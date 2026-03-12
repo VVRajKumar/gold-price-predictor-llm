@@ -20,7 +20,6 @@ if str(ROOT) not in sys.path:
 
 from src.prediction_engine import PredictionEngine
 from src.data_fetchers.market_data import MarketDataFetcher
-from src.accuracy_tracker import AccuracyTracker
 
 # ── Page config ──────────────────────────────────────────────────────
 st.set_page_config(
@@ -64,14 +63,9 @@ def get_market() -> MarketDataFetcher:
     return MarketDataFetcher()
 
 
-@st.cache_resource
-def get_accuracy_tracker() -> AccuracyTracker:
-    return AccuracyTracker()
-
-
 engine = get_engine()
 market = get_market()
-accuracy_tracker = get_accuracy_tracker()
+accuracy_tracker = engine.get_accuracy_tracker()
 
 
 def outlook_color(outlook: str) -> str:
@@ -104,6 +98,24 @@ with st.sidebar:
         from streamlit_autorefresh import st_autorefresh
         interval = st.slider("Refresh interval (min)", 15, 120, 30)
         st_autorefresh(interval=interval * 60_000, key="auto_refresh")
+
+    st.divider()
+    st.markdown("### 🎯 Accuracy Auto-Check")
+    if st.button("🔍 Check Accuracy Now", use_container_width=True):
+        with st.spinner("Fetching latest market data & comparing..."):
+            n = accuracy_tracker.refresh_all()
+        st.success(f"Checked! {n} plan(s) had new data.")
+        st.rerun()
+
+    last = accuracy_tracker.last_checked
+    if last:
+        try:
+            last_dt = datetime.fromisoformat(last)
+            st.caption(f"Last checked: {last_dt.strftime('%H:%M %b %d')}")
+        except Exception:
+            st.caption(f"Last checked: {last}")
+    else:
+        st.caption("Not checked yet — will auto-check in background")
 
     st.divider()
     st.markdown("### Agent Roster")
@@ -343,21 +355,40 @@ st.divider()
 # ════════════════════════════════════════════════════════════════════
 st.subheader("🎯 Prediction Accuracy Scorecard")
 
-# Evaluate all past plans in history
+# Auto-evaluate all stored plans against latest market data
 history = engine.get_plan_history()
+stored_plans = accuracy_tracker.get_stored_plans()
+
+# Ensure all history plans are stored for tracking
+import json as _json
 if history:
-    import json as _json
     for h in history:
         plan_dict = _json.loads(h.model_dump_json())
-        accuracy_tracker.evaluate_plan(plan_dict)
+        accuracy_tracker.store_plan(plan_dict)
 
-    # Also evaluate the current plan (some days may already be in the past)
-    current_eval = accuracy_tracker.evaluate_plan(
-        _json.loads(plan.model_dump_json())
-    )
+# Also store the current plan
+accuracy_tracker.store_plan(_json.loads(plan.model_dump_json()))
 
-    all_evals = accuracy_tracker.get_all_evaluations()
-    agg_stats = accuracy_tracker.get_aggregate_stats()
+# Re-evaluate all stored plans (picks up any new day closes)
+accuracy_tracker.refresh_all()
+
+all_evals = accuracy_tracker.get_all_evaluations()
+agg_stats = accuracy_tracker.get_aggregate_stats()
+
+if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
+    # Show when accuracy was last auto-updated
+    latest_eval = accuracy_tracker.get_latest_evaluation()
+    if latest_eval:
+        eval_time = latest_eval.get("evaluated_at", "")
+        try:
+            eval_dt = datetime.fromisoformat(eval_time)
+            st.caption(f"🔄 Auto-updated: {eval_dt.strftime('%H:%M %b %d, %Y')} "
+                       f"· {latest_eval['days_evaluated']}/{latest_eval['days_total']} days scored "
+                       f"· Background check every 6h")
+        except Exception:
+            pass
+
+if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
 
     if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         # ── Aggregate Metrics Row ────────────────────────────────────
@@ -520,12 +551,19 @@ if history:
             "📍 **No accuracy data yet.** Accuracy scoring requires at least one "
             "prediction where the predicted dates are now in the past. Generate a "
             "prediction and check back after those dates to see how accurate the "
-            "system was!"
+            "system was!\n\n"
+            "The system **auto-checks every 6 hours** in the background, or click "
+            "**Check Accuracy Now** in the sidebar."
         )
+
 else:
     st.info(
-        "📍 **No predictions to evaluate yet.** Generate your first prediction, "
-        "then check back once some predicted days have passed to see the accuracy score."
+        "📍 **No accuracy data yet.** Accuracy scoring requires at least one "
+        "prediction where the predicted dates are now in the past. Generate a "
+        "prediction and check back after those dates to see how accurate the "
+        "system was!\n\n"
+        "The system **auto-checks every 6 hours** in the background, or click "
+        "**Check Accuracy Now** in the sidebar."
     )
 
 st.divider()

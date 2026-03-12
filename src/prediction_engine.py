@@ -19,6 +19,7 @@ from loguru import logger
 from src.config import CACHE_DIR, REFRESH_INTERVAL_MINUTES, PREDICTION_DAYS
 from src.orchestrator import Orchestrator, PredictionPlan
 from src.data_fetchers.market_data import MarketDataFetcher
+from src.accuracy_tracker import AccuracyTracker
 
 
 class PredictionEngine:
@@ -27,6 +28,7 @@ class PredictionEngine:
     def __init__(self):
         self._orchestrator = Orchestrator()
         self._market = MarketDataFetcher()
+        self._accuracy = AccuracyTracker()
         self._current_plan: Optional[PredictionPlan] = None
         self._plan_history: list[PredictionPlan] = []
         self._lock = threading.Lock()
@@ -34,6 +36,9 @@ class PredictionEngine:
 
         # Try to load the latest cached plan
         self._load_cached_plan()
+
+        # Start background accuracy auto-check (every 6 hours)
+        self._accuracy.start_auto_check(interval_hours=6)
 
     # ── Cache helpers ────────────────────────────────────────────────
 
@@ -132,6 +137,10 @@ class PredictionEngine:
 
             self._current_plan = plan
             self._save_plan(plan)
+
+            # Store plan for accuracy tracking
+            self._accuracy.store_plan(json.loads(plan.model_dump_json()))
+
             return plan
 
     def get_current_plan(self) -> Optional[PredictionPlan]:
@@ -139,6 +148,9 @@ class PredictionEngine:
 
     def get_plan_history(self) -> list[PredictionPlan]:
         return self._plan_history
+
+    def get_accuracy_tracker(self) -> AccuracyTracker:
+        return self._accuracy
 
     # ── Auto-refresh loop ───────────────────────────────────────────
 

@@ -1,11 +1,14 @@
 """
 Accuracy Tracker – compares past predictions against actual gold prices
 and computes accuracy metrics (MAE, MAPE, directional accuracy, hit-rate).
+Auto-refreshes when market closes each day.
 """
 
 from __future__ import annotations
 
 import json
+import threading
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -19,6 +22,7 @@ from src.data_fetchers.market_data import MarketDataFetcher
 
 
 _ACCURACY_PATH = CACHE_DIR / "accuracy_log.json"
+_PLANS_STORE_PATH = CACHE_DIR / "stored_plans.json"
 
 
 class AccuracyTracker:
@@ -27,6 +31,9 @@ class AccuracyTracker:
     def __init__(self):
         self._market = MarketDataFetcher()
         self._log: list[dict] = self._load_log()
+        self._stored_plans: list[dict] = self._load_stored_plans()
+        self._last_checked: Optional[str] = None
+        self._auto_running = False
 
     # ── Persistence ──────────────────────────────────────────────────
 
@@ -42,6 +49,36 @@ class AccuracyTracker:
         _ACCURACY_PATH.write_text(
             json.dumps(self._log, indent=2, default=str), encoding="utf-8"
         )
+
+    def _load_stored_plans(self) -> list[dict]:
+        if _PLANS_STORE_PATH.exists():
+            try:
+                return json.loads(_PLANS_STORE_PATH.read_text(encoding="utf-8"))
+            except Exception:
+                return []
+        return []
+
+    def _save_stored_plans(self):
+        _PLANS_STORE_PATH.write_text(
+            json.dumps(self._stored_plans, indent=2, default=str), encoding="utf-8"
+        )
+
+    # ── Store a plan for future evaluation ───────────────────────────
+
+    def store_plan(self, plan_dict: dict):
+        """Persist a prediction plan so it can be re-evaluated later as days pass."""
+        gen_at = plan_dict.get("generated_at", "")
+        existing_ids = {p.get("generated_at") for p in self._stored_plans}
+        if gen_at not in existing_ids:
+            self._stored_plans.append(plan_dict)
+            # Keep last 50 plans
+            if len(self._stored_plans) > 50:
+                self._stored_plans = self._stored_plans[-50:]
+            self._save_stored_plans()
+            logger.info(f"Stored plan {gen_at} for future accuracy tracking")
+
+    def get_stored_plans(self) -> list[dict]:
+        return self._stored_plans
 
     # ── Core: evaluate a prediction plan ─────────────────────────────
 
@@ -193,3 +230,66 @@ class AccuracyTracker:
                 np.mean([r["directional_accuracy"] for r in self._log]), 1
             ),
         }
+
+    # ── Refresh: re-evaluate ALL stored plans against latest data ────
+
+    def refresh_all(self) -> int:
+        """
+        Re-evaluate every stored plan against the latest actual prices.
+        Called automatically when market data updates (new day closes).
+        Returns the number of plans that had new evaluable days.
+        """
+        updated = 0
+        for plan_dict in self._stored_plans:
+            before_count = self._evaluable_day_count(plan_dict.get("generated_at", ""))
+            self.evaluate_plan(plan_dict)
+            after_count = self._evaluable_day_count(plan_dict.get("generated_at", ""))
+            if after_count > before_count:
+                updated += 1
+
+        self._last_checked = datetime.now().isoformat()
+        logger.info(f"Accuracy refresh complete — {updated} plans had new data")
+        return updated
+
+    def _evaluable_day_count(self, generated_at: str) -> int:
+        for r in self._log:
+            if r.get("plan_generated_at") == generated_at:
+                return r.get("days_evaluated", 0)
+        return 0
+
+    @property
+    def last_checked(self) -> Optional[str]:
+        return self._last_checked
+
+    # ── Background auto-check thread ─────────────────────────────────
+
+    def start_auto_check(self, interval_hours: float = 6):
+        """
+        Start a background thread that re-evaluates stored predictions
+        periodically (default every 6 hours).  This catches new day-close
+        data as it becomes available without requiring user interaction.
+        """
+        if self._auto_running:
+            return
+        self._auto_running = True
+
+        def _loop():
+            # Initial check on startup
+            try:
+                self.refresh_all()
+            except Exception as e:
+                logger.warning(f"Initial accuracy refresh failed: {e}")
+
+            while self._auto_running:
+                time.sleep(interval_hours * 3600)
+                try:
+                    self.refresh_all()
+                except Exception as e:
+                    logger.warning(f"Auto accuracy refresh failed: {e}")
+
+        t = threading.Thread(target=_loop, daemon=True, name="accuracy-auto-check")
+        t.start()
+        logger.info(f"Accuracy auto-check started — refreshing every {interval_hours}h")
+
+    def stop_auto_check(self):
+        self._auto_running = False

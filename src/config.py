@@ -8,6 +8,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _get_secret(key: str, default: str = "") -> str:
+    """Read from env vars first, fall back to Streamlit secrets (for Cloud)."""
+    val = os.getenv(key)
+    if val:
+        return val
+    try:
+        import streamlit as st
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
+
+
 # ── Paths ────────────────────────────────────────────────────────────
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
@@ -18,12 +31,12 @@ for d in [DATA_DIR, CACHE_DIR, LOGS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 # ── API Keys ─────────────────────────────────────────────────────────
-AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "")
-AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY", "")
-AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o-prod")
-AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
-NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
-FRED_API_KEY = os.getenv("FRED_API_KEY", "")
+AZURE_OPENAI_ENDPOINT = _get_secret("AZURE_OPENAI_ENDPOINT")
+AZURE_OPENAI_API_KEY = _get_secret("AZURE_OPENAI_API_KEY")
+AZURE_OPENAI_DEPLOYMENT = _get_secret("AZURE_OPENAI_DEPLOYMENT", "gpt-4o-prod")
+AZURE_OPENAI_API_VERSION = _get_secret("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+NEWS_API_KEY = _get_secret("NEWS_API_KEY")
+FRED_API_KEY = _get_secret("FRED_API_KEY")
 
 # ── LLM Settings ────────────────────────────────────────────────────
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))

@@ -1,0 +1,36 @@
+# Core LLM & Agent Framework
+openai>=1.30.0
+langchain>=0.2.0
+langchain-openai>=0.1.8
+langchain-community>=0.2.0
+langgraph>=0.1.0
+
+# Data Sources
+yfinance>=0.2.40
+fredapi>=0.5.1
+newsapi-python>=0.2.7
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+feedparser>=6.0.11
+
+# Data Processing & ML
+pandas>=2.2.0
+numpy>=1.26.0
+scikit-learn>=1.4.0
+statsmodels>=0.14.0
+prophet>=1.1.5
+ta>=0.11.0
+
+# Visualization & Dashboard
+streamlit>=1.35.0
+plotly>=5.22.0
+streamlit-autorefresh>=1.0.1
+
+# Utilities
+python-dotenv>=1.0.0
+Schedule>=1.2.0
+loguru>=0.7.0
+tenacity>=8.3.0
+pydantic>=2.7.0
+aiohttp>=3.9.0
+cachetools>=5.3.0

@@ -28,7 +28,7 @@ class PredictionEngine:
     def __init__(self):
         self._orchestrator = Orchestrator()
         self._market = MarketDataFetcher()
-        self._accuracy = AccuracyTracker()
+        self._accuracy: Optional[AccuracyTracker] = None
         self._current_plan: Optional[PredictionPlan] = None
         self._plan_history: list[PredictionPlan] = []
         self._lock = threading.Lock()
@@ -36,9 +36,6 @@ class PredictionEngine:
 
         # Try to load the latest cached plan
         self._load_cached_plan()
-
-        # Start background accuracy auto-check (every 6 hours)
-        self._accuracy.start_auto_check(interval_hours=6)
 
     # ── Cache helpers ────────────────────────────────────────────────
 
@@ -139,7 +136,11 @@ class PredictionEngine:
             self._save_plan(plan)
 
             # Store plan for accuracy tracking
-            self._accuracy.store_plan(json.loads(plan.model_dump_json()))
+            try:
+                tracker = self.get_accuracy_tracker()
+                tracker.store_plan(json.loads(plan.model_dump_json()))
+            except Exception as e:
+                logger.warning(f"Could not store plan for accuracy: {e}")
 
             return plan
 
@@ -150,6 +151,9 @@ class PredictionEngine:
         return self._plan_history
 
     def get_accuracy_tracker(self) -> AccuracyTracker:
+        if self._accuracy is None:
+            self._accuracy = AccuracyTracker()
+            self._accuracy.start_auto_check(interval_hours=6)
         return self._accuracy
 
     # ── Auto-refresh loop ───────────────────────────────────────────

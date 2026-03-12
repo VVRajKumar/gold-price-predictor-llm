@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
 
 from src.prediction_engine import PredictionEngine
 from src.data_fetchers.market_data import MarketDataFetcher
+from src.accuracy_tracker import AccuracyTracker
 
 # ── Page config ──────────────────────────────────────────────────────
 st.set_page_config(
@@ -63,8 +64,14 @@ def get_market() -> MarketDataFetcher:
     return MarketDataFetcher()
 
 
+@st.cache_resource
+def get_accuracy_tracker() -> AccuracyTracker:
+    return AccuracyTracker()
+
+
 engine = get_engine()
 market = get_market()
+accuracy_tracker = get_accuracy_tracker()
 
 
 def outlook_color(outlook: str) -> str:
@@ -331,8 +338,198 @@ if plan.risk_factors:
 
 st.divider()
 
-# ── Historical Prediction Accuracy ──────────────────────────────────
+# ════════════════════════════════════════════════════════════════════
+# PREDICTION ACCURACY SCORECARD
+# ════════════════════════════════════════════════════════════════════
+st.subheader("🎯 Prediction Accuracy Scorecard")
+
+# Evaluate all past plans in history
 history = engine.get_plan_history()
+if history:
+    import json as _json
+    for h in history:
+        plan_dict = _json.loads(h.model_dump_json())
+        accuracy_tracker.evaluate_plan(plan_dict)
+
+    # Also evaluate the current plan (some days may already be in the past)
+    current_eval = accuracy_tracker.evaluate_plan(
+        _json.loads(plan.model_dump_json())
+    )
+
+    all_evals = accuracy_tracker.get_all_evaluations()
+    agg_stats = accuracy_tracker.get_aggregate_stats()
+
+    if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
+        # ── Aggregate Metrics Row ────────────────────────────────────
+        st.markdown("#### Overall Accuracy (All Past Predictions)")
+        m1, m2, m3, m4, m5 = st.columns(5)
+        with m1:
+            mape = agg_stats["overall_mape"]
+            mape_color = "🟢" if mape < 2 else ("🟡" if mape < 5 else "🔴")
+            st.metric(f"{mape_color} MAPE", f"{mape:.1f}%")
+        with m2:
+            st.metric("📏 MAE", f"${agg_stats['overall_mae']:,.2f}")
+        with m3:
+            hit = agg_stats["overall_band_hit_rate"]
+            hit_color = "🟢" if hit >= 70 else ("🟡" if hit >= 50 else "🔴")
+            st.metric(f"{hit_color} Band Hit Rate", f"{hit:.0f}%")
+        with m4:
+            da = agg_stats["avg_directional_accuracy"]
+            da_color = "🟢" if da >= 60 else ("🟡" if da >= 50 else "🔴")
+            st.metric(f"{da_color} Direction Accuracy", f"{da:.0f}%")
+        with m5:
+            st.metric("📊 Days Evaluated", f"{agg_stats['total_predictions_evaluated']}")
+
+        st.caption(
+            "**MAPE** = Mean Absolute Percentage Error (lower is better) · "
+            "**MAE** = Mean Absolute Error in $ · "
+            "**Band Hit Rate** = % of days actual price fell within predicted range · "
+            "**Direction** = % of days predicted direction matched actual"
+        )
+
+        # ── Predicted vs Actual Chart ────────────────────────────────
+        all_daily = []
+        for ev in all_evals:
+            for d in ev.get("daily_results", []):
+                all_daily.append(d)
+
+        if all_daily:
+            acc_df = pd.DataFrame(all_daily)
+            acc_df["date"] = pd.to_datetime(acc_df["date"])
+            acc_df = acc_df.sort_values("date").drop_duplicates(subset="date", keep="last")
+
+            fig_acc = go.Figure()
+
+            # Prediction band
+            fig_acc.add_trace(go.Scatter(
+                x=acc_df["date"], y=acc_df["high_range"],
+                mode="lines", name="Upper Band",
+                line=dict(width=0), showlegend=False,
+            ))
+            fig_acc.add_trace(go.Scatter(
+                x=acc_df["date"], y=acc_df["low_range"],
+                mode="lines", name="Prediction Range",
+                fill="tonexty", fillcolor="rgba(0,212,170,0.12)",
+                line=dict(width=0),
+            ))
+
+            # Predicted line
+            fig_acc.add_trace(go.Scatter(
+                x=acc_df["date"], y=acc_df["predicted"],
+                mode="lines+markers", name="Predicted",
+                line=dict(color="#00d4aa", width=2, dash="dash"),
+                marker=dict(size=7, symbol="diamond"),
+            ))
+
+            # Actual line
+            fig_acc.add_trace(go.Scatter(
+                x=acc_df["date"], y=acc_df["actual"],
+                mode="lines+markers", name="Actual",
+                line=dict(color="#ffd93d", width=2),
+                marker=dict(size=7),
+            ))
+
+            # Color markers for within/outside band
+            outside = acc_df[~acc_df["within_band"]]
+            if not outside.empty:
+                fig_acc.add_trace(go.Scatter(
+                    x=outside["date"], y=outside["actual"],
+                    mode="markers", name="Outside Band ✗",
+                    marker=dict(size=12, color="#ff6b6b", symbol="x"),
+                ))
+
+            fig_acc.update_layout(
+                title="Predicted vs Actual Gold Price",
+                template="plotly_dark", height=450,
+                yaxis_title="Price (USD)", xaxis_title="Date",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                hovermode="x unified",
+            )
+            st.plotly_chart(fig_acc, use_container_width=True)
+
+            # ── Daily Accuracy Table ─────────────────────────────────
+            with st.expander("📋 Daily Accuracy Breakdown", expanded=False):
+                display_df = acc_df[["date", "predicted", "actual", "low_range",
+                                     "high_range", "error", "pct_error", "within_band"]].copy()
+                display_df = display_df.rename(columns={
+                    "date": "Date",
+                    "predicted": "Predicted ($)",
+                    "actual": "Actual ($)",
+                    "low_range": "Low ($)",
+                    "high_range": "High ($)",
+                    "error": "Error ($)",
+                    "pct_error": "Error (%)",
+                    "within_band": "In Range",
+                })
+                st.dataframe(
+                    display_df.style.format({
+                        "Predicted ($)": "${:,.2f}",
+                        "Actual ($)": "${:,.2f}",
+                        "Low ($)": "${:,.2f}",
+                        "High ($)": "${:,.2f}",
+                        "Error ($)": "{:+,.2f}",
+                        "Error (%)": "{:.2f}%",
+                    }),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+        # ── Per-Plan Accuracy History ────────────────────────────────
+        if len(all_evals) > 1:
+            with st.expander("📈 Accuracy Trend Across Predictions"):
+                trend_data = []
+                for ev in all_evals:
+                    trend_data.append({
+                        "Generated At": ev["plan_generated_at"][:16],
+                        "Days Checked": ev["days_evaluated"],
+                        "MAE ($)": ev["mae"],
+                        "MAPE (%)": ev["mape"],
+                        "Band Hit (%)": ev["band_hit_rate"],
+                        "Direction (%)": ev["directional_accuracy"],
+                    })
+                trend_df = pd.DataFrame(trend_data)
+
+                fig_trend = go.Figure()
+                fig_trend.add_trace(go.Scatter(
+                    x=trend_df["Generated At"], y=trend_df["MAPE (%)"],
+                    mode="lines+markers", name="MAPE %",
+                    line=dict(color="#ff6b6b"),
+                ))
+                fig_trend.add_trace(go.Scatter(
+                    x=trend_df["Generated At"], y=trend_df["Band Hit (%)"],
+                    mode="lines+markers", name="Band Hit %",
+                    line=dict(color="#00d4aa"),
+                ))
+                fig_trend.add_trace(go.Scatter(
+                    x=trend_df["Generated At"], y=trend_df["Direction (%)"],
+                    mode="lines+markers", name="Direction %",
+                    line=dict(color="#ffd93d"),
+                ))
+                fig_trend.update_layout(
+                    title="Accuracy Trend Over Time",
+                    template="plotly_dark", height=350,
+                    yaxis_title="Percentage",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                )
+                st.plotly_chart(fig_trend, use_container_width=True)
+
+                st.dataframe(trend_df, use_container_width=True, hide_index=True)
+
+    else:
+        st.info(
+            "📍 **No accuracy data yet.** Accuracy scoring requires at least one "
+            "prediction where the predicted dates are now in the past. Generate a "
+            "prediction and check back after those dates to see how accurate the "
+            "system was!"
+        )
+else:
+    st.info(
+        "📍 **No predictions to evaluate yet.** Generate your first prediction, "
+        "then check back once some predicted days have passed to see the accuracy score."
+    )
+
+st.divider()
+# ── Prediction Generation History ────────────────────────────────────
 if len(history) > 1:
     st.subheader("📊 Prediction History")
     hist_data = []

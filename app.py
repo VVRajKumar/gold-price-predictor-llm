@@ -18,6 +18,14 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Streamlit Cloud: repos live at /mount/src/<name>/ which can shadow our 'src' pkg
+_expected = ROOT / "src" / "__init__.py"
+if "src" in sys.modules:
+    _loaded = getattr(sys.modules["src"], "__file__", None)
+    if _loaded is None or Path(_loaded).resolve() != _expected.resolve():
+        for _k in [k for k in list(sys.modules) if k == "src" or k.startswith("src.")]:
+            del sys.modules[_k]
+
 from src.prediction_engine import PredictionEngine
 from src.data_fetchers.market_data import MarketDataFetcher
 
@@ -84,7 +92,7 @@ with st.sidebar:
     st.caption("Multi-Agent AI System")
     st.divider()
 
-    if st.button("🔄 Generate New Prediction", use_container_width=True, type="primary"):
+    if st.button("🔄 Generate New Prediction", width="stretch", type="primary"):
         with st.spinner("Running 8 specialist agents … this takes 1-2 minutes"):
             plan = engine.generate()
         st.success("Prediction updated!")
@@ -101,7 +109,7 @@ with st.sidebar:
 
     st.divider()
     st.markdown("### 🎯 Accuracy Auto-Check")
-    if st.button("🔍 Check Accuracy Now", use_container_width=True):
+    if st.button("🔍 Check Accuracy Now", width="stretch"):
         with st.spinner("Fetching latest market data & comparing..."):
             n = accuracy_tracker.refresh_all()
         st.success(f"Checked! {n} plan(s) had new data.")
@@ -158,7 +166,7 @@ if plan is None:
             template="plotly_dark", height=500,
             xaxis_rangeslider_visible=False,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     st.stop()
 
 # ── Top Metrics Row ──────────────────────────────────────────────────
@@ -234,7 +242,7 @@ if plan.daily_predictions:
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
         hovermode="x unified",
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Daily breakdown table
     st.dataframe(
@@ -253,7 +261,7 @@ if plan.daily_predictions:
             "High ($)": "${:,.2f}",
             "Confidence": "{:.0%}",
         }),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 else:
@@ -289,7 +297,7 @@ if plan.agent_reports:
                 title="Agent Confidence Levels",
             )
             fig_conf.update_layout(template="plotly_dark", height=400)
-            st.plotly_chart(fig_conf, use_container_width=True)
+            st.plotly_chart(fig_conf, width="stretch")
 
         with col2:
             fig_bias = px.bar(
@@ -298,7 +306,7 @@ if plan.agent_reports:
                 title="Agent Prediction Bias (-1 Bearish → +1 Bullish)",
             )
             fig_bias.update_layout(template="plotly_dark", height=400)
-            st.plotly_chart(fig_bias, use_container_width=True)
+            st.plotly_chart(fig_bias, width="stretch")
 
     # Individual agent cards
     for name, report in plan.agent_reports.items():
@@ -476,7 +484,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                 legend=dict(orientation="h", yanchor="bottom", y=1.02),
                 hovermode="x unified",
             )
-            st.plotly_chart(fig_acc, use_container_width=True)
+            st.plotly_chart(fig_acc, width="stretch")
 
             # ── Daily Accuracy Table ─────────────────────────────────
             with st.expander("📋 Daily Accuracy Breakdown", expanded=False):
@@ -501,7 +509,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                         "Error ($)": "{:+,.2f}",
                         "Error (%)": "{:.2f}%",
                     }),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
 
@@ -542,9 +550,9 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                     yaxis_title="Percentage",
                     legend=dict(orientation="h", yanchor="bottom", y=1.02),
                 )
-                st.plotly_chart(fig_trend, use_container_width=True)
+                st.plotly_chart(fig_trend, width="stretch")
 
-                st.dataframe(trend_df, use_container_width=True, hide_index=True)
+                st.dataframe(trend_df, width="stretch", hide_index=True)
 
     else:
         st.info(
@@ -597,7 +605,7 @@ if len(history) > 1:
         yaxis=dict(title="Gold Price ($)"),
         yaxis2=dict(title="Confidence", overlaying="y", side="right", range=[0, 1]),
     )
-    st.plotly_chart(fig_hist, use_container_width=True)
+    st.plotly_chart(fig_hist, width="stretch")
 
 # ── Footer ───────────────────────────────────────────────────────────
 st.divider()

@@ -10,7 +10,7 @@ import requests
 from loguru import logger
 from cachetools import TTLCache
 
-from src.config import NEWS_API_KEY
+from ..config import NEWS_API_KEY
 
 _cache = TTLCache(maxsize=16, ttl=1800)  # 30-min cache
 

@@ -15,21 +15,21 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from src.config import (
+from .config import (
     AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY,
     AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION,
     TEMPERATURE, PREDICTION_DAYS,
 )
-from src.agents.base_agent import AgentReport
-from src.agents.geopolitics_agent import GeopoliticsAgent
-from src.agents.trend_analysis_agent import TrendAnalysisAgent
-from src.agents.etf_flow_agent import ETFFlowAgent
-from src.agents.macro_economics_agent import MacroEconomicsAgent
-from src.agents.oil_energy_agent import OilEnergyAgent
-from src.agents.sentiment_agent import SentimentAgent
-from src.agents.technical_agent import TechnicalAnalysisAgent
-from src.agents.historical_pattern_agent import HistoricalPatternAgent
-from src.data_fetchers.market_data import MarketDataFetcher
+from .agents.base_agent import AgentReport
+from .agents.geopolitics_agent import GeopoliticsAgent
+from .agents.trend_analysis_agent import TrendAnalysisAgent
+from .agents.etf_flow_agent import ETFFlowAgent
+from .agents.macro_economics_agent import MacroEconomicsAgent
+from .agents.oil_energy_agent import OilEnergyAgent
+from .agents.sentiment_agent import SentimentAgent
+from .agents.technical_agent import TechnicalAnalysisAgent
+from .agents.historical_pattern_agent import HistoricalPatternAgent
+from .data_fetchers.market_data import MarketDataFetcher
 
 
 # ── Prediction schema ──────────────────────────────────────────────

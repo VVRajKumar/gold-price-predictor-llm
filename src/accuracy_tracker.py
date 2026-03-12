@@ -17,8 +17,8 @@ import pandas as pd
 import numpy as np
 from loguru import logger
 
-from src.config import CACHE_DIR
-from src.data_fetchers.market_data import MarketDataFetcher
+from .config import CACHE_DIR
+from .data_fetchers.market_data import MarketDataFetcher
 
 
 _ACCURACY_PATH = CACHE_DIR / "accuracy_log.json"

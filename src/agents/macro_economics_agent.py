@@ -6,9 +6,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from src.agents.base_agent import BaseAgent, AgentReport
-from src.data_fetchers.macro_data import MacroDataFetcher
-from src.data_fetchers.market_data import MarketDataFetcher
+from .base_agent import BaseAgent, AgentReport
+from ..data_fetchers.macro_data import MacroDataFetcher
+from ..data_fetchers.market_data import MarketDataFetcher
 
 
 class MacroEconomicsAgent(BaseAgent):

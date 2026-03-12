@@ -9,8 +9,8 @@ from typing import Any
 
 import pandas as pd
 import numpy as np
-from src.agents.base_agent import BaseAgent, AgentReport
-from src.data_fetchers.market_data import MarketDataFetcher
+from .base_agent import BaseAgent, AgentReport
+from ..data_fetchers.market_data import MarketDataFetcher
 
 
 class HistoricalPatternAgent(BaseAgent):

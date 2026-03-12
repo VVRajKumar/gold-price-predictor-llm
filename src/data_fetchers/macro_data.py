@@ -8,7 +8,7 @@ import pandas as pd
 from loguru import logger
 from cachetools import TTLCache
 
-from src.config import FRED_API_KEY, FRED_SERIES
+from ..config import FRED_API_KEY, FRED_SERIES
 
 _cache = TTLCache(maxsize=32, ttl=3600)  # 1-hour cache
 

@@ -16,10 +16,10 @@ import pandas as pd
 import numpy as np
 from loguru import logger
 
-from src.config import CACHE_DIR, REFRESH_INTERVAL_MINUTES, PREDICTION_DAYS
-from src.orchestrator import Orchestrator, PredictionPlan
-from src.data_fetchers.market_data import MarketDataFetcher
-from src.accuracy_tracker import AccuracyTracker
+from .config import CACHE_DIR, REFRESH_INTERVAL_MINUTES, PREDICTION_DAYS
+from .orchestrator import Orchestrator, PredictionPlan
+from .data_fetchers.market_data import MarketDataFetcher
+from .accuracy_tracker import AccuracyTracker
 
 
 class PredictionEngine:

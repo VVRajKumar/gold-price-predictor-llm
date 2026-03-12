@@ -10,7 +10,7 @@ import yfinance as yf
 from loguru import logger
 from cachetools import TTLCache
 
-from src.config import (
+from ..config import (
     GOLD_TICKER, SILVER_TICKER, OIL_TICKER, DXY_TICKER,
     SP500_TICKER, TREASURY_10Y, VIX_TICKER,
     HISTORICAL_LOOKBACK_DAYS,

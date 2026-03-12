@@ -6,8 +6,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from src.agents.base_agent import BaseAgent, AgentReport
-from src.data_fetchers.etf_data import ETFDataFetcher
+from .base_agent import BaseAgent, AgentReport
+from ..data_fetchers.etf_data import ETFDataFetcher
 
 
 class ETFFlowAgent(BaseAgent):

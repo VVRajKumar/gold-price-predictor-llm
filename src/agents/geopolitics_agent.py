@@ -6,8 +6,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from src.agents.base_agent import BaseAgent, AgentReport
-from src.data_fetchers.news_data import NewsDataFetcher
+from .base_agent import BaseAgent, AgentReport
+from ..data_fetchers.news_data import NewsDataFetcher
 
 
 class GeopoliticsAgent(BaseAgent):

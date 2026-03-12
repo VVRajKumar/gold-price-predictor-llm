@@ -12,6 +12,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+# Streamlit Cloud: repos live at /mount/src/<name>/ which can shadow our 'src' pkg
+_expected = ROOT / "src" / "__init__.py"
+if "src" in sys.modules:
+    _loaded = getattr(sys.modules["src"], "__file__", None)
+    if _loaded is None or Path(_loaded).resolve() != _expected.resolve():
+        for _k in [k for k in list(sys.modules) if k == "src" or k.startswith("src.")]:
+            del sys.modules[_k]
+
 from src.prediction_engine import PredictionEngine
 from loguru import logger
 

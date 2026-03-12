@@ -9,7 +9,7 @@ import yfinance as yf
 from loguru import logger
 from cachetools import TTLCache
 
-from src.config import GOLD_ETF_TICKERS, GOLD_MINER_TICKERS, HISTORICAL_LOOKBACK_DAYS
+from ..config import GOLD_ETF_TICKERS, GOLD_MINER_TICKERS, HISTORICAL_LOOKBACK_DAYS
 
 _cache = TTLCache(maxsize=64, ttl=900)
 

@@ -75,6 +75,14 @@ engine = get_engine()
 market = get_market()
 accuracy_tracker = engine.get_accuracy_tracker()
 
+# Streamlit can sometimes keep a stale cached engine object across hot reloads.
+# If weekly API is missing, rebuild once so app doesn't crash after deployment.
+if not hasattr(engine, "ensure_weekly_prediction"):
+    st.cache_resource.clear()
+    engine = PredictionEngine()
+    market = get_market()
+    accuracy_tracker = engine.get_accuracy_tracker()
+
 
 def outlook_color(outlook: str) -> str:
     return {"bullish": "#00d4aa", "bearish": "#ff6b6b"}.get(outlook, "#ffd93d")
@@ -196,7 +204,10 @@ if view_mode == "Weekly Archive":
 
 # MAIN DASHBOARD
 # ════════════════════════════════════════════════════════════════════
-plan = engine.ensure_weekly_prediction()
+if hasattr(engine, "ensure_weekly_prediction"):
+    plan = engine.ensure_weekly_prediction()
+else:
+    plan = engine.get_current_plan()
 
 # Always keep the live OHLC chart visible.
 st.subheader("🕯️ Live Gold OHLC (90D)")

@@ -30,12 +30,16 @@ class PredictionEngine:
         self._market = MarketDataFetcher()
         self._accuracy: Optional[AccuracyTracker] = None
         self._current_plan: Optional[PredictionPlan] = None
-        self._plan_history: list[PredictionPlan] = []
+        self._weekly_archive: list[dict] = []
         self._lock = threading.Lock()
         self._running = False
 
-        # Try to load the latest cached plan
+        # One-time storage reset requested for the new weekly workflow.
+        self._reset_storage_once()
+
+        # Try to load the latest cached plan and weekly archive.
         self._load_cached_plan()
+        self._load_weekly_archive()
 
     # ── Cache helpers ────────────────────────────────────────────────
 
@@ -47,16 +51,56 @@ class PredictionEngine:
     def _history_path(self) -> Path:
         return CACHE_DIR / "prediction_history.json"
 
+    @property
+    def _weekly_archive_path(self) -> Path:
+        return CACHE_DIR / "weekly_prediction_archive.json"
+
+    @property
+    def _reset_marker_path(self) -> Path:
+        return CACHE_DIR / "weekly_workflow_reset_v1.marker"
+
+    def _week_id(self, ts: str) -> str:
+        dt = datetime.fromisoformat(ts)
+        iso = dt.isocalendar()
+        return f"{iso.year}-W{iso.week:02d}"
+
+    def _reset_storage_once(self):
+        if self._reset_marker_path.exists():
+            return
+
+        for p in [
+            CACHE_DIR / "latest_prediction.json",
+            CACHE_DIR / "prediction_history.json",
+            CACHE_DIR / "accuracy_log.json",
+            CACHE_DIR / "stored_plans.json",
+            CACHE_DIR / "weekly_prediction_archive.json",
+        ]:
+            try:
+                if p.exists():
+                    p.unlink()
+            except Exception as e:
+                logger.warning(f"Could not reset file {p.name}: {e}")
+
+        self._reset_marker_path.write_text(datetime.now().isoformat(), encoding="utf-8")
+        logger.info("Storage reset complete for weekly workflow")
+
+    def _load_weekly_archive(self):
+        if self._weekly_archive_path.exists():
+            try:
+                data = json.loads(self._weekly_archive_path.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    self._weekly_archive = data
+            except Exception as e:
+                logger.warning(f"Could not load weekly archive: {e}")
+
+    def _save_weekly_archive(self):
+        self._weekly_archive_path.write_text(
+            json.dumps(self._weekly_archive, indent=2),
+            encoding="utf-8",
+        )
+
     def _save_plan(self, plan: PredictionPlan):
         self._cache_path.write_text(plan.model_dump_json(indent=2), encoding="utf-8")
-
-        # Append to history (keep last 100)
-        self._plan_history.append(plan)
-        if len(self._plan_history) > 100:
-            self._plan_history = self._plan_history[-100:]
-
-        history_data = [json.loads(p.model_dump_json()) for p in self._plan_history]
-        self._history_path.write_text(json.dumps(history_data, indent=2), encoding="utf-8")
 
     def _load_cached_plan(self):
         if self._cache_path.exists():
@@ -71,12 +115,35 @@ class PredictionEngine:
             except Exception as e:
                 logger.warning(f"Could not load cached plan: {e}")
 
-        if self._history_path.exists():
+    def _archive_previous_week_if_needed(self):
+        if self._current_plan is None:
+            return
+
+        try:
+            current_week = self._week_id(datetime.now().isoformat())
+            plan_week = self._week_id(self._current_plan.generated_at)
+            if plan_week == current_week:
+                return
+
+            if not any(item.get("week_id") == plan_week for item in self._weekly_archive):
+                self._weekly_archive.append({
+                    "week_id": plan_week,
+                    "archived_at": datetime.now().isoformat(),
+                    "plan": json.loads(self._current_plan.model_dump_json()),
+                })
+                self._weekly_archive = self._weekly_archive[-52:]
+                self._save_weekly_archive()
+                logger.info(f"Archived completed weekly prediction: {plan_week}")
+
+            # Do not keep old-week plan as current.
+            self._current_plan = None
             try:
-                history = json.loads(self._history_path.read_text(encoding="utf-8"))
-                self._plan_history = [PredictionPlan(**h) for h in history]
+                if self._cache_path.exists():
+                    self._cache_path.unlink()
             except Exception:
                 pass
+        except Exception as e:
+            logger.warning(f"Weekly archive check failed: {e}")
 
     # ── Statistical baseline (Prophet) ──────────────────────────────
 
@@ -148,11 +215,42 @@ class PredictionEngine:
 
             return plan
 
+    def ensure_weekly_prediction(self) -> Optional[PredictionPlan]:
+        """Return the current-week plan, creating one if missing/new week."""
+        with self._lock:
+            self._archive_previous_week_if_needed()
+
+            if self._current_plan is None:
+                logger.info("No active weekly plan found — generating a new weekly prediction")
+                plan = self._orchestrator.generate_prediction()
+
+                baseline = self._prophet_baseline()
+                if baseline:
+                    plan.agent_reports["prophet_baseline"] = {
+                        "type": "statistical_model",
+                        "predictions": baseline,
+                    }
+
+                self._current_plan = plan
+                self._save_plan(plan)
+
+                try:
+                    tracker = self.get_accuracy_tracker()
+                    tracker.store_plan(json.loads(plan.model_dump_json()))
+                except Exception as e:
+                    logger.warning(f"Could not store weekly plan for accuracy: {e}")
+
+            return self._current_plan
+
     def get_current_plan(self) -> Optional[PredictionPlan]:
         return self._current_plan
 
     def get_plan_history(self) -> list[PredictionPlan]:
-        return self._plan_history
+        # Main page no longer shows rolling prediction history.
+        return []
+
+    def get_weekly_archive(self) -> list[dict]:
+        return list(reversed(self._weekly_archive))
 
     def get_accuracy_tracker(self) -> AccuracyTracker:
         if self._accuracy is None:

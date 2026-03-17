@@ -90,6 +90,13 @@ def outlook_emoji(outlook: str) -> str:
 with st.sidebar:
     st.title("🥇 Gold Predictor")
     st.caption("Multi-Agent AI System")
+
+    view_mode = st.radio(
+        "Page",
+        ["Live Prediction", "Weekly Archive"],
+        index=0,
+    )
+
     st.divider()
 
     if st.button("🔄 Generate New Prediction", width="stretch", type="primary"):
@@ -145,11 +152,51 @@ with st.sidebar:
 
 
 # ════════════════════════════════════════════════════════════════════
+st.title("🥇 Agentic Gold Price Prediction System")
+
+if view_mode == "Weekly Archive":
+    st.subheader("🗂️ Weekly Prediction Archive")
+    weekly_archive = engine.get_weekly_archive()
+
+    if not weekly_archive:
+        st.info("No completed weekly predictions archived yet.")
+        st.stop()
+
+    rows = []
+    for item in weekly_archive:
+        plan_dict = item.get("plan", {})
+        rows.append({
+            "Week": item.get("week_id", ""),
+            "Generated": plan_dict.get("generated_at", "")[:16],
+            "Outlook": str(plan_dict.get("overall_outlook", "")).upper(),
+            "Confidence": f"{float(plan_dict.get('overall_confidence', 0)):.0%}",
+            "Anchor Price": f"${float(plan_dict.get('current_price', 0)):,.2f}",
+        })
+
+    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+
+    for item in weekly_archive:
+        plan_dict = item.get("plan", {})
+        week_id = item.get("week_id", "Unknown Week")
+        outlook = str(plan_dict.get("overall_outlook", "neutral")).upper()
+        with st.expander(f"{week_id} — {outlook}"):
+            st.markdown(plan_dict.get("executive_summary", "No summary available."))
+
+            daily = plan_dict.get("daily_predictions", [])
+            if daily:
+                adf = pd.DataFrame(daily)
+                if "date" in adf.columns:
+                    adf["date"] = pd.to_datetime(adf["date"])
+                st.dataframe(
+                    adf[["date", "predicted_price", "low_range", "high_range", "confidence", "key_driver"]],
+                    width="stretch",
+                    hide_index=True,
+                )
+    st.stop()
+
 # MAIN DASHBOARD
 # ════════════════════════════════════════════════════════════════════
-plan = engine.get_current_plan()
-
-st.title("🥇 Agentic Gold Price Prediction System")
+plan = engine.ensure_weekly_prediction()
 
 # Always keep the live OHLC chart visible.
 st.subheader("🕯️ Live Gold OHLC (90D)")

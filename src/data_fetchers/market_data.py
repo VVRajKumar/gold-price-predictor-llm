@@ -88,22 +88,30 @@ class MarketDataFetcher:
         if df.empty:
             return {"error": "No gold data available"}
 
-        latest = df.iloc[-1]
-        prev = df.iloc[-2] if len(df) > 1 else latest
+        close = pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna()
+        high = pd.to_numeric(df["High"].squeeze(), errors="coerce").dropna()
+        low = pd.to_numeric(df["Low"].squeeze(), errors="coerce").dropna()
+        volume = pd.to_numeric(df["Volume"].squeeze(), errors="coerce").dropna() if "Volume" in df else pd.Series(dtype=float)
+
+        if close.empty:
+            logger.warning("Gold data returned but Close column has no valid values")
+            return {"error": "No valid gold close prices available"}
+
+        current = float(close.iloc[-1])
+        prev = float(close.iloc[-2]) if len(close) > 1 else current
+        daily_change_pct = 0.0 if prev == 0 else (current - prev) / prev * 100
+
         return {
-            "current_price": round(float(df["Close"].squeeze().iloc[-1]), 2),
-            "prev_close": round(float(df["Close"].squeeze().iloc[-2] if len(df) > 1 else df["Close"].squeeze().iloc[-1]), 2),
-            "daily_change_pct": round(
-                (float(df["Close"].squeeze().iloc[-1]) - float(df["Close"].squeeze().iloc[-2 if len(df) > 1 else -1]))
-                / float(df["Close"].squeeze().iloc[-2 if len(df) > 1 else -1]) * 100, 3
-            ),
-            "30d_high": round(float(df["High"].squeeze().max()), 2),
-            "30d_low": round(float(df["Low"].squeeze().min()), 2),
-            "30d_avg": round(float(df["Close"].squeeze().mean()), 2),
-            "30d_volatility": round(float(df["Close"].squeeze().pct_change().std() * 100), 4),
-            "volume_latest": int(df["Volume"].squeeze().iloc[-1]) if "Volume" in df else 0,
-            "data_points": len(df),
-            "as_of": df.index[-1].strftime("%Y-%m-%d"),
+            "current_price": round(current, 2),
+            "prev_close": round(prev, 2),
+            "daily_change_pct": round(float(daily_change_pct), 3),
+            "30d_high": round(float(high.max()), 2) if not high.empty else round(current, 2),
+            "30d_low": round(float(low.min()), 2) if not low.empty else round(current, 2),
+            "30d_avg": round(float(close.mean()), 2),
+            "30d_volatility": round(float(close.pct_change().dropna().std() * 100), 4) if len(close) > 2 else 0.0,
+            "volume_latest": int(volume.iloc[-1]) if not volume.empty else 0,
+            "data_points": int(len(close)),
+            "as_of": close.index[-1].strftime("%Y-%m-%d"),
         }
 
     # ------------------------------------------------------------------ #

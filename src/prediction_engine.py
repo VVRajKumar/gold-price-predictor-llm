@@ -62,8 +62,12 @@ class PredictionEngine:
         if self._cache_path.exists():
             try:
                 data = json.loads(self._cache_path.read_text(encoding="utf-8"))
-                self._current_plan = PredictionPlan(**data)
-                logger.info("Loaded cached prediction plan")
+                plan = PredictionPlan(**data)
+                if not np.isfinite(plan.current_price) or plan.current_price <= 0:
+                    logger.warning("Ignoring cached prediction plan with invalid current_price")
+                else:
+                    self._current_plan = plan
+                    logger.info("Loaded cached prediction plan")
             except Exception as e:
                 logger.warning(f"Could not load cached plan: {e}")
 

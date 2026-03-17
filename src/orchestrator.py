@@ -6,6 +6,7 @@ and produces a unified 7-day gold price prediction via a meta-reasoning LLM call
 from __future__ import annotations
 
 import json
+import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from typing import Any
@@ -178,6 +179,15 @@ Synthesise all of the above and produce your 7-day prediction plan as JSON."""
         # 1. Get current gold price
         gold_summary = self._market.get_gold_summary(period_days=7)
         current_price = gold_summary.get("current_price", 0.0)
+        if not isinstance(current_price, (int, float)) or not math.isfinite(current_price) or current_price <= 0:
+            logger.warning("Invalid current gold price from summary; attempting last valid close fallback")
+            fallback_df = self._market.fetch_ticker("GC=F", period_days=14)
+            if not fallback_df.empty and "Close" in fallback_df:
+                close = fallback_df["Close"].squeeze()
+                close = close.dropna() if hasattr(close, "dropna") else close
+                if len(close) > 0:
+                    current_price = float(close.iloc[-1])
+
         logger.info(f"Current gold price: ${current_price}")
 
         # 2. Run all agents

@@ -151,22 +151,31 @@ plan = engine.get_current_plan()
 
 st.title("🥇 Agentic Gold Price Prediction System")
 
+# Always keep the live OHLC chart visible.
+st.subheader("🕯️ Live Gold OHLC (90D)")
+gold_df = market.fetch_ticker("GC=F", period_days=90)
+if not gold_df.empty:
+    fig_ohlc = go.Figure()
+    fig_ohlc.add_trace(go.Candlestick(
+        x=gold_df.index,
+        open=gold_df["Open"],
+        high=gold_df["High"],
+        low=gold_df["Low"],
+        close=gold_df["Close"],
+        name="Gold (GC=F)",
+    ))
+    fig_ohlc.update_layout(
+        title="Gold Futures – Last 90 Days",
+        template="plotly_dark",
+        height=450,
+        xaxis_rangeslider_visible=False,
+    )
+    st.plotly_chart(fig_ohlc, width="stretch")
+else:
+    st.warning("Live gold OHLC data is temporarily unavailable.")
+
 if plan is None:
     st.info("No prediction yet. Click **Generate New Prediction** in the sidebar to start.")
-    # Show live gold chart as a teaser
-    gold_df = market.fetch_ticker("GC=F", period_days=90)
-    if not gold_df.empty:
-        fig = go.Figure()
-        fig.add_trace(go.Candlestick(
-            x=gold_df.index, open=gold_df["Open"], high=gold_df["High"],
-            low=gold_df["Low"], close=gold_df["Close"], name="Gold (GC=F)",
-        ))
-        fig.update_layout(
-            title="Gold Futures – Last 90 Days",
-            template="plotly_dark", height=500,
-            xaxis_rangeslider_visible=False,
-        )
-        st.plotly_chart(fig, width="stretch")
     st.stop()
 
 # ── Top Metrics Row ──────────────────────────────────────────────────

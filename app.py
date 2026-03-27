@@ -227,8 +227,18 @@ if not gold_df.empty:
         template="plotly_dark",
         height=450,
         xaxis_rangeslider_visible=False,
+        xaxis=dict(fixedrange=True),
+        yaxis=dict(fixedrange=True),
     )
-    st.plotly_chart(fig_ohlc, width="stretch")
+    st.plotly_chart(
+        fig_ohlc,
+        width="stretch",
+        config={
+            "scrollZoom": False,
+            "doubleClick": False,
+            "displayModeBar": False,
+        },
+    )
 else:
     st.warning("Live gold OHLC data is temporarily unavailable.")
 

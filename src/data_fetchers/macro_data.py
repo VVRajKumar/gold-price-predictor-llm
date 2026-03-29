@@ -19,6 +19,11 @@ class MacroDataFetcher:
     def __init__(self):
         self._api_key = FRED_API_KEY
 
+    _SERIES_FALLBACKS = {
+        # GOLDAMGBD228NLBM intermittently returns 400 for some ranges/accounts.
+        "gold_fixing_price": ["IR14270", "GOLDAMGBD228NLBM", "GOLDPMGBD228NLBM"],
+    }
+
     # ------------------------------------------------------------------ #
     def _fred_request(self, series_id: str, lookback_days: int = 365) -> pd.DataFrame:
         """Low-level FRED API call."""
@@ -57,7 +62,11 @@ class MacroDataFetcher:
             _cache[cache_key] = df
             return df
         except Exception as e:
-            logger.error(f"FRED error for {series_id}: {e}")
+            msg = str(e)
+            if "400" in msg:
+                logger.warning(f"FRED 400 for {series_id}: {msg}")
+            else:
+                logger.error(f"FRED error for {series_id}: {msg}")
             return pd.DataFrame()
 
     # ------------------------------------------------------------------ #
@@ -67,7 +76,15 @@ class MacroDataFetcher:
         if not series_id:
             logger.warning(f"Unknown series name: {name}")
             return pd.DataFrame()
-        return self._fred_request(series_id, lookback_days)
+
+        candidates = self._SERIES_FALLBACKS.get(name, [series_id])
+        for sid in candidates:
+            df = self._fred_request(sid, lookback_days)
+            if not df.empty:
+                return df
+
+        logger.warning(f"No FRED data returned for series '{name}' using candidates: {candidates}")
+        return pd.DataFrame()
 
     # ------------------------------------------------------------------ #
     def fetch_all(self, lookback_days: int = 365) -> dict[str, pd.DataFrame]:

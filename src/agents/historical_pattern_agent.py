@@ -46,7 +46,10 @@ Return ONLY valid JSON, no markdown fences."""
         if df.empty:
             return {"error": "No data"}
 
-        close = df["Close"].squeeze()
+        close = pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna()
+        if close.empty:
+            return {"error": "No valid close prices"}
+
         current_month = pd.Timestamp.now().month
 
         # Monthly returns for the past year
@@ -58,7 +61,7 @@ Return ONLY valid JSON, no markdown fences."""
 
         # Year-over-year return
         yoy = None
-        if len(close) > 250:
+        if len(close) >= 252:
             yoy = round((float(close.iloc[-1]) - float(close.iloc[-252])) / float(close.iloc[-252]) * 100, 2)
 
         # Quarterly performance

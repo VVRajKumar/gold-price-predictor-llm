@@ -66,5 +66,5 @@ FRED_SERIES = {
     "us_debt": "GFDEBTN",
     "m2_money_supply": "M2SL",
     "inflation_expectation": "T5YIE",
-    "gold_fixing_price": "GOLDAMGBD228NLBM",
+    "gold_fixing_price": "IR14270",
 }

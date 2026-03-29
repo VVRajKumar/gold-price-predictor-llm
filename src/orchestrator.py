@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from typing import Any
@@ -93,6 +94,76 @@ Return ONLY valid JSON with these EXACT keys (no markdown fences):
 """
 
 
+def _extract_summary_text(text: str) -> str:
+    """Normalize agent summary text, including partial JSON-like outputs."""
+    if not isinstance(text, str):
+        return ""
+
+    cleaned = text.strip()
+    if not cleaned:
+        return ""
+
+    if cleaned.startswith("{"):
+        try:
+            obj = json.loads(cleaned)
+            summary = obj.get("summary") if isinstance(obj, dict) else None
+            if isinstance(summary, str) and summary.strip():
+                return summary.strip()
+        except Exception:
+            # Best-effort extraction when the JSON is truncated/invalid.
+            match = re.search(r'"summary"\s*:\s*"((?:\\.|[^"\\])*)"', cleaned, flags=re.DOTALL)
+            if match:
+                raw_value = match.group(1)
+                try:
+                    return bytes(raw_value, "utf-8").decode("unicode_escape").strip()
+                except Exception:
+                    return raw_value.replace('\\"', '"').strip()
+
+    return cleaned
+
+
+def _ensure_full_stop(text: str) -> str:
+    """Ensure summary text ends cleanly with a period."""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return ""
+
+    cleaned = cleaned.rstrip(" ")
+    if cleaned.endswith("..."):
+        return cleaned
+    if cleaned.endswith("…"):
+        return cleaned.rstrip("… ") + "..."
+    if cleaned.endswith("."):
+        return cleaned
+    if cleaned.endswith("!") or cleaned.endswith("?"):
+        return cleaned[:-1].rstrip() + "."
+    return cleaned + "."
+
+
+def _truncate_sentence_safe(text: str, max_chars: int) -> str:
+    """Truncate text at a natural boundary so UI copy does not end mid-sentence."""
+    if len(text) <= max_chars:
+        return _ensure_full_stop(text)
+
+    snippet = text[:max_chars].rstrip()
+    cut = max(snippet.rfind(". "), snippet.rfind("! "), snippet.rfind("? "), snippet.rfind("\n"))
+    if cut >= int(max_chars * 0.6):
+        return _ensure_full_stop(snippet[: cut + 1])
+
+    word_cut = snippet.rfind(" ")
+    if word_cut > 0:
+        return _ensure_full_stop(snippet[:word_cut])
+    return _ensure_full_stop(snippet)
+
+
+def _format_summary(text: str, max_chars: int) -> str:
+    """Normalize, truncate, and ensure a clean sentence-ending summary."""
+    normalized = _extract_summary_text(text)
+    if not normalized:
+        return "No summary available."
+    return _truncate_sentence_safe(normalized, max_chars)
+
+
 class Orchestrator:
     """Run all agents → aggregate → meta-reason → produce PredictionPlan."""
 
@@ -154,11 +225,12 @@ class Orchestrator:
 
         agent_summaries = []
         for r in reports:
+            summary_for_prompt = _format_summary(r.summary, 800)
             agent_summaries.append(
                 f"### {r.agent_name}\n"
                 f"- Outlook: {r.outlook} | Confidence: {r.confidence:.2f} | "
                 f"Impact: {r.impact_score:.2f} | Bias: {r.prediction_bias:+.2f}\n"
-                f"- Summary: {r.summary[:800]}\n"
+                f"- Summary: {summary_for_prompt}\n"
                 f"- Key factors: {', '.join(r.key_factors[:5])}\n"
             )
 
@@ -249,7 +321,7 @@ Synthesise all of the above and produce your 7-day prediction plan as JSON."""
                     "confidence": r.confidence,
                     "impact_score": r.impact_score,
                     "prediction_bias": r.prediction_bias,
-                    "summary": r.summary[:500],
+                    "summary": _format_summary(r.summary, 700),
                     "key_factors": r.key_factors[:5],
                 }
                 for r in reports

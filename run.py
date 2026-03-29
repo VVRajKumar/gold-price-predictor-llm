@@ -26,6 +26,27 @@ from loguru import logger
 logger.add("logs/gold_predictor.log", rotation="10 MB", retention="30 days")
 
 
+def _summary_preview(text: str, max_chars: int = 500) -> str:
+    """Return a readable summary snippet that ends cleanly with punctuation."""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return "No summary available."
+
+    if len(cleaned) <= max_chars:
+        return cleaned if cleaned.endswith(".") else cleaned.rstrip("!?") + "."
+
+    snippet = cleaned[:max_chars].rstrip()
+    cut = max(snippet.rfind(". "), snippet.rfind("! "), snippet.rfind("? "), snippet.rfind("\n"))
+    if cut >= int(max_chars * 0.6):
+        snippet = snippet[: cut + 1].rstrip()
+    else:
+        word_cut = snippet.rfind(" ")
+        if word_cut > 0:
+            snippet = snippet[:word_cut].rstrip()
+
+    return snippet if snippet.endswith(".") else snippet.rstrip("!?") + "."
+
+
 def main():
     parser = argparse.ArgumentParser(description="Gold Price Predictor – Agentic AI")
     parser.add_argument(
@@ -69,7 +90,7 @@ def main():
             print(f"  Generated:      {plan.generated_at}")
             print(f"\n  {'─' * 60}")
             print(f"\n  EXECUTIVE SUMMARY:")
-            print(f"  {plan.executive_summary[:500]}")
+            print(f"  {_summary_preview(plan.executive_summary, 500)}")
             print(f"\n  {'─' * 60}")
             print(f"\n  7-DAY PREDICTIONS:")
             print(f"  {'Date':<12} {'Predicted':>10} {'Low':>10} {'High':>10} {'Conf':>6}  Driver")

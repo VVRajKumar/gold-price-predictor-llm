@@ -474,121 +474,119 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
             pass
 
 if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
+    # ── Aggregate Metrics Row ────────────────────────────────────
+    st.markdown("#### Overall Accuracy (All Past Predictions)")
+    m1, m2, m3, m4, m5 = st.columns(5)
+    with m1:
+        mape = agg_stats["overall_mape"]
+        mape_color = "🟢" if mape < 2 else ("🟡" if mape < 5 else "🔴")
+        st.metric(f"{mape_color} MAPE", f"{mape:.1f}%")
+    with m2:
+        st.metric("📏 MAE", f"${agg_stats['overall_mae']:,.2f}")
+    with m3:
+        hit = agg_stats["overall_band_hit_rate"]
+        hit_color = "🟢" if hit >= 70 else ("🟡" if hit >= 50 else "🔴")
+        st.metric(f"{hit_color} Band Hit Rate", f"{hit:.0f}%")
+    with m4:
+        da = agg_stats["avg_directional_accuracy"]
+        da_color = "🟢" if da >= 60 else ("🟡" if da >= 50 else "🔴")
+        st.metric(f"{da_color} Direction Accuracy", f"{da:.0f}%")
+    with m5:
+        st.metric("📊 Days Evaluated", f"{agg_stats['total_predictions_evaluated']}")
 
-    if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
-        # ── Aggregate Metrics Row ────────────────────────────────────
-        st.markdown("#### Overall Accuracy (All Past Predictions)")
-        m1, m2, m3, m4, m5 = st.columns(5)
-        with m1:
-            mape = agg_stats["overall_mape"]
-            mape_color = "🟢" if mape < 2 else ("🟡" if mape < 5 else "🔴")
-            st.metric(f"{mape_color} MAPE", f"{mape:.1f}%")
-        with m2:
-            st.metric("📏 MAE", f"${agg_stats['overall_mae']:,.2f}")
-        with m3:
-            hit = agg_stats["overall_band_hit_rate"]
-            hit_color = "🟢" if hit >= 70 else ("🟡" if hit >= 50 else "🔴")
-            st.metric(f"{hit_color} Band Hit Rate", f"{hit:.0f}%")
-        with m4:
-            da = agg_stats["avg_directional_accuracy"]
-            da_color = "🟢" if da >= 60 else ("🟡" if da >= 50 else "🔴")
-            st.metric(f"{da_color} Direction Accuracy", f"{da:.0f}%")
-        with m5:
-            st.metric("📊 Days Evaluated", f"{agg_stats['total_predictions_evaluated']}")
+    st.caption(
+        "**MAPE** = Mean Absolute Percentage Error (lower is better) · "
+        "**MAE** = Mean Absolute Error in $ · "
+        "**Band Hit Rate** = % of days actual price fell within predicted range · "
+        "**Direction** = % of days predicted direction matched actual"
+    )
 
-        st.caption(
-            "**MAPE** = Mean Absolute Percentage Error (lower is better) · "
-            "**MAE** = Mean Absolute Error in $ · "
-            "**Band Hit Rate** = % of days actual price fell within predicted range · "
-            "**Direction** = % of days predicted direction matched actual"
-        )
+    # ── Predicted vs Actual Chart ────────────────────────────────
+    all_daily = []
+    for ev in all_evals:
+        for d in ev.get("daily_results", []):
+            all_daily.append(d)
 
-        # ── Predicted vs Actual Chart ────────────────────────────────
-        all_daily = []
-        for ev in all_evals:
-            for d in ev.get("daily_results", []):
-                all_daily.append(d)
+    if all_daily:
+        acc_df = pd.DataFrame(all_daily)
+        acc_df["date"] = pd.to_datetime(acc_df["date"])
+        acc_df = acc_df.sort_values("date").drop_duplicates(subset="date", keep="last")
 
-        if all_daily:
-            acc_df = pd.DataFrame(all_daily)
-            acc_df["date"] = pd.to_datetime(acc_df["date"])
-            acc_df = acc_df.sort_values("date").drop_duplicates(subset="date", keep="last")
+        fig_acc = go.Figure()
 
-            fig_acc = go.Figure()
-
-            # Prediction band
-            fig_acc.add_trace(go.Scatter(
+        # Prediction band
+        fig_acc.add_trace(go.Scatter(
                 x=acc_df["date"], y=acc_df["high_range"],
                 mode="lines", name="Upper Band",
                 line=dict(width=0), showlegend=False,
-            ))
-            fig_acc.add_trace(go.Scatter(
+        ))
+        fig_acc.add_trace(go.Scatter(
                 x=acc_df["date"], y=acc_df["low_range"],
                 mode="lines", name="Prediction Range",
                 fill="tonexty", fillcolor="rgba(0,212,170,0.12)",
                 line=dict(width=0),
-            ))
+        ))
 
-            # Predicted line
-            fig_acc.add_trace(go.Scatter(
+        # Predicted line
+        fig_acc.add_trace(go.Scatter(
                 x=acc_df["date"], y=acc_df["predicted"],
                 mode="lines+markers", name="Predicted",
                 line=dict(color="#00d4aa", width=2, dash="dash"),
                 marker=dict(size=7, symbol="diamond"),
-            ))
+        ))
 
-            # Actual line
-            fig_acc.add_trace(go.Scatter(
+        # Actual line
+        fig_acc.add_trace(go.Scatter(
                 x=acc_df["date"], y=acc_df["actual"],
                 mode="lines+markers", name="Actual",
                 line=dict(color="#ffd93d", width=2),
                 marker=dict(size=7),
-            ))
+        ))
 
-            # Color markers for within/outside band
-            outside = acc_df[~acc_df["within_band"]]
-            if not outside.empty:
-                fig_acc.add_trace(go.Scatter(
+        # Color markers for within/outside band
+        outside = acc_df[~acc_df["within_band"]]
+        if not outside.empty:
+            fig_acc.add_trace(go.Scatter(
                     x=outside["date"], y=outside["actual"],
                     mode="markers", name="Outside Band ✗",
                     marker=dict(size=12, color="#ff6b6b", symbol="x"),
-                ))
+            ))
 
-            fig_acc.update_layout(
+        fig_acc.update_layout(
                 title="Predicted vs Actual Gold Price",
                 template="plotly_dark", height=450,
                 yaxis_title="Price (USD)", xaxis_title="Date",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02),
                 hovermode="x unified",
-            )
-            st.plotly_chart(fig_acc, width="stretch")
+        )
+        st.plotly_chart(fig_acc, width="stretch")
 
-            # ── Daily Accuracy Table ─────────────────────────────────
-            with st.expander("📋 Daily Accuracy Breakdown", expanded=False):
-                display_df = acc_df[["date", "predicted", "actual", "low_range",
-                                     "high_range", "error", "pct_error", "within_band"]].copy()
-                display_df = display_df.rename(columns={
-                    "date": "Date",
-                    "predicted": "Predicted ($)",
-                    "actual": "Actual ($)",
-                    "low_range": "Low ($)",
-                    "high_range": "High ($)",
-                    "error": "Error ($)",
-                    "pct_error": "Error (%)",
-                    "within_band": "In Range",
-                })
-                st.dataframe(
-                    display_df.style.format({
-                        "Predicted ($)": "${:,.2f}",
-                        "Actual ($)": "${:,.2f}",
-                        "Low ($)": "${:,.2f}",
-                        "High ($)": "${:,.2f}",
-                        "Error ($)": "{:+,.2f}",
-                        "Error (%)": "{:.2f}%",
-                    }),
-                    width="stretch",
-                    hide_index=True,
-                )
+        # ── Daily Accuracy Table ─────────────────────────────────
+        with st.expander("📋 Daily Accuracy Breakdown", expanded=False):
+            display_df = acc_df[["date", "predicted", "actual", "low_range",
+                                 "high_range", "error", "pct_error", "within_band"]].copy()
+            display_df = display_df.rename(columns={
+                "date": "Date",
+                "predicted": "Predicted ($)",
+                "actual": "Actual ($)",
+                "low_range": "Low ($)",
+                "high_range": "High ($)",
+                "error": "Error ($)",
+                "pct_error": "Error (%)",
+                "within_band": "In Range",
+            })
+            st.dataframe(
+                display_df.style.format({
+                    "Predicted ($)": "${:,.2f}",
+                    "Actual ($)": "${:,.2f}",
+                    "Low ($)": "${:,.2f}",
+                    "High ($)": "${:,.2f}",
+                    "Error ($)": "{:+,.2f}",
+                    "Error (%)": "{:.2f}%",
+                }),
+                width="stretch",
+                hide_index=True,
+            )
 
         # ── Per-Plan Accuracy History ────────────────────────────────
         if len(all_evals) > 1:

@@ -200,6 +200,7 @@ class PredictionEngine:
             if baseline:
                 plan.agent_reports["prophet_baseline"] = {
                     "type": "statistical_model",
+                    "summary": "Prophet baseline generated from recent gold price time-series trend.",
                     "predictions": baseline,
                 }
 
@@ -228,6 +229,7 @@ class PredictionEngine:
                 if baseline:
                     plan.agent_reports["prophet_baseline"] = {
                         "type": "statistical_model",
+                        "summary": "Prophet baseline generated from recent gold price time-series trend.",
                         "predictions": baseline,
                     }
 

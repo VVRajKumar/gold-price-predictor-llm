@@ -433,13 +433,14 @@ if plan.risk_factors:
     for i, risk in enumerate(plan.risk_factors, 1):
         st.markdown(f"**{i}.** {risk}")
 
-st.divider()
+is_streamlit_cloud = str(ROOT).replace("\\", "/").startswith("/mount/src/")
+if not is_streamlit_cloud:
+    st.divider()
 
 # ════════════════════════════════════════════════════════════════════
 # PREDICTION ACCURACY SCORECARD
 # ════════════════════════════════════════════════════════════════════
 history = engine.get_plan_history()
-is_streamlit_cloud = str(ROOT).replace("\\", "/").startswith("/mount/src/")
 if not is_streamlit_cloud:
     st.subheader("🎯 Prediction Accuracy Scorecard")
     # Auto-evaluate all stored plans against latest market data
@@ -650,9 +651,9 @@ if not is_streamlit_cloud:
             "**Check Accuracy Now** in the sidebar."
         )
 
-st.divider()
 # ── Prediction Generation History ────────────────────────────────────
-if len(history) > 1:
+if not is_streamlit_cloud and len(history) > 1:
+    st.divider()
     st.subheader("📊 Prediction History")
     hist_data = []
     for h in history[-20:]:

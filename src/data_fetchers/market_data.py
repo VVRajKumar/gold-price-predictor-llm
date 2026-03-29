@@ -45,15 +45,16 @@ class MarketDataFetcher:
         if cache_key in _cache:
             return _cache[cache_key]
 
-        end = datetime.now()
-        start = end - timedelta(days=period_days)
-        logger.info(f"Fetching {ticker} from {start.date()} to {end.date()}")
+        # Use UTC calendar dates so localhost and Streamlit Cloud fetch the same 1d candle window.
+        end_date = datetime.utcnow().date()
+        start_date = end_date - timedelta(days=period_days)
+        logger.info(f"Fetching {ticker} from {start_date} to {end_date}")
 
         try:
             df = yf.download(
                 ticker,
-                start=start.strftime("%Y-%m-%d"),
-                end=end.strftime("%Y-%m-%d"),
+                start=start_date.strftime("%Y-%m-%d"),
+                end=end_date.strftime("%Y-%m-%d"),
                 interval=interval,
                 progress=False,
             )
@@ -66,6 +67,9 @@ class MarketDataFetcher:
                 df.columns = df.columns.droplevel(1)
             # Ensure no duplicate columns – keep first occurrence
             df = df.loc[:, ~df.columns.duplicated()]
+
+            if isinstance(df.index, pd.DatetimeIndex) and df.index.tz is not None:
+                df.index = df.index.tz_convert(None)
 
             _cache[cache_key] = df
             return df

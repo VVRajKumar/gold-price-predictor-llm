@@ -438,11 +438,11 @@ st.divider()
 # ════════════════════════════════════════════════════════════════════
 # PREDICTION ACCURACY SCORECARD
 # ════════════════════════════════════════════════════════════════════
+history = engine.get_plan_history()
 is_streamlit_cloud = str(ROOT).replace("\\", "/").startswith("/mount/src/")
 if not is_streamlit_cloud:
     st.subheader("🎯 Prediction Accuracy Scorecard")
     # Auto-evaluate all stored plans against latest market data
-    history = engine.get_plan_history()
     stored_plans = accuracy_tracker.get_stored_plans()
 
     # Ensure all history plans are stored for tracking

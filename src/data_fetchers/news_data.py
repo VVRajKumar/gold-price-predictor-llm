@@ -120,8 +120,8 @@ class NewsDataFetcher:
     ) -> list[dict]:
         """Fetch articles from NewsAPI."""
         if not NEWS_API_KEY:
-            logger.warning("NEWS_API_KEY not set – skipping newsapi")
-            return []
+            logger.warning("NEWS_API_KEY not set – using RSS fallback")
+            return self._rss_fallback(page_size=page_size, query=query)
 
         cache_key = f"newsapi_{query}_{days_back}_{page_size}"
         if cache_key in _cache:

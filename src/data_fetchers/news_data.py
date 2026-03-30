@@ -3,6 +3,7 @@ News data fetcher – pulls gold-related news from NewsAPI and RSS feeds.
 """
 
 from datetime import datetime, timedelta
+import threading
 from typing import Optional
 
 import feedparser
@@ -13,6 +14,8 @@ from cachetools import TTLCache
 from ..config import NEWS_API_KEY
 
 _cache = TTLCache(maxsize=16, ttl=1800)  # 30-min cache
+_newsapi_lock = threading.Lock()
+_newsapi_block_until: Optional[datetime] = None
 
 # RSS feeds for gold / macro news
 RSS_FEEDS = {
@@ -37,9 +40,16 @@ class NewsDataFetcher:
             logger.warning("NEWS_API_KEY not set – skipping newsapi")
             return []
 
-        cache_key = f"newsapi_{query}_{days_back}"
+        cache_key = f"newsapi_{query}_{days_back}_{page_size}"
         if cache_key in _cache:
             return _cache[cache_key]
+
+        global _newsapi_block_until
+        with _newsapi_lock:
+            if _newsapi_block_until and datetime.now() < _newsapi_block_until:
+                # During cooldown, skip remote calls to avoid repeated 429 spam.
+                _cache[cache_key] = []
+                return []
 
         from_date = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
         url = "https://newsapi.org/v2/everything"
@@ -70,7 +80,25 @@ class NewsDataFetcher:
             _cache[cache_key] = cleaned
             return cleaned
         except Exception as e:
-            logger.error(f"NewsAPI error: {e}")
+            status_code = None
+            retry_after = None
+            if isinstance(e, requests.HTTPError) and getattr(e, "response", None) is not None:
+                status_code = e.response.status_code
+                retry_after = e.response.headers.get("Retry-After")
+
+            if status_code == 429:
+                cooldown_seconds = 1800
+                if retry_after and str(retry_after).isdigit():
+                    cooldown_seconds = max(60, int(retry_after))
+                with _newsapi_lock:
+                    _newsapi_block_until = datetime.now() + timedelta(seconds=cooldown_seconds)
+                logger.warning(
+                    f"NewsAPI rate limit reached (429). Cooling down for {cooldown_seconds}s; using cached/RSS fallback."
+                )
+            else:
+                logger.warning(f"NewsAPI request failed (status={status_code}): {type(e).__name__}")
+
+            _cache[cache_key] = []
             return []
 
     # ------------------------------------------------------------------ #

@@ -285,8 +285,18 @@ if plan.daily_predictions:
 
     # Historical prices
     if not gold_recent.empty:
+        close_series = pd.to_numeric(gold_recent["Close"], errors="coerce").dropna()
+        # Reindex to calendar days so weekends/holidays are visible on the timeline.
+        if not close_series.empty:
+            daily_idx = pd.date_range(
+                start=close_series.index.min(),
+                end=close_series.index.max(),
+                freq="D",
+            )
+            close_series = close_series.reindex(daily_idx).ffill()
+
         fig.add_trace(go.Scatter(
-            x=gold_recent.index, y=gold_recent["Close"],
+            x=close_series.index, y=close_series.values,
             mode="lines", name="Actual",
             line=dict(color="#ffd93d", width=2),
         ))

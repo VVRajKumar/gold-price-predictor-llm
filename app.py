@@ -288,9 +288,14 @@ if plan.daily_predictions:
         close_series = pd.to_numeric(gold_recent["Close"], errors="coerce").dropna()
         # Reindex to calendar days so weekends/holidays are visible on the timeline.
         if not close_series.empty:
+            chart_end = close_series.index.max()
+            pred_start = pred_df["date"].min() if not pred_df.empty else chart_end
+            if pd.notna(pred_start):
+                chart_end = max(chart_end, pred_start - pd.Timedelta(days=1))
+
             daily_idx = pd.date_range(
                 start=close_series.index.min(),
-                end=close_series.index.max(),
+                end=chart_end,
                 freq="D",
             )
             close_series = close_series.reindex(daily_idx).ffill()

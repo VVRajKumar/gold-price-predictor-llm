@@ -69,7 +69,11 @@ Return ONLY valid JSON, no markdown fences."""
         gold_news = self._news.fetch_newsapi(days_back=2, page_size=15)
         headlines = [a["title"] for a in gold_news[:15]]
 
-        return {"vix_info": vix_info, "sp500_info": sp_info, "news_headlines": headlines}
+        return {
+            "vix_info": vix_info,
+            "sp500_info": sp_info,
+            "news_headlines": headlines,
+        }
 
     def analyse(self, data: dict[str, Any]) -> AgentReport:
         prompt = f"""Analyse market sentiment and its implications for gold.
@@ -106,6 +110,8 @@ Provide your sentiment analysis as JSON."""
                 "fear_greed_level": result.get("fear_greed_level", "neutral"),
                 "safe_haven_demand": result.get("safe_haven_demand", "moderate"),
                 "news_sentiment_score": result.get("news_sentiment_score", 0.0),
+                "headlines_used": data.get("news_headlines", [])[:15],
+                "headlines_count": len(data.get("news_headlines", []) or []),
                 **data.get("vix_info", {}),
             },
             raw_llm_response=raw,

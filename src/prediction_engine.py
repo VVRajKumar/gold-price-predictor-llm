@@ -20,6 +20,7 @@ from .config import CACHE_DIR, REFRESH_INTERVAL_MINUTES, PREDICTION_DAYS
 from .orchestrator import Orchestrator, PredictionPlan
 from .data_fetchers.market_data import MarketDataFetcher
 from .accuracy_tracker import AccuracyTracker
+from .time_utils import iso_now_ist
 
 
 class PredictionEngine:
@@ -81,7 +82,7 @@ class PredictionEngine:
             except Exception as e:
                 logger.warning(f"Could not reset file {p.name}: {e}")
 
-        self._reset_marker_path.write_text(datetime.now().isoformat(), encoding="utf-8")
+        self._reset_marker_path.write_text(iso_now_ist(), encoding="utf-8")
         logger.info("Storage reset complete for weekly workflow")
 
     def _load_weekly_archive(self):
@@ -120,7 +121,7 @@ class PredictionEngine:
             return
 
         try:
-            current_week = self._week_id(datetime.now().isoformat())
+            current_week = self._week_id(iso_now_ist())
             plan_week = self._week_id(self._current_plan.generated_at)
             if plan_week == current_week:
                 return
@@ -128,7 +129,7 @@ class PredictionEngine:
             if not any(item.get("week_id") == plan_week for item in self._weekly_archive):
                 self._weekly_archive.append({
                     "week_id": plan_week,
-                    "archived_at": datetime.now().isoformat(),
+                    "archived_at": iso_now_ist(),
                     "plan": json.loads(self._current_plan.model_dump_json()),
                 })
                 self._weekly_archive = self._weekly_archive[-52:]

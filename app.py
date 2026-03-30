@@ -28,6 +28,7 @@ if "src" in sys.modules:
 
 from src.prediction_engine import PredictionEngine
 from src.data_fetchers.market_data import MarketDataFetcher
+from src.time_utils import now_ist, parse_iso_to_ist
 
 # ── Page config ──────────────────────────────────────────────────────
 st.set_page_config(
@@ -133,7 +134,7 @@ with st.sidebar:
     last = accuracy_tracker.last_checked
     if last:
         try:
-            last_dt = datetime.fromisoformat(last)
+            last_dt = parse_iso_to_ist(last)
             st.caption(f"Last checked: {last_dt.strftime('%H:%M %b %d')}")
         except Exception:
             st.caption(f"Last checked: {last}")
@@ -156,7 +157,7 @@ with st.sidebar:
         st.markdown(f"- {a}")
 
     st.divider()
-    st.caption(f"v1.0 · Updated {datetime.now().strftime('%H:%M')}")
+    st.caption(f"v1.0 · Updated {now_ist().strftime('%H:%M')}")
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -263,7 +264,10 @@ with c4:
     else:
         st.metric("7-Day Target", "N/A")
 with c5:
-    st.metric("Last Updated", datetime.fromisoformat(plan.generated_at).strftime("%H:%M %b %d"))
+    try:
+        st.metric("Last Updated", parse_iso_to_ist(plan.generated_at).strftime("%H:%M %b %d"))
+    except Exception:
+        st.metric("Last Updated", plan.generated_at)
 
 st.divider()
 
@@ -483,7 +487,7 @@ if not is_streamlit_cloud:
         if latest_eval:
             eval_time = latest_eval.get("evaluated_at", "")
             try:
-                eval_dt = datetime.fromisoformat(eval_time)
+                eval_dt = parse_iso_to_ist(eval_time)
                 st.caption(f"🔄 Auto-updated: {eval_dt.strftime('%H:%M %b %d, %Y')} "
                            f"· {latest_eval['days_evaluated']}/{latest_eval['days_total']} days scored "
                            f"· Background check every 6h")
@@ -610,8 +614,12 @@ if not is_streamlit_cloud:
                 with st.expander("📈 Accuracy Trend Across Predictions"):
                     trend_data = []
                     for ev in all_evals:
+                        try:
+                            gen_at = parse_iso_to_ist(ev["plan_generated_at"]).strftime("%Y-%m-%d %H:%M")
+                        except Exception:
+                            gen_at = str(ev.get("plan_generated_at", ""))[:16]
                         trend_data.append({
-                            "Generated At": ev["plan_generated_at"][:16],
+                            "Generated At": gen_at,
                             "Days Checked": ev["days_evaluated"],
                             "MAE ($)": ev["mae"],
                             "MAPE (%)": ev["mape"],

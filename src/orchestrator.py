@@ -32,6 +32,7 @@ from .agents.sentiment_agent import SentimentAgent
 from .agents.technical_agent import TechnicalAnalysisAgent
 from .agents.historical_pattern_agent import HistoricalPatternAgent
 from .data_fetchers.market_data import MarketDataFetcher
+from .time_utils import iso_now_ist, now_ist
 
 
 # ── Prediction schema ──────────────────────────────────────────────
@@ -47,7 +48,7 @@ class DayPrediction(BaseModel):
 
 
 class PredictionPlan(BaseModel):
-    generated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    generated_at: str = Field(default_factory=iso_now_ist)
     current_price: float = 0.0
     overall_outlook: str = "neutral"  # bullish / bearish / neutral
     overall_confidence: float = 0.5
@@ -164,6 +165,33 @@ def _format_summary(text: str, max_chars: int) -> str:
     return _truncate_sentence_safe(normalized, max_chars)
 
 
+def _json_safe(value: Any) -> Any:
+    """Best-effort conversion to JSON-serialisable types for plan persistence."""
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for k, v in value.items():
+            try:
+                out[str(k)] = _json_safe(v)
+            except Exception:
+                out[str(k)] = str(v)
+        return out
+
+    # Common non-JSON-friendly numeric types (numpy, pandas scalars, etc.)
+    try:
+        if hasattr(value, "item"):
+            return _json_safe(value.item())
+    except Exception:
+        pass
+
+    return str(value)
+
+
 class Orchestrator:
     """Run all agents → aggregate → meta-reason → produce PredictionPlan."""
 
@@ -220,7 +248,7 @@ class Orchestrator:
     # ------------------------------------------------------------------ #
     def _build_meta_prompt(self, reports: list[AgentReport], current_price: float) -> str:
         """Assemble the meta-reasoning prompt from all agent reports."""
-        tomorrow = datetime.now() + timedelta(days=1)
+        tomorrow = now_ist() + timedelta(days=1)
         dates = [(tomorrow + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(PREDICTION_DAYS)]
 
         agent_summaries = []
@@ -323,6 +351,7 @@ Synthesise all of the above and produce your 7-day prediction plan as JSON."""
                     "prediction_bias": r.prediction_bias,
                     "summary": _format_summary(r.summary, 700),
                     "key_factors": r.key_factors[:5],
+                    "data_points": _json_safe(r.data_points),
                 }
                 for r in reports
             },

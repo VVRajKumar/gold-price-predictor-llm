@@ -87,6 +87,8 @@ Provide your analysis as JSON."""
             data_points={
                 "risk_events": result.get("risk_events", []),
                 "articles_analysed": len(data.get("geopolitics_news", [])),
+                "geopolitics_headlines_used": [a.get("title", "") for a in data.get("geopolitics_news", [])[:25] if a.get("title")],
+                "safe_haven_headlines_used": [a.get("title", "") for a in data.get("gold_safe_haven_news", [])[:10] if a.get("title")],
             },
             raw_llm_response=raw,
         )

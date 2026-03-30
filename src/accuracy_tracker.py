@@ -19,6 +19,7 @@ from loguru import logger
 
 from .config import CACHE_DIR
 from .data_fetchers.market_data import MarketDataFetcher
+from .time_utils import iso_now_ist, now_ist
 
 
 _ACCURACY_PATH = CACHE_DIR / "accuracy_log.json"
@@ -104,7 +105,7 @@ class AccuracyTracker:
         if isinstance(close, pd.DataFrame):
             close = close.iloc[:, 0]
 
-        today = datetime.now().date()
+        today = now_ist().date()
         evaluated_days = []
 
         for dp in preds:
@@ -157,7 +158,7 @@ class AccuracyTracker:
 
         result = {
             "plan_generated_at": generated_at,
-            "evaluated_at": datetime.now().isoformat(),
+            "evaluated_at": iso_now_ist(),
             "current_price_at_prediction": round(current_price, 2),
             "days_evaluated": len(evaluated_days),
             "days_total": len(preds),
@@ -247,7 +248,7 @@ class AccuracyTracker:
             if after_count > before_count:
                 updated += 1
 
-        self._last_checked = datetime.now().isoformat()
+        self._last_checked = iso_now_ist()
         logger.info(f"Accuracy refresh complete — {updated} plans had new data")
         return updated
 

@@ -18,13 +18,14 @@ from ..config import (
     AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION,
     TEMPERATURE,
 )
+from ..time_utils import iso_now_ist
 
 
 class AgentReport(BaseModel):
     """Standardised output every agent returns."""
 
     agent_name: str
-    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    timestamp: str = Field(default_factory=iso_now_ist)
     summary: str = ""
     outlook: str = ""                 # bullish / bearish / neutral
     confidence: float = 0.5           # 0-1 scale

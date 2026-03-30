@@ -108,6 +108,8 @@ Provide your analysis as JSON."""
             data_points={
                 "oil_gold_ratio": data.get("gold_oil_ratio"),
                 "energy_inflation_risk": result.get("energy_inflation_risk", "moderate"),
+                "energy_headlines_used": data.get("energy_news_headlines", [])[:10],
+                "energy_headlines_count": len(data.get("energy_news_headlines", []) or []),
                 **data.get("oil_info", {}),
             },
             raw_llm_response=raw,

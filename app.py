@@ -100,11 +100,7 @@ with st.sidebar:
     st.title("🥇 Gold Predictor")
     st.caption("Multi-Agent AI System")
 
-    view_mode = st.radio(
-        "Page",
-        ["Live Prediction", "Weekly Archive"],
-        index=0,
-    )
+    view_mode = "Live Prediction"
 
     st.divider()
 
@@ -113,33 +109,6 @@ with st.sidebar:
             plan = engine.generate()
         st.success("Prediction updated!")
         st.rerun()
-
-    st.divider()
-
-    # Auto-refresh toggle
-    auto_refresh = st.toggle("Auto-refresh", value=False)
-    if auto_refresh:
-        from streamlit_autorefresh import st_autorefresh
-        interval = st.slider("Refresh interval (min)", 15, 120, 30)
-        st_autorefresh(interval=interval * 60_000, key="auto_refresh")
-
-    st.divider()
-    st.markdown("### 🎯 Accuracy Auto-Check")
-    if st.button("🔍 Check Accuracy Now", width="stretch"):
-        with st.spinner("Fetching latest market data & comparing..."):
-            n = accuracy_tracker.refresh_all()
-        st.success(f"Checked! {n} plan(s) had new data.")
-        st.rerun()
-
-    last = accuracy_tracker.last_checked
-    if last:
-        try:
-            last_dt = parse_iso_to_ist(last)
-            st.caption(f"Last checked: {last_dt.strftime('%H:%M %b %d')}")
-        except Exception:
-            st.caption(f"Last checked: {last}")
-    else:
-        st.caption("Not checked yet — will auto-check in background")
 
     st.divider()
     st.markdown("### Agent Roster")
@@ -219,6 +188,9 @@ if not gold_df.empty:
         cutoff_ts = latest_ts - pd.Timedelta(days=90)
         gold_df = gold_df[gold_df.index >= cutoff_ts]
 
+    range_start = gold_df.index.min()
+    range_end = gold_df.index.max()
+
     fig_ohlc = go.Figure()
     fig_ohlc.add_trace(go.Candlestick(
         x=gold_df.index,
@@ -245,6 +217,11 @@ if not gold_df.empty:
             "displayModeBar": False,
         },
     )
+    if isinstance(range_start, pd.Timestamp) and isinstance(range_end, pd.Timestamp):
+        st.caption(
+            f"Plotted range: {range_start.strftime('%Y-%m-%d')} to {range_end.strftime('%Y-%m-%d')} "
+            f"({len(gold_df)} trading sessions in last 90 calendar days)"
+        )
 else:
     st.warning("Live gold OHLC data is temporarily unavailable.")
 

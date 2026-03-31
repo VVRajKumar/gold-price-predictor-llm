@@ -46,18 +46,6 @@ REFRESH_INTERVAL_MINUTES = int(os.getenv("REFRESH_INTERVAL_MINUTES", "30"))
 PREDICTION_DAYS = 7
 HISTORICAL_LOOKBACK_DAYS = 365
 
-
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
-# When enabled, predictions are generated with deterministic rules (no LLM synthesis)
-# so local and Streamlit Cloud stay aligned for the same source market data.
-STRICT_CONSISTENCY_MODE = _env_bool("STRICT_CONSISTENCY_MODE", True)
-
 # ── Ticker Symbols ──────────────────────────────────────────────────
 GOLD_TICKER = "GC=F"           # Gold Futures
 SILVER_TICKER = "SI=F"         # Silver Futures

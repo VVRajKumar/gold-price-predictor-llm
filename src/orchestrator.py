@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from .config import (
     AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY,
     AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION,
-    TEMPERATURE, PREDICTION_DAYS, STRICT_CONSISTENCY_MODE,
+    TEMPERATURE, PREDICTION_DAYS,
 )
 from .agents.base_agent import AgentReport
 from .agents.geopolitics_agent import GeopoliticsAgent
@@ -297,10 +297,6 @@ Synthesise all of the above and produce your 7-day prediction plan as JSON."""
 
         logger.info(f"Current gold price: ${current_price}")
 
-        if STRICT_CONSISTENCY_MODE:
-            logger.info("STRICT_CONSISTENCY_MODE enabled: using deterministic prediction path")
-            return self._generate_deterministic_plan(current_price)
-
         # 2. Run all agents
         reports = self.run_all_agents()
         logger.info(f"Received {len(reports)} agent reports")
@@ -373,67 +369,3 @@ Synthesise all of the above and produce your 7-day prediction plan as JSON."""
             f"(conf={plan.overall_confidence:.2f}) ==="
         )
         return plan
-
-    def _generate_deterministic_plan(self, current_price: float) -> PredictionPlan:
-        """Build a fully deterministic 7-day plan for cross-environment consistency."""
-        base = float(current_price) if current_price > 0 else 1.0
-        tomorrow = now_ist().date() + timedelta(days=1)
-
-        # Fixed day-by-day drift schedule (deterministic, no random component)
-        daily_drifts = [0.0010, 0.0016, 0.0022, 0.0018, 0.0025, 0.0030, 0.0035]
-        daily: list[DayPrediction] = []
-
-        for i in range(PREDICTION_DAYS):
-            date_str = (tomorrow + timedelta(days=i)).strftime("%Y-%m-%d")
-            drift = daily_drifts[i] if i < len(daily_drifts) else daily_drifts[-1]
-            predicted = round(base * (1.0 + drift), 2)
-            band = max(predicted * 0.006, 8.0)
-
-            daily.append(
-                DayPrediction(
-                    date=date_str,
-                    predicted_price=predicted,
-                    low_range=round(predicted - band, 2),
-                    high_range=round(predicted + band, 2),
-                    confidence=0.75,
-                    key_driver="Deterministic weekly baseline",
-                )
-            )
-
-        week_delta = daily[-1].predicted_price - base if daily else 0.0
-        if week_delta > 0:
-            outlook = "bullish"
-        elif week_delta < 0:
-            outlook = "bearish"
-        else:
-            outlook = "neutral"
-
-        summary = (
-            "Deterministic consistency mode is active. This weekly plan is generated from a fixed "
-            "baseline schedule to keep local and Streamlit outputs aligned for the same source market data."
-        )
-
-        return PredictionPlan(
-            current_price=round(base, 2),
-            overall_outlook=outlook,
-            overall_confidence=0.75,
-            executive_summary=summary,
-            daily_predictions=daily,
-            risk_factors=[
-                "Unexpected macro shocks",
-                "Geopolitical escalation",
-                "Liquidity and volatility spikes",
-            ],
-            bull_case="Steady risk-off demand supports a mild upside drift in gold.",
-            bear_case="Stronger USD and easing risk premium can cap gains and pressure prices.",
-            agent_reports={
-                "consistency_mode": {
-                    "outlook": outlook,
-                    "confidence": 0.75,
-                    "impact_score": 0.75,
-                    "prediction_bias": 0.15 if outlook == "bullish" else (-0.15 if outlook == "bearish" else 0.0),
-                    "summary": "Deterministic mode replaces LLM synthesis to keep predictions identical across environments.",
-                    "key_factors": ["fixed baseline", "same calendar anchor", "no random sampling"],
-                }
-            },
-        )

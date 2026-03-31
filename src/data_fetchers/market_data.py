@@ -71,6 +71,14 @@ class MarketDataFetcher:
             if isinstance(df.index, pd.DatetimeIndex) and df.index.tz is not None:
                 df.index = df.index.tz_convert(None)
 
+            # Enforce a strict calendar-day window from the latest available candle.
+            # This keeps chart ranges consistent even if the provider returns extra history.
+            if period_days and isinstance(df.index, pd.DatetimeIndex) and not df.empty:
+                end_ts = df.index.max()
+                start_ts = end_ts - pd.Timedelta(days=period_days)
+                df = df[df.index >= start_ts]
+                df = df.sort_index()
+
             _cache[cache_key] = df
             return df
         except Exception as e:

@@ -214,6 +214,11 @@ else:
 st.subheader("🕯️ Live Gold OHLC (90D)")
 gold_df = market.fetch_ticker("GC=F", period_days=90)
 if not gold_df.empty:
+    if isinstance(gold_df.index, pd.DatetimeIndex):
+        latest_ts = gold_df.index.max()
+        cutoff_ts = latest_ts - pd.Timedelta(days=90)
+        gold_df = gold_df[gold_df.index >= cutoff_ts]
+
     fig_ohlc = go.Figure()
     fig_ohlc.add_trace(go.Candlestick(
         x=gold_df.index,

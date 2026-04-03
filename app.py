@@ -351,6 +351,11 @@ if plan.daily_predictions:
         template="plotly_dark", height=500,
         yaxis_title="Price (₹/10g)",
         xaxis_title="Time",
+        xaxis=dict(
+            dtick=3600000,  # 1 hour in ms — tick every hour
+            tickformat="%b %d\n%H:%M",
+            rangebreaks=[dict(bounds=["sat", "mon"])],
+        ),
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
         hovermode="x unified",
     )

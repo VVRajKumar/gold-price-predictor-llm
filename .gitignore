@@ -8,4 +8,5 @@ dist/
 build/
 .streamlit/secrets.toml
 data/cache/
+data/cache/backup_daily_logs/
 *.log

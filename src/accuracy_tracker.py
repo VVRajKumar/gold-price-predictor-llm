@@ -25,6 +25,9 @@ from .time_utils import iso_now_ist, now_ist
 _ACCURACY_PATH = CACHE_DIR / "accuracy_log.json"
 _PLANS_STORE_PATH = CACHE_DIR / "stored_plans.json"
 
+# Only evaluate/store plans generated on or after this cutoff (hourly scorecard start)
+_HOURLY_SCORECARD_START = datetime(2026, 4, 4, 0, 0, 0)
+
 
 class AccuracyTracker:
     """Track and score past predictions vs actual prices."""
@@ -69,6 +72,14 @@ class AccuracyTracker:
     def store_plan(self, plan_dict: dict):
         """Persist a prediction plan so it can be re-evaluated later as days pass."""
         gen_at = plan_dict.get("generated_at", "")
+        # Skip plans generated before the hourly scorecard cutoff
+        try:
+            gen_dt = datetime.fromisoformat(str(gen_at))
+            if gen_dt.replace(tzinfo=None) < _HOURLY_SCORECARD_START:
+                logger.debug(f"Skipping pre-cutoff plan {gen_at}")
+                return
+        except (ValueError, TypeError):
+            pass
         existing_ids = {p.get("generated_at") for p in self._stored_plans}
         if gen_at not in existing_ids:
             self._stored_plans.append(plan_dict)
@@ -94,6 +105,13 @@ class AccuracyTracker:
             return None
 
         generated_at = plan_dict.get("generated_at", "")
+        # Skip evaluation for plans generated before the hourly scorecard cutoff
+        try:
+            gen_dt = datetime.fromisoformat(str(generated_at))
+            if gen_dt.replace(tzinfo=None) < _HOURLY_SCORECARD_START:
+                return None
+        except (ValueError, TypeError):
+            pass
         current_price = plan_dict.get("current_price", 0)
 
         # Fetch recent actual gold prices on hourly candles

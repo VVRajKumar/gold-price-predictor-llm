@@ -51,23 +51,25 @@ XGBOOST_BLEND_WEIGHT = float(os.getenv("XGBOOST_BLEND_WEIGHT", "0.35"))
 HISTORICAL_LOOKBACK_DAYS = 365
 
 # ── Ticker Symbols ──────────────────────────────────────────────────
-GOLD_TICKER = "GC=F"           # Gold Futures
+GOLD_TICKER = "GC=F"           # COMEX Gold Futures (base reference)
+MCX_GOLD_TICKER = "GOLD.NS"   # MCX Gold via NSE (INR-denominated proxy)
 SILVER_TICKER = "SI=F"         # Silver Futures
 OIL_TICKER = "CL=F"           # Crude Oil Futures
-DXY_TICKER = "DX-Y.NYB"       # US Dollar Index
-SP500_TICKER = "^GSPC"        # S&P 500
-TREASURY_10Y = "^TNX"         # 10-Year Treasury Yield
-VIX_TICKER = "^VIX"           # Volatility Index
+DXY_TICKER = "DX-Y.NYB"       # US Dollar Index (affects INR gold)
+USDINR_TICKER = "INR=X"       # USD/INR exchange rate
+NIFTY_TICKER = "^NSEI"        # Nifty 50 Index
+INDIA_VIX_TICKER = "^INDIAVIX" # India VIX
+SENSEX_TICKER = "^BSESN"      # BSE Sensex
+TREASURY_10Y = "^TNX"         # US 10-Year Treasury (global reference)
 
-GOLD_ETF_TICKERS = ["GLD", "IAU", "SGOL", "BAR", "OUNZ"]
-GOLD_MINER_TICKERS = ["GDX", "GDXJ", "NEM", "GOLD", "AEM"]
+GOLD_ETF_TICKERS = ["GOLDBEES.NS", "GOLDIAM.NS", "HDFCGOLD.NS", "LICNETFGOLD.NS", "SBIGETS.NS"]
+GOLD_MINER_TICKERS = ["TITAN.NS", "TBZ.NS", "RAJESHEXPO.NS"]
 
-# ── FRED Series IDs ─────────────────────────────────────────────────
+# ── FRED Series IDs (global macro – still relevant for Indian gold) ──
 FRED_SERIES = {
     "fed_funds_rate": "FEDFUNDS",
-    "cpi": "CPIAUCSL",
+    "cpi_us": "CPIAUCSL",
     "real_interest_rate": "REAINTRATREARAT10Y",
-    "us_debt": "GFDEBTN",
     "m2_money_supply": "M2SL",
     "inflation_expectation": "T5YIE",
 }

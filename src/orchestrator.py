@@ -61,37 +61,41 @@ class PredictionPlan(BaseModel):
     agent_reports: dict[str, dict] = Field(default_factory=dict)  # slim copies
 
 
-META_SYSTEM_PROMPT = """You are the Chief Gold Strategist – the most senior analyst in
-a multi-agent gold prediction system. You have received independent reports from
-8 specialist analysts (geopolitics, trend, ETF flows, macro-economics, oil/energy,
-sentiment, technical analysis, historical patterns).
+META_SYSTEM_PROMPT = """You are the Chief Gold Strategist for the INDIAN gold market.
+You are the most senior analyst in a multi-agent gold prediction system.
+All prices are in INR (Indian Rupees) per 10 grams.
+
+You have received independent reports from 8 specialist analysts (geopolitics, trend,
+ETF flows, macro-economics, oil/energy, sentiment, technical analysis, historical patterns),
+all focused on the Indian gold market.
 
 Your job is to:
 1. Weigh each analyst's findings by their confidence AND impact score.
 2. Identify consensus and disagreements.
-3. Produce a precise hourly rolling prediction with price targets and confidence bands.
-4. Explain the bull case and bear case.
-5. List the top risk factors that could invalidate the prediction.
+3. Produce a precise hourly rolling prediction with price targets in INR per 10g and confidence bands.
+4. Consider the dual drivers: global gold price (COMEX) AND USD/INR exchange rate.
+5. Explain the bull case and bear case for Indian gold.
+6. List the top risk factors that could invalidate the prediction.
 
 Return ONLY valid JSON with these EXACT keys (no markdown fences):
 {
   "overall_outlook": "bullish" | "bearish" | "neutral",
   "overall_confidence": 0.0 to 1.0,
-  "executive_summary": "3-4 paragraph synthesis of all agent findings",
+  "executive_summary": "3-4 paragraph synthesis of all agent findings for Indian gold",
   "daily_predictions": [
     {
-    "date": "YYYY-MM-DD HH:00",
-      "predicted_price": float,
+      "date": "YYYY-MM-DD HH:00",
+      "predicted_price": float (INR per 10g),
       "low_range": float,
       "high_range": float,
       "confidence": 0.0 to 1.0,
-            "key_driver": "what drives this hour's move"
+      "key_driver": "what drives this hour's move"
     },
-        ... (exactly one entry per hour for the next horizon, starting from next full hour)
+    ... (exactly one entry per hour for the next horizon, starting from next full hour)
   ],
   "risk_factors": ["risk 1", "risk 2", ...],
-  "bull_case": "paragraph describing the bullish scenario",
-  "bear_case": "paragraph describing the bearish scenario"
+  "bull_case": "paragraph describing the bullish scenario for Indian gold",
+  "bear_case": "paragraph describing the bearish scenario for Indian gold"
 }
 """
 
@@ -271,7 +275,7 @@ class Orchestrator:
                 f"- Key factors: {', '.join(r.key_factors[:5])}\n"
             )
 
-        return f"""Current gold price: ${current_price:.2f}
+        return f"""Current Indian gold price: \u20b9{current_price:,.2f} per 10 grams
 Prediction dates needed: {', '.join(dates)}
 
 ## Recent Forecast Error Feedback
@@ -281,7 +285,7 @@ Prediction dates needed: {', '.join(dates)}
 
 {''.join(agent_summaries)}
 
-Synthesise all of the above and produce your hourly prediction plan as JSON."""
+Synthesise all of the above and produce your hourly prediction plan for Indian gold (INR per 10g) as JSON."""
 
     def _build_feedback_context(self) -> str:
         """Summarise recent forecast misses so the next run can self-correct."""
@@ -316,7 +320,7 @@ Synthesise all of the above and produce your hourly prediction plan as JSON."""
         tendency = "over-predicting" if mean_signed > 0 else "under-predicting"
         return (
             f"Recent evaluated plans: {len(recent)}. "
-            f"Average signed error: {mean_signed:+.2f} USD ({tendency}). "
+            f"Average signed error: {mean_signed:+.2f} INR ({tendency}). "
             f"Average absolute percentage error: {mean_abs_pct:.2f}%. "
             "Use this as calibration feedback for the next-hour forecast."
         )
@@ -326,19 +330,20 @@ Synthesise all of the above and produce your hourly prediction plan as JSON."""
         """Full pipeline: agents → meta-reasoning → PredictionPlan."""
         logger.info("=== Orchestrator: starting full prediction cycle ===")
 
-        # 1. Get current gold price
-        gold_summary = self._market.get_gold_summary(period_days=7)
-        current_price = gold_summary.get("current_price", 0.0)
+        # 1. Get current gold price in INR per 10 grams
+        current_price = self._market.get_gold_inr_price()
         if not isinstance(current_price, (int, float)) or not math.isfinite(current_price) or current_price <= 0:
-            logger.warning("Invalid current gold price from summary; attempting last valid close fallback")
+            logger.warning("Invalid INR gold price; attempting fallback via COMEX + USD/INR")
             fallback_df = self._market.fetch_ticker("GC=F", period_days=14)
+            usdinr = self._market.get_usdinr_rate()
             if not fallback_df.empty and "Close" in fallback_df:
                 close = fallback_df["Close"].squeeze()
                 close = close.dropna() if hasattr(close, "dropna") else close
                 if len(close) > 0:
-                    current_price = float(close.iloc[-1])
+                    usd_per_oz = float(close.iloc[-1])
+                    current_price = round(usd_per_oz * usdinr / 31.1035 * 10, 2)
 
-        logger.info(f"Current gold price: ${current_price}")
+        logger.info(f"Current Indian gold price: \u20b9{current_price:,.2f} per 10g")
 
         # 2. Run all agents
         reports = self.run_all_agents()

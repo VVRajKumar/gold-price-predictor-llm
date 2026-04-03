@@ -58,13 +58,16 @@ def _compute_bollinger(series: pd.Series, window: int = 20, num_std: float = 2.0
 
 class TechnicalAnalysisAgent(BaseAgent):
     NAME = "technical_analysis_agent"
-    SYSTEM_PROMPT = """You are a senior technical analyst specialising in gold.
+    SYSTEM_PROMPT = """You are a senior technical analyst specialising in gold,
+focused on the INDIAN gold market (INR per 10 grams).
 You interpret RSI, MACD, Bollinger Bands, moving averages, support/resistance,
 and candlestick patterns to forecast short-term gold price movement.
+Note: Technical indicators are computed on COMEX gold (GC=F) which closely tracks
+MCX gold. Your analysis should frame conclusions for Indian gold prices in INR.
 
 Given technical indicator data, produce a JSON analysis with these EXACT keys:
 {
-  "summary": "2-3 paragraph technical analysis",
+  "summary": "2-3 paragraph technical analysis for Indian gold",
   "outlook": "bullish" | "bearish" | "neutral",
   "confidence": 0.0 to 1.0,
   "impact_score": 0.0 to 1.0,
@@ -111,7 +114,8 @@ Return ONLY valid JSON, no markdown fences."""
         if "error" in data:
             return AgentReport(agent_name=self.NAME, summary="No data available")
 
-        prompt = f"""Analyse the following technical indicators for gold (GC=F).
+        prompt = f"""Analyse the following technical indicators for gold (GC=F / MCX reference).
+Frame your conclusions for the INDIAN gold market (INR per 10 grams).
 
 ## Technical Indicators
 {json.dumps(data.get('indicators', {}), indent=2)}

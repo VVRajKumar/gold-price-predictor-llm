@@ -13,17 +13,19 @@ from ..data_fetchers.news_data import NewsDataFetcher
 
 class SentimentAgent(BaseAgent):
     NAME = "sentiment_agent"
-    SYSTEM_PROMPT = """You are a senior market sentiment analyst. You gauge fear/greed
-across markets and determine how sentiment is likely to drive gold prices.
-You analyse:
-- VIX (fear index) – high VIX = risk-off = gold-positive
-- S&P 500 movements – sharp drops = flight to gold
-- News sentiment (positive/negative tone of gold coverage)
-- Market-wide risk appetite vs. safe-haven demand
+    SYSTEM_PROMPT = """You are a senior market sentiment analyst focused on the INDIAN gold market.
+You gauge fear/greed across Indian and global markets and determine how sentiment
+is likely to drive gold prices in India (INR). You analyse:
+- India VIX (fear index) – high India VIX = risk-off = gold-positive
+- Nifty 50 / Sensex movements – sharp drops = flight to gold
+- USD/INR exchange rate – INR weakening = higher Indian gold prices
+- News sentiment (positive/negative tone of gold coverage in India)
+- Festival and wedding season demand sentiment
+- Market-wide risk appetite vs. safe-haven demand in India
 
 Given sentiment data, produce a JSON analysis with these EXACT keys:
 {
-  "summary": "2-3 paragraph sentiment analysis for gold",
+  "summary": "2-3 paragraph sentiment analysis for Indian gold market",
   "outlook": "bullish" | "bearish" | "neutral",
   "confidence": 0.0 to 1.0,
   "impact_score": 0.0 to 1.0,
@@ -41,27 +43,41 @@ Return ONLY valid JSON, no markdown fences."""
         self._news = NewsDataFetcher()
 
     def gather_data(self) -> dict[str, Any]:
-        # VIX data
-        vix_df = self._market.fetch_ticker("^VIX", period_days=30)
+        # India VIX data
+        vix_df = self._market.fetch_ticker("^INDIAVIX", period_days=30)
         vix_info = {}
         if not vix_df.empty:
             vix_close = vix_df["Close"].squeeze()
             vix_info = {
+                "index": "India VIX",
                 "current": round(float(vix_close.iloc[-1]), 2),
                 "5d_avg": round(float(vix_close.tail(5).mean()), 2),
                 "30d_avg": round(float(vix_close.mean()), 2),
-                "is_elevated": float(vix_close.iloc[-1]) > 20,
+                "is_elevated": float(vix_close.iloc[-1]) > 18,
             }
 
-        # S&P 500 recent action
-        sp_df = self._market.fetch_ticker("^GSPC", period_days=30)
-        sp_info = {}
-        if not sp_df.empty:
-            sp_close = sp_df["Close"].squeeze()
-            sp_info = {
+        # Nifty 50 recent action
+        nifty_df = self._market.fetch_ticker("^NSEI", period_days=30)
+        nifty_info = {}
+        if not nifty_df.empty:
+            nifty_close = nifty_df["Close"].squeeze()
+            nifty_info = {
+                "index": "Nifty 50",
                 "5d_change_pct": round(
-                    (float(sp_close.iloc[-1]) - float(sp_close.iloc[-min(5, len(sp_close))]))
-                    / float(sp_close.iloc[-min(5, len(sp_close))]) * 100, 2
+                    (float(nifty_close.iloc[-1]) - float(nifty_close.iloc[-min(5, len(nifty_close))]))
+                    / float(nifty_close.iloc[-min(5, len(nifty_close))]) * 100, 2
+                ),
+            }
+
+        # USD/INR exchange rate
+        usdinr_df = self._market.fetch_ticker("INR=X", period_days=30)
+        usdinr_info = {}
+        if not usdinr_df.empty:
+            usdinr_close = usdinr_df["Close"].squeeze()
+            usdinr_info = {
+                "current_rate": round(float(usdinr_close.iloc[-1]), 2),
+                "5d_change": round(
+                    float(usdinr_close.iloc[-1]) - float(usdinr_close.iloc[-min(5, len(usdinr_close))]), 2
                 ),
             }
 
@@ -71,23 +87,27 @@ Return ONLY valid JSON, no markdown fences."""
 
         return {
             "vix_info": vix_info,
-            "sp500_info": sp_info,
+            "nifty_info": nifty_info,
+            "usdinr_info": usdinr_info,
             "news_headlines": headlines,
         }
 
     def analyse(self, data: dict[str, Any]) -> AgentReport:
-        prompt = f"""Analyse market sentiment and its implications for gold.
+        prompt = f"""Analyse market sentiment and its implications for INDIAN gold prices (INR).
 
-## VIX (Fear Index)
+## India VIX (Fear Index)
 {json.dumps(data.get('vix_info', {}), indent=2)}
 
-## S&P 500 Recent Performance
-{json.dumps(data.get('sp500_info', {}), indent=2)}
+## Nifty 50 Recent Performance
+{json.dumps(data.get('nifty_info', {}), indent=2)}
+
+## USD/INR Exchange Rate
+{json.dumps(data.get('usdinr_info', {}), indent=2)}
 
 ## Recent Gold-Related Headlines (gauge sentiment)
 {chr(10).join(['- ' + h for h in data.get('news_headlines', [])])}
 
-Provide your sentiment analysis as JSON."""
+Provide your sentiment analysis focused on Indian gold market as JSON."""
 
         raw = self._ask_llm(prompt)
         try:
@@ -113,6 +133,7 @@ Provide your sentiment analysis as JSON."""
                 "headlines_used": data.get("news_headlines", [])[:15],
                 "headlines_count": len(data.get("news_headlines", []) or []),
                 **data.get("vix_info", {}),
+                **data.get("usdinr_info", {}),
             },
             raw_llm_response=raw,
         )

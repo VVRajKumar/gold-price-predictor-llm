@@ -12,7 +12,7 @@ from cachetools import TTLCache
 
 from ..config import (
     GOLD_TICKER, SILVER_TICKER, OIL_TICKER, DXY_TICKER,
-    SP500_TICKER, TREASURY_10Y, VIX_TICKER,
+    USDINR_TICKER, NIFTY_TICKER, INDIA_VIX_TICKER,
     HISTORICAL_LOOKBACK_DAYS,
 )
 
@@ -28,9 +28,9 @@ class MarketDataFetcher:
         "silver": SILVER_TICKER,
         "oil": OIL_TICKER,
         "usd_index": DXY_TICKER,
-        "sp500": SP500_TICKER,
-        "treasury_10y": TREASURY_10Y,
-        "vix": VIX_TICKER,
+        "usdinr": USDINR_TICKER,
+        "nifty50": NIFTY_TICKER,
+        "india_vix": INDIA_VIX_TICKER,
     }
 
     # ------------------------------------------------------------------ #
@@ -94,6 +94,31 @@ class MarketDataFetcher:
         return results
 
     # ------------------------------------------------------------------ #
+    def get_usdinr_rate(self) -> float:
+        """Return latest USD/INR exchange rate, fallback to 83.5 if unavailable."""
+        df = self.fetch_ticker(USDINR_TICKER, period_days=7)
+        if not df.empty:
+            close = df["Close"].squeeze()
+            if hasattr(close, "iloc") and len(close) > 0:
+                return float(close.iloc[-1])
+        return 83.5  # reasonable fallback
+
+    # ------------------------------------------------------------------ #
+    def get_gold_inr_price(self, period_days: int = 7) -> float:
+        """Return gold price in INR per 10 grams (Indian standard unit)."""
+        usd_rate = self.get_usdinr_rate()
+        df = self.fetch_ticker(GOLD_TICKER, period_days=period_days)
+        if df.empty:
+            return 0.0
+        close = df["Close"].squeeze()
+        if hasattr(close, "iloc") and len(close) > 0:
+            usd_per_oz = float(close.iloc[-1])
+            # 1 troy oz = 31.1035 grams → per 10g
+            inr_per_10g = (usd_per_oz / 31.1035) * 10 * usd_rate
+            return round(inr_per_10g, 2)
+        return 0.0
+
+    # ------------------------------------------------------------------ #
     def get_gold_summary(self, period_days: int = 30) -> dict:
         """Return a compact dict summarising recent gold price action."""
         df = self.fetch_ticker(GOLD_TICKER, period_days)
@@ -124,6 +149,8 @@ class MarketDataFetcher:
             "volume_latest": int(volume.iloc[-1]) if not volume.empty else 0,
             "data_points": int(len(close)),
             "as_of": close.index[-1].strftime("%Y-%m-%d"),
+            "currency": "INR",
+            "unit": "per 10 grams",
         }
 
     # ------------------------------------------------------------------ #

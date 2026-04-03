@@ -12,14 +12,15 @@ from ..data_fetchers.etf_data import ETFDataFetcher
 
 class ETFFlowAgent(BaseAgent):
     NAME = "etf_flow_agent"
-    SYSTEM_PROMPT = """You are a senior ETF and fund-flow analyst specialising in gold.
-You analyse gold ETF trading volume, price trends, and implied fund flows to gauge
-institutional demand for gold.  Higher ETF inflows are bullish for gold;
+    SYSTEM_PROMPT = """You are a senior ETF and fund-flow analyst specialising in Indian gold ETFs.
+You analyse Indian gold ETF trading volume (GOLDBEES, HDFCGOLD, LICNETFGOLD, SBIGETS, etc.),
+price trends, and implied fund flows to gauge institutional and retail
+demand for gold in India.  Higher ETF inflows are bullish for gold;
 outflows are bearish.
 
-Given recent gold ETF data, produce a JSON analysis with these EXACT keys:
+Given recent Indian gold ETF data, produce a JSON analysis with these EXACT keys:
 {
-  "summary": "2-3 paragraph ETF flow analysis",
+  "summary": "2-3 paragraph ETF flow analysis for Indian gold ETFs",
   "outlook": "bullish" | "bearish" | "neutral",
   "confidence": 0.0 to 1.0,
   "impact_score": 0.0 to 1.0,
@@ -39,11 +40,12 @@ Return ONLY valid JSON, no markdown fences."""
         return {"etf_summary": etf_summary}
 
     def analyse(self, data: dict[str, Any]) -> AgentReport:
-        prompt = f"""Analyse the following gold ETF data for institutional fund-flow signals.
+        prompt = f"""Analyse the following Indian gold ETF data for institutional and retail fund-flow signals.
 
-## Gold ETF Summary (30-day)
+## Indian Gold ETF Summary (30-day)
 {json.dumps(data.get('etf_summary', {}), indent=2)}
 
+Focus on Indian ETFs like GOLDBEES, HDFCGOLD, LICNETFGOLD, SBIGETS.
 Provide your ETF flow analysis as JSON."""
 
         raw = self._ask_llm(prompt)

@@ -15,17 +15,21 @@ from ..data_fetchers.market_data import MarketDataFetcher
 
 class HistoricalPatternAgent(BaseAgent):
     NAME = "historical_pattern_agent"
-    SYSTEM_PROMPT = """You are an expert in gold market history and cyclical analysis.
+    SYSTEM_PROMPT = """You are an expert in gold market history and cyclical analysis,
+focused on the INDIAN gold market (INR per 10 grams).
 You identify:
-- Seasonal patterns (gold tends to rally Aug-Feb, weaken Jun-Jul)
+- Indian seasonal patterns: Akshaya Tritiya (Apr-May), Dhanteras/Diwali (Oct-Nov),
+  wedding season (Oct-Feb), monsoon impact on rural demand (Jun-Sep)
+- Festival-driven demand spikes (Navratri, Pongal, Onam)
 - Analogous historical periods (compare current conditions to past)
-- Long-term secular trends (gold super-cycles)
-- Year-over-year performance patterns
+- Long-term secular trends (gold super-cycles, INR depreciation trends)
+- Year-over-year performance patterns in INR terms
 - Key historical support/resistance from prior cycles
+- Impact of import duty changes on price patterns
 
 Given historical gold data, produce a JSON analysis with these EXACT keys:
 {
-  "summary": "2-3 paragraph historical pattern analysis",
+  "summary": "2-3 paragraph historical pattern analysis for Indian gold",
   "outlook": "bullish" | "bearish" | "neutral",
   "confidence": 0.0 to 1.0,
   "impact_score": 0.0 to 1.0,
@@ -94,13 +98,15 @@ Return ONLY valid JSON, no markdown fences."""
         if "error" in data:
             return AgentReport(agent_name=self.NAME, summary="No historical data available")
 
-        prompt = f"""Analyse the following historical gold data for cyclical and seasonal patterns.
+        prompt = f"""Analyse the following historical gold data for cyclical and seasonal patterns
+in the INDIAN gold market (INR per 10 grams).
 
 ## Historical Data
 {json.dumps(data, indent=2)}
 
-Consider seasonal tendencies (gold typically rallies Aug-Feb) and compare the 
-current market conditions to analogous historical periods.
+Consider Indian seasonal tendencies: Akshaya Tritiya (Apr-May), Dhanteras/Diwali (Oct-Nov),
+wedding season (Oct-Feb), and monsoon impact on rural demand (Jun-Sep).
+Also consider INR depreciation trends and import duty history.
 
 Provide your historical pattern analysis as JSON."""
 

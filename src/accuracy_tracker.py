@@ -114,7 +114,7 @@ class AccuracyTracker:
             pass
         current_price = plan_dict.get("current_price", 0)
 
-        # Fetch recent actual gold prices on hourly candles
+        # Fetch recent actual gold prices on hourly candles and convert to INR/10g
         gold_df = self._market.fetch_ticker("GC=F", period_days=10, interval="1h")
         if gold_df.empty:
             return None
@@ -122,6 +122,11 @@ class AccuracyTracker:
         close = gold_df["Close"].squeeze()
         if isinstance(close, pd.DataFrame):
             close = close.iloc[:, 0]
+
+        # Convert USD/oz to INR/10g
+        usdinr = self._market.get_usdinr_rate()
+        oz_to_10g = 10.0 / 31.1035
+        close = close * usdinr * oz_to_10g
 
         now_ts = now_ist().replace(minute=0, second=0, microsecond=0).replace(tzinfo=None)
         evaluated_days = []

@@ -22,11 +22,13 @@ _NEWSAPI_LAST_GOOD_TTL_SECONDS = 6 * 60 * 60  # 6 hours
 _RSS_CONNECT_TIMEOUT_SECONDS = 4
 _RSS_READ_TIMEOUT_SECONDS = 8
 
-# RSS feeds for gold / macro news
+# RSS feeds for gold / macro news (India-focused + global)
 RSS_FEEDS = {
+    "google_india_gold": "https://news.google.com/rss/search?q=india+gold+price&hl=en-IN&gl=IN&ceid=IN:en",
+    "google_mcx_gold": "https://news.google.com/rss/search?q=MCX+gold&hl=en-IN&gl=IN&ceid=IN:en",
+    "google_rbi_gold": "https://news.google.com/rss/search?q=RBI+gold+reserves&hl=en-IN&gl=IN&ceid=IN:en",
     "google_geopolitics_gold": "https://news.google.com/rss/search?q=geopolitics+gold&hl=en-US&gl=US&ceid=US:en",
     "google_gold_price": "https://news.google.com/rss/search?q=gold+price&hl=en-US&gl=US&ceid=US:en",
-    "marketwatch_topstories": "https://www.marketwatch.com/rss/topstories",
     "investing_gold": "https://www.investing.com/rss/news_14.rss",
 }
 
@@ -39,6 +41,16 @@ class NewsDataFetcher:
         "xau",
         "bullion",
         "safe haven",
+        "rbi",
+        "reserve bank of india",
+        "mcx",
+        "india gold",
+        "rupee",
+        "inr",
+        "import duty",
+        "sovereign gold bond",
+        "dhanteras",
+        "akshaya tritiya",
         "fed",
         "federal reserve",
         "interest rate",
@@ -114,7 +126,7 @@ class NewsDataFetcher:
     # ------------------------------------------------------------------ #
     def fetch_newsapi(
         self,
-        query: str = "gold price OR gold market OR gold futures",
+        query: str = "gold price OR india gold OR MCX gold OR rupee gold",
         days_back: int = 3,
         page_size: int = 20,
     ) -> list[dict]:
@@ -249,7 +261,8 @@ class NewsDataFetcher:
         # Avoid multiple remote calls per run (reduces rate-limit risk).
         combined_query = (
             "geopolitics OR war OR conflict OR sanctions OR "
-            "central bank gold reserves OR federal reserve interest rate OR "
+            "central bank gold reserves OR RBI gold OR india gold import duty OR "
+            "federal reserve interest rate OR rupee OR "
             "inflation OR recession OR BRICS OR dedollarization"
         )
         return self.fetch_newsapi(query=combined_query, days_back=days_back, page_size=25)

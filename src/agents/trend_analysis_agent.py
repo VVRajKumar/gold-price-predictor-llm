@@ -13,13 +13,15 @@ from ..data_fetchers.market_data import MarketDataFetcher
 
 class TrendAnalysisAgent(BaseAgent):
     NAME = "trend_analysis_agent"
-    SYSTEM_PROMPT = """You are a senior commodities trader specialising in gold price trends.
+    SYSTEM_PROMPT = """You are a senior commodities trader specialising in Indian gold price trends.
 You analyse price data, moving averages, momentum, and rate-of-change to determine
-the prevailing trend direction and strength.
+the prevailing trend direction and strength for gold in India (INR per 10 grams).
+Note: underlying data uses COMEX gold (GC=F) which closely tracks MCX gold.
+Consider USD/INR exchange rate movements as an additional trend factor.
 
 Given recent gold price data, produce a JSON analysis with these EXACT keys:
 {
-  "summary": "2-3 paragraph trend analysis",
+  "summary": "2-3 paragraph trend analysis for Indian gold",
   "outlook": "bullish" | "bearish" | "neutral",
   "confidence": 0.0 to 1.0,
   "impact_score": 0.0 to 1.0,
@@ -61,7 +63,8 @@ Return ONLY valid JSON, no markdown fences."""
         }
 
     def analyse(self, data: dict[str, Any]) -> AgentReport:
-        prompt = f"""Analyse the following gold price data and determine the current trend.
+        prompt = f"""Analyse the following gold price data and determine the current trend
+for the INDIAN gold market (INR per 10 grams).
 
 ## Gold Summary
 {json.dumps(data.get('gold_summary', {}), indent=2)}

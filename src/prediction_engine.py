@@ -236,19 +236,24 @@ class PredictionEngine:
             recent_vol = float(close.pct_change().dropna().tail(24).std()) if len(close) > 25 else 0.002
             recent_vol = max(recent_vol, 0.0015)
 
+            # Convert USD/oz predictions to INR/10g
+            usdinr = self._market.get_usdinr_rate()
+            oz_to_10g = 10.0 / 31.1035  # troy oz to 10 grams factor
+
             preds: list[dict] = []
             for h in range(PREDICTION_HOURS):
                 feat = self._build_xgb_feature(history).reshape(1, -1)
-                pred = float(model.predict(feat)[0])
+                pred_usd = float(model.predict(feat)[0])
+                pred_inr = pred_usd * usdinr * oz_to_10g
                 ts = pd.Timestamp(last_ts) + pd.Timedelta(hours=h + 1)
-                band = max(pred * (recent_vol * 1.6), 3.0)
+                band = max(pred_inr * (recent_vol * 1.6), 50.0)
                 preds.append({
                     "date": ts.strftime("%Y-%m-%d %H:00"),
-                    "xgb_price": round(pred, 2),
-                    "xgb_low": round(pred - band, 2),
-                    "xgb_high": round(pred + band, 2),
+                    "xgb_price": round(pred_inr, 2),
+                    "xgb_low": round(pred_inr - band, 2),
+                    "xgb_high": round(pred_inr + band, 2),
                 })
-                history.append(pred)
+                history.append(pred_usd)
 
             return preds
         except Exception as e:

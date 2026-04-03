@@ -32,7 +32,7 @@ from src.time_utils import now_ist, parse_iso_to_ist
 
 # ── Page config ──────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Gold Price Predictor – Agentic AI",
+    page_title="Indian Gold Price Predictor – Agentic AI",
     page_icon="🥇",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -130,7 +130,7 @@ with st.sidebar:
 
 
 # ════════════════════════════════════════════════════════════════════
-st.title("🥇 Agentic Gold Price Prediction System")
+st.title("🥇 Indian Gold Price Prediction System (₹/10g)")
 
 if view_mode == "Weekly Archive":
     st.subheader("🗂️ Weekly Prediction Archive")
@@ -148,7 +148,7 @@ if view_mode == "Weekly Archive":
             "Generated": plan_dict.get("generated_at", "")[:16],
             "Outlook": str(plan_dict.get("overall_outlook", "")).upper(),
             "Confidence": f"{float(plan_dict.get('overall_confidence', 0)):.0%}",
-            "Anchor Price": f"${float(plan_dict.get('current_price', 0)):,.2f}",
+            "Anchor Price": f"₹{float(plan_dict.get('current_price', 0)):,.2f}",
         })
 
     st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
@@ -180,13 +180,19 @@ else:
     plan = engine.get_current_plan()
 
 # Always keep the live OHLC chart visible.
-st.subheader("🕯️ Live Gold OHLC (90D)")
+st.subheader("🕯️ Live Indian Gold OHLC (90D) – INR/10g")
 gold_df = market.fetch_ticker("GC=F", period_days=90)
 if not gold_df.empty:
     if isinstance(gold_df.index, pd.DatetimeIndex):
         latest_ts = gold_df.index.max()
         cutoff_ts = latest_ts - pd.Timedelta(days=90)
         gold_df = gold_df[gold_df.index >= cutoff_ts]
+
+    # Convert USD/oz to INR/10g for display
+    _usdinr_rate = market.get_usdinr_rate()
+    _oz_to_10g = 10.0 / 31.1035
+    for _col in ["Open", "High", "Low", "Close"]:
+        gold_df[_col] = gold_df[_col] * _usdinr_rate * _oz_to_10g
 
     range_start = gold_df.index.min()
     range_end = gold_df.index.max()
@@ -198,15 +204,15 @@ if not gold_df.empty:
         high=gold_df["High"],
         low=gold_df["Low"],
         close=gold_df["Close"],
-        name="Gold (GC=F)",
+        name="Gold (INR/10g)",
     ))
     fig_ohlc.update_layout(
-        title="Gold Futures – Last 90 Days",
+        title="Indian Gold – Last 90 Days (₹ per 10 grams)",
         template="plotly_dark",
         height=450,
         xaxis_rangeslider_visible=False,
         xaxis=dict(fixedrange=True),
-        yaxis=dict(fixedrange=True),
+        yaxis=dict(fixedrange=True, title="Price (₹/10g)"),
     )
     st.plotly_chart(
         fig_ohlc,
@@ -232,7 +238,7 @@ if plan is None:
 # ── Top Metrics Row ──────────────────────────────────────────────────
 c1, c2, c3, c4, c5 = st.columns(5)
 with c1:
-    st.metric("Current Price", f"${plan.current_price:,.2f}")
+    st.metric("Current Price", f"₹{plan.current_price:,.2f}")
 with c2:
     color = outlook_color(plan.overall_outlook)
     st.metric("Outlook", f"{outlook_emoji(plan.overall_outlook)} {plan.overall_outlook.upper()}")
@@ -242,7 +248,7 @@ with c4:
     if plan.daily_predictions:
         horizon_target = plan.daily_predictions[-1]
         delta = horizon_target.predicted_price - plan.current_price
-        st.metric("24-Hour Target", f"${horizon_target.predicted_price:,.2f}", f"{delta:+,.2f}")
+        st.metric("24-Hour Target", f"₹{horizon_target.predicted_price:,.2f}", f"₹{delta:+,.2f}")
     else:
         st.metric("24-Hour Target", "N/A")
 with c5:
@@ -287,14 +293,18 @@ if plan.daily_predictions:
     pred_df = pd.DataFrame([dp.model_dump() for dp in plan.daily_predictions])
     pred_df["date"] = pd.to_datetime(pred_df["date"])
 
-    # Also get recent hourly actuals
+    # Also get recent hourly actuals (converted to INR/10g)
     gold_recent = market.fetch_ticker("GC=F", period_days=5, interval="1h")
 
     fig = go.Figure()
 
-    # Historical prices
+    # Historical prices (convert to INR/10g)
     if not gold_recent.empty:
         close_series = pd.to_numeric(gold_recent["Close"], errors="coerce").dropna()
+        # Convert USD/oz to INR/10g
+        _usdinr_hist = market.get_usdinr_rate()
+        _oz_to_10g_hist = 10.0 / 31.1035
+        close_series = close_series * _usdinr_hist * _oz_to_10g_hist
         # Reindex hourly so missing bars do not break the timeline.
         if not close_series.empty:
             chart_end = close_series.index.max()
@@ -338,7 +348,7 @@ if plan.daily_predictions:
 
     fig.update_layout(
         template="plotly_dark", height=500,
-        yaxis_title="Price (USD)",
+        yaxis_title="Price (₹/10g)",
         xaxis_title="Time",
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
         hovermode="x unified",
@@ -350,16 +360,16 @@ if plan.daily_predictions:
         pred_df[["date", "predicted_price", "low_range", "high_range", "confidence", "key_driver"]]
         .rename(columns={
             "date": "Date",
-            "predicted_price": "Predicted ($)",
-            "low_range": "Low ($)",
-            "high_range": "High ($)",
+            "predicted_price": "Predicted (₹)",
+            "low_range": "Low (₹)",
+            "high_range": "High (₹)",
             "confidence": "Confidence",
             "key_driver": "Key Driver",
         })
         .style.format({
-            "Predicted ($)": "${:,.2f}",
-            "Low ($)": "${:,.2f}",
-            "High ($)": "${:,.2f}",
+            "Predicted (₹)": "₹{:,.2f}",
+            "Low (₹)": "₹{:,.2f}",
+            "High (₹)": "₹{:,.2f}",
             "Confidence": "{:.0%}",
         }),
         width="stretch",
@@ -506,7 +516,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         mape_color = "🟢" if mape < 2 else ("🟡" if mape < 5 else "🔴")
         st.metric(f"{mape_color} MAPE", f"{mape:.1f}%")
     with m2:
-        st.metric("📏 MAE", f"${agg_stats['overall_mae']:,.2f}")
+        st.metric("📏 MAE", f"₹{agg_stats['overall_mae']:,.2f}")
     with m3:
         hit = agg_stats["overall_band_hit_rate"]
         hit_color = "🟢" if hit >= 70 else ("🟡" if hit >= 50 else "🔴")
@@ -520,7 +530,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
 
     st.caption(
         "**MAPE** = Mean Absolute Percentage Error (lower is better) · "
-        "**MAE** = Mean Absolute Error in $ · "
+        "**MAE** = Mean Absolute Error in ₹ · "
         "**Band Hit Rate** = % of hours actual price fell within predicted range · "
         "**Direction** = % of hours predicted direction matched actual"
     )
@@ -577,9 +587,9 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
             ))
 
         fig_acc.update_layout(
-                title="Predicted vs Actual Gold Price",
+                title="Predicted vs Actual Indian Gold Price (₹/10g)",
                 template="plotly_dark", height=450,
-                yaxis_title="Price (USD)", xaxis_title="Time",
+                yaxis_title="Price (₹/10g)", xaxis_title="Time",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02),
                 hovermode="x unified",
         )
@@ -591,21 +601,21 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                                  "high_range", "error", "pct_error", "within_band"]].copy()
             display_df = display_df.rename(columns={
                 "date": "Hour",
-                "predicted": "Predicted ($)",
-                "actual": "Actual ($)",
-                "low_range": "Low ($)",
-                "high_range": "High ($)",
-                "error": "Error ($)",
+                "predicted": "Predicted (₹)",
+                "actual": "Actual (₹)",
+                "low_range": "Low (₹)",
+                "high_range": "High (₹)",
+                "error": "Error (₹)",
                 "pct_error": "Error (%)",
                 "within_band": "In Range",
             })
             st.dataframe(
                 display_df.style.format({
-                    "Predicted ($)": "${:,.2f}",
-                    "Actual ($)": "${:,.2f}",
-                    "Low ($)": "${:,.2f}",
-                    "High ($)": "${:,.2f}",
-                    "Error ($)": "{:+,.2f}",
+                    "Predicted (₹)": "₹{:,.2f}",
+                    "Actual (₹)": "₹{:,.2f}",
+                    "Low (₹)": "₹{:,.2f}",
+                    "High (₹)": "₹{:,.2f}",
+                    "Error (₹)": "{:+,.2f}",
                     "Error (%)": "{:.2f}%",
                 }),
                 width="stretch",
@@ -624,7 +634,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                     trend_data.append({
                         "Generated At": gen_dt,
                         "Hours Checked": ev["days_evaluated"],
-                        "MAE ($)": ev["mae"],
+                        "MAE (₹)": ev["mae"],
                         "MAPE (%)": ev["mape"],
                         "Band Hit (%)": ev["band_hit_rate"],
                         "Direction (%)": ev["directional_accuracy"],
@@ -659,7 +669,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                 st.plotly_chart(fig_trend, width="stretch")
 
                 st.dataframe(
-                    trend_df[["Generated At Display", "Hours Checked", "MAE ($)", "MAPE (%)", "Band Hit (%)", "Direction (%)"]]
+                    trend_df[["Generated At Display", "Hours Checked", "MAE (₹)", "MAPE (%)", "Band Hit (%)", "Direction (%)"]]
                     .rename(columns={"Generated At Display": "Generated At"}),
                     width="stretch",
                     hide_index=True,
@@ -711,7 +721,7 @@ if len(history) > 1:
     ))
     fig_hist.update_layout(
         template="plotly_dark", height=350,
-        yaxis=dict(title="Gold Price ($)"),
+        yaxis=dict(title="Gold Price (₹/10g)"),
         yaxis2=dict(title="Confidence", overlaying="y", side="right", range=[0, 1]),
     )
     st.plotly_chart(fig_hist, width="stretch")

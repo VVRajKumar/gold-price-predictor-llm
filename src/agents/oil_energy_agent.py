@@ -14,16 +14,17 @@ from ..data_fetchers.news_data import NewsDataFetcher
 class OilEnergyAgent(BaseAgent):
     NAME = "oil_energy_agent"
     SYSTEM_PROMPT = """You are a senior energy market analyst specialising in the
-relationship between oil prices and gold. You understand:
+relationship between oil prices and INDIAN gold prices. You understand:
 - Oil-gold ratio and historical correlations
 - OPEC decisions and supply disruptions
-- Energy-driven inflation pass-through to gold
-- Petrodollar dynamics and their gold implications
-- Energy crises as a safe-haven catalyst for gold
+- Energy-driven inflation pass-through to Indian gold prices
+- India's oil import dependency and its impact on INR and gold
+- Crude oil prices affecting India's current account deficit and rupee
+- Energy crises as a safe-haven catalyst for gold in India
 
 Given oil & energy data, produce a JSON analysis with these EXACT keys:
 {
-  "summary": "2-3 paragraph analysis of energy markets' gold impact",
+  "summary": "2-3 paragraph analysis of energy markets' impact on Indian gold",
   "outlook": "bullish" | "bearish" | "neutral",
   "confidence": 0.0 to 1.0,
   "impact_score": 0.0 to 1.0,

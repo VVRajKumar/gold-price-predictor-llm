@@ -12,10 +12,13 @@ from ..data_fetchers.etf_data import ETFDataFetcher
 
 class ETFFlowAgent(BaseAgent):
     NAME = "etf_flow_agent"
-    SYSTEM_PROMPT = """You are a senior ETF and fund-flow analyst specialising in Indian gold ETFs.
-You analyse Indian gold ETF trading volume (GOLDBEES, HDFCGOLD, LICNETFGOLD, SBIGETS, etc.),
-price trends, and implied fund flows to gauge institutional and retail
-demand for gold in India.  Higher ETF inflows are bullish for gold;
+    SYSTEM_PROMPT = """You are a senior ETF and fund-flow analyst specialising in Indian gold ETFs and gold mutual funds.
+You analyse Indian gold ETF trading volume and gold fund performance:
+- Gold ETFs: GOLDBEES (Nippon India), ICICIGOLD, SBIGETF, HDFCGOLD, KOTAKGOLD, TATAGOLD
+- Gold Mutual Funds: SBI Gold Fund, HDFC Gold Fund, Axis Gold Fund, Kotak Gold Fund,
+  Nippon India Gold Fund, ICICI Prudential Gold Fund
+You track price trends, volume changes, and implied fund flows to gauge institutional
+and retail demand for gold in India.  Higher ETF inflows are bullish for gold;
 outflows are bearish.
 
 Given recent Indian gold ETF data, produce a JSON analysis with these EXACT keys:
@@ -37,15 +40,20 @@ Return ONLY valid JSON, no markdown fences."""
 
     def gather_data(self) -> dict[str, Any]:
         etf_summary = self._etf.get_etf_flow_summary(period_days=30)
-        return {"etf_summary": etf_summary}
+        fund_summary = self._etf.get_fund_summary(period_days=30)
+        return {"etf_summary": etf_summary, "fund_summary": fund_summary}
 
     def analyse(self, data: dict[str, Any]) -> AgentReport:
-        prompt = f"""Analyse the following Indian gold ETF data for institutional and retail fund-flow signals.
+        prompt = f"""Analyse the following Indian gold ETF and mutual fund data for institutional and retail fund-flow signals.
 
 ## Indian Gold ETF Summary (30-day)
 {json.dumps(data.get('etf_summary', {}), indent=2)}
 
-Focus on Indian ETFs like GOLDBEES, HDFCGOLD, LICNETFGOLD, SBIGETS.
+## Indian Gold Mutual Fund Summary (30-day)
+{json.dumps(data.get('fund_summary', {}), indent=2)}
+
+Focus on Gold ETFs (GOLDBEES, ICICIGOLD, SBIGETF, HDFCGOLD, KOTAKGOLD, TATAGOLD)
+and Gold Mutual Funds for retail demand signals.
 Provide your ETF flow analysis as JSON."""
 
         raw = self._ask_llm(prompt)

@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 from .base_agent import BaseAgent, AgentReport
 from ..data_fetchers.market_data import MarketDataFetcher
+from ..data_fetchers.india_context import get_festival_context
 
 
 class HistoricalPatternAgent(BaseAgent):
@@ -84,6 +85,7 @@ Return ONLY valid JSON, no markdown fences."""
         return {
             "current_price": round(float(close.iloc[-1]), 2),
             "current_month": current_month,
+            "india_seasonal": get_festival_context(),
             "monthly_returns": monthly_returns,
             "quarterly_returns": quarterly_returns,
             "yoy_return_pct": yoy,
@@ -102,8 +104,12 @@ Return ONLY valid JSON, no markdown fences."""
 in the INDIAN gold market (INR per 10 grams).
 
 ## Historical Data
-{json.dumps(data, indent=2)}
+{json.dumps(data, indent=2, default=str)}
 
+## Current India Seasonal / Festival Context
+{json.dumps(data.get('india_seasonal', {}), indent=2)}
+
+Use the festival calendar above to determine if gold demand is currently elevated.
 Consider Indian seasonal tendencies: Akshaya Tritiya (Apr-May), Dhanteras/Diwali (Oct-Nov),
 wedding season (Oct-Feb), and monsoon impact on rural demand (Jun-Sep).
 Also consider INR depreciation trends and import duty history.

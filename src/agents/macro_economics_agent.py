@@ -9,6 +9,7 @@ from typing import Any
 from .base_agent import BaseAgent, AgentReport
 from ..data_fetchers.macro_data import MacroDataFetcher
 from ..data_fetchers.market_data import MarketDataFetcher
+from ..data_fetchers.india_context import get_india_macro_context, get_festival_context
 
 
 class MacroEconomicsAgent(BaseAgent):
@@ -105,6 +106,8 @@ Return ONLY valid JSON, no markdown fences."""
 
         return {
             "macro_summary": macro_summary,
+            "india_macro": get_india_macro_context(),
+            "india_seasonal": get_festival_context(),
             "usdinr": usdinr_info,
             "dxy_index": dxy_info,
             "nifty50": nifty_info,
@@ -114,7 +117,13 @@ Return ONLY valid JSON, no markdown fences."""
     def analyse(self, data: dict[str, Any]) -> AgentReport:
         prompt = f"""Analyse the following macroeconomic data and its implications for INDIAN gold prices (INR).
 
-## Global Macro Indicators (FRED)
+## India-Specific Macro (RBI, CPI, Import Duty)
+{json.dumps(data.get('india_macro', {}), indent=2)}
+
+## India Seasonal / Festival Context
+{json.dumps(data.get('india_seasonal', {}), indent=2)}
+
+## Global Macro Indicators (FRED – US reference, affects India via USD)
 {json.dumps(data.get('macro_summary', {}), indent=2)}
 
 ## USD/INR Exchange Rate

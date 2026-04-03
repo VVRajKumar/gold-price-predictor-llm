@@ -9,7 +9,7 @@ import yfinance as yf
 from loguru import logger
 from cachetools import TTLCache
 
-from ..config import GOLD_ETF_TICKERS, GOLD_MINER_TICKERS, HISTORICAL_LOOKBACK_DAYS
+from ..config import GOLD_ETF_TICKERS, GOLD_MINER_TICKERS, GOLD_FUND_TICKERS, HISTORICAL_LOOKBACK_DAYS
 
 _cache = TTLCache(maxsize=64, ttl=900)
 
@@ -111,6 +111,61 @@ class ETFDataFetcher:
                     else "decreasing" if avg_recent_vol < avg_older_vol * 0.9
                     else "stable"
                 ),
+            }
+
+        return summary
+
+    # ------------------------------------------------------------------ #
+    def fetch_fund_prices(
+        self, period_days: int = HISTORICAL_LOOKBACK_DAYS
+    ) -> dict[str, pd.DataFrame]:
+        """Download price history for Indian gold mutual funds."""
+        cache_key = f"funds_{period_days}"
+        if cache_key in _cache:
+            return _cache[cache_key]
+
+        end = datetime.now()
+        start = end - timedelta(days=period_days)
+        results = {}
+
+        for ticker in GOLD_FUND_TICKERS:
+            try:
+                df = yf.download(
+                    ticker,
+                    start=start.strftime("%Y-%m-%d"),
+                    end=end.strftime("%Y-%m-%d"),
+                    progress=False,
+                )
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = df.columns.droplevel(1)
+                df = df.loc[:, ~df.columns.duplicated()]
+                results[ticker] = df
+            except Exception as e:
+                logger.warning(f"Fund {ticker} fetch error: {e}")
+
+        _cache[cache_key] = results
+        return results
+
+    # ------------------------------------------------------------------ #
+    def get_fund_summary(self, period_days: int = 30) -> dict:
+        """Return NAV-based summary for gold mutual funds."""
+        fund_data = self.fetch_fund_prices(period_days)
+        summary = {}
+
+        for ticker, df in fund_data.items():
+            if df.empty or len(df) < 2:
+                continue
+
+            close = df["Close"].squeeze()
+            price_change = (
+                (float(close.iloc[-1]) - float(close.iloc[0]))
+                / float(close.iloc[0])
+                * 100
+            )
+
+            summary[ticker] = {
+                "current_nav": round(float(close.iloc[-1]), 2),
+                "period_return_pct": round(price_change, 2),
             }
 
         return summary

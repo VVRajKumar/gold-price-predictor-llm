@@ -19,6 +19,7 @@ from ..config import (
     TEMPERATURE,
 )
 from ..time_utils import iso_now_ist
+from ..guardrails import validate_agent_report
 
 
 class AgentReport(BaseModel):
@@ -79,10 +80,26 @@ class BaseAgent(ABC):
 
     # ------------------------------------------------------------------ #
     def run(self) -> AgentReport:
-        """Convenience: gather → analyse in one call."""
+        """Convenience: gather → analyse → guardrail in one call."""
         logger.info(f"[{self.NAME}] Starting run …")
         data = self.gather_data()
         report = self.analyse(data)
+
+        # ── Guardrail: validate & correct agent output ──
+        corrected = validate_agent_report(
+            {
+                "outlook": report.outlook,
+                "confidence": report.confidence,
+                "impact_score": report.impact_score,
+                "prediction_bias": report.prediction_bias,
+            },
+            agent_name=self.NAME,
+        )
+        report.outlook = corrected["outlook"]
+        report.confidence = corrected["confidence"]
+        report.impact_score = corrected["impact_score"]
+        report.prediction_bias = corrected["prediction_bias"]
+
         logger.info(
             f"[{self.NAME}] Done – outlook={report.outlook}, "
             f"confidence={report.confidence:.2f}, bias={report.prediction_bias:+.2f}"

@@ -28,6 +28,7 @@ from .config import (
 from .orchestrator import Orchestrator, PredictionPlan
 from .data_fetchers.market_data import MarketDataFetcher
 from .accuracy_tracker import AccuracyTracker
+from .guardrails import validate_xgb_predictions, validate_price_series
 from .time_utils import iso_now_ist
 
 
@@ -204,6 +205,13 @@ class PredictionEngine:
                 return []
 
             values = close.to_numpy(dtype=float)
+
+            # ── Guardrail: validate training data integrity ──
+            values_list = validate_price_series(values.tolist(), "xgb_training")
+            if len(values_list) < 120:
+                logger.warning("XGBoost: insufficient valid training data after cleanup")
+                return []
+            values = np.array(values_list, dtype=float)
             X_rows: list[np.ndarray] = []
             y_rows: list[float] = []
             min_hist = 25
@@ -254,6 +262,12 @@ class PredictionEngine:
                     "xgb_high": round(pred_inr + band, 2),
                 })
                 history.append(pred_usd)
+
+            # ── Guardrail: validate XGBoost predictions ──
+            current_inr = current_price_inr = self._market.get_gold_inr_price()
+            if not (isinstance(current_inr, (int, float)) and np.isfinite(current_inr) and current_inr > 0):
+                current_inr = preds[0]["xgb_price"] if preds else 70000.0
+            preds = validate_xgb_predictions(preds, current_inr)
 
             return preds
         except Exception as e:

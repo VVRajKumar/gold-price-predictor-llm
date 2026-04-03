@@ -33,6 +33,7 @@ from .agents.sentiment_agent import SentimentAgent
 from .agents.technical_agent import TechnicalAnalysisAgent
 from .agents.historical_pattern_agent import HistoricalPatternAgent
 from .data_fetchers.market_data import MarketDataFetcher
+from .guardrails import validate_prediction_plan, adjust_confidence_from_track_record
 from .time_utils import iso_now_ist, now_ist
 
 
@@ -326,6 +327,39 @@ Synthesise all of the above and produce your hourly prediction plan for Indian g
         )
 
     # ------------------------------------------------------------------ #
+    def _get_recent_mape(self) -> float | None:
+        """Read recent MAPE from accuracy log (if available)."""
+        log_path = Path(CACHE_DIR) / "accuracy_log.json"
+        try:
+            if not log_path.exists():
+                return None
+            entries = json.loads(log_path.read_text(encoding="utf-8"))
+            if not isinstance(entries, list) or not entries:
+                return None
+            recent = entries[-5:]
+            mapes = [e.get("aggregate", {}).get("mape") for e in recent if e.get("aggregate")]
+            mapes = [m for m in mapes if m is not None]
+            return sum(mapes) / len(mapes) if mapes else None
+        except Exception:
+            return None
+
+    def _get_recent_band_hit_rate(self) -> float | None:
+        """Read recent band hit rate from accuracy log (if available)."""
+        log_path = Path(CACHE_DIR) / "accuracy_log.json"
+        try:
+            if not log_path.exists():
+                return None
+            entries = json.loads(log_path.read_text(encoding="utf-8"))
+            if not isinstance(entries, list) or not entries:
+                return None
+            recent = entries[-5:]
+            rates = [e.get("aggregate", {}).get("band_hit_rate") for e in recent if e.get("aggregate")]
+            rates = [r for r in rates if r is not None]
+            return sum(rates) / len(rates) if rates else None
+        except Exception:
+            return None
+
+    # ------------------------------------------------------------------ #
     def generate_prediction(self) -> PredictionPlan:
         """Full pipeline: agents → meta-reasoning → PredictionPlan."""
         logger.info("=== Orchestrator: starting full prediction cycle ===")
@@ -381,7 +415,17 @@ Synthesise all of the above and produce your hourly prediction plan for Indian g
                 "bear_case": "",
             }
 
-        # 4. Build PredictionPlan
+        # 4. ── Guardrail: validate meta-LLM output ──
+        result = validate_prediction_plan(result, current_price, PREDICTION_HOURS)
+
+        # 5. ── Guardrail: track-record confidence adjustment ──
+        result["overall_confidence"] = adjust_confidence_from_track_record(
+            result["overall_confidence"],
+            mape=self._get_recent_mape(),
+            band_hit_rate=self._get_recent_band_hit_rate(),
+        )
+
+        # 6. Build PredictionPlan
         daily = []
         for dp in result.get("daily_predictions", []):
             try:

@@ -67,7 +67,7 @@ class PredictionEngine:
 
     @property
     def _reset_marker_path(self) -> Path:
-        return CACHE_DIR / "weekly_workflow_reset_v1.marker"
+        return CACHE_DIR / "weekly_workflow_reset_v2.marker"
 
     def _week_id(self, ts: str) -> str:
         dt = datetime.fromisoformat(ts)
@@ -119,6 +119,12 @@ class PredictionEngine:
                 plan = PredictionPlan(**data)
                 if not np.isfinite(plan.current_price) or plan.current_price <= 0:
                     logger.warning("Ignoring cached prediction plan with invalid current_price")
+                elif plan.current_price < 30_000:
+                    # Price is clearly not in INR/10g scale (likely stale USD-era cache)
+                    logger.warning(
+                        f"Cached plan current_price ₹{plan.current_price:,.2f} is below "
+                        f"₹30,000 – likely stale USD-era cache; discarding"
+                    )
                 else:
                     self._current_plan = plan
                     logger.info("Loaded cached prediction plan")

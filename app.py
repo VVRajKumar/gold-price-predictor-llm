@@ -344,18 +344,13 @@ if plan.daily_predictions:
         x=pred_df["date"], y=pred_df["predicted_price"],
         mode="lines+markers", name="Predicted",
         line=dict(color="#00d4aa", width=3),
-        marker=dict(size=8),
+        marker=dict(size=10, symbol="circle"),
     ))
 
     fig.update_layout(
         template="plotly_dark", height=500,
         yaxis_title="Price (₹/10g)",
         xaxis_title="Time",
-        xaxis=dict(
-            dtick=3600000,  # 1 hour in ms — tick every hour
-            tickformat="%b %d\n%H:%M",
-            rangebreaks=[dict(bounds=["sat", "mon"])],
-        ),
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
         hovermode="x unified",
     )

@@ -20,6 +20,7 @@ from loguru import logger
 from .config import CACHE_DIR
 from .data_fetchers.market_data import MarketDataFetcher
 from .time_utils import iso_now_ist, now_ist
+from . import cloud_storage
 
 
 _ACCURACY_PATH = CACHE_DIR / "accuracy_log.json"
@@ -47,12 +48,12 @@ class AccuracyTracker:
                 return json.loads(_ACCURACY_PATH.read_text(encoding="utf-8"))
             except Exception:
                 return []
-        return []
+        # Fallback: try restoring from cloud
+        data = cloud_storage.load("accuracy_log.json")
+        return data if isinstance(data, list) else []
 
     def _save_log(self):
-        _ACCURACY_PATH.write_text(
-            json.dumps(self._log, indent=2, default=str), encoding="utf-8"
-        )
+        cloud_storage.persist("accuracy_log.json", self._log)
 
     def _load_stored_plans(self) -> list[dict]:
         if _PLANS_STORE_PATH.exists():
@@ -60,12 +61,12 @@ class AccuracyTracker:
                 return json.loads(_PLANS_STORE_PATH.read_text(encoding="utf-8"))
             except Exception:
                 return []
-        return []
+        # Fallback: try restoring from cloud
+        data = cloud_storage.load("stored_plans.json")
+        return data if isinstance(data, list) else []
 
     def _save_stored_plans(self):
-        _PLANS_STORE_PATH.write_text(
-            json.dumps(self._stored_plans, indent=2, default=str), encoding="utf-8"
-        )
+        cloud_storage.persist("stored_plans.json", self._stored_plans)
 
     # ── Store a plan for future evaluation ───────────────────────────
 

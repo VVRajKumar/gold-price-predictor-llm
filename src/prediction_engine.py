@@ -29,6 +29,7 @@ from .orchestrator import Orchestrator, PredictionPlan
 from .data_fetchers.market_data import MarketDataFetcher
 from .accuracy_tracker import AccuracyTracker
 from .guardrails import validate_xgb_predictions, validate_price_series
+from . import cloud_storage
 from .time_utils import iso_now_ist
 
 
@@ -36,6 +37,9 @@ class PredictionEngine:
     """Manages the prediction lifecycle: generate, cache, schedule, serve."""
 
     def __init__(self):
+        # Restore persisted accuracy data from cloud before anything reads cache
+        cloud_storage.sync_from_cloud()
+
         self._orchestrator = Orchestrator()
         self._market = MarketDataFetcher()
         self._accuracy: Optional[AccuracyTracker] = None

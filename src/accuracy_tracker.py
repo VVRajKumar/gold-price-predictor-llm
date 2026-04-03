@@ -96,8 +96,8 @@ class AccuracyTracker:
         generated_at = plan_dict.get("generated_at", "")
         current_price = plan_dict.get("current_price", 0)
 
-        # Fetch recent actual gold prices
-        gold_df = self._market.fetch_ticker("GC=F", period_days=30)
+        # Fetch recent actual gold prices on hourly candles
+        gold_df = self._market.fetch_ticker("GC=F", period_days=10, interval="1h")
         if gold_df.empty:
             return None
 
@@ -105,16 +105,19 @@ class AccuracyTracker:
         if isinstance(close, pd.DataFrame):
             close = close.iloc[:, 0]
 
-        today = now_ist().date()
+        now_ts = now_ist().replace(minute=0, second=0, microsecond=0).replace(tzinfo=None)
         evaluated_days = []
 
         for dp in preds:
-            pred_date = pd.to_datetime(dp["date"]).date()
-            if pred_date >= today:
-                continue  # future day, can't evaluate yet
+            pred_ts = pd.to_datetime(dp["date"], errors="coerce")
+            if pd.isna(pred_ts):
+                continue
+            pred_ts = pred_ts.tz_localize(None) if getattr(pred_ts, "tzinfo", None) is not None else pred_ts
+            if pred_ts >= now_ts:
+                continue  # future hour, can't evaluate yet
 
-            # Find actual close for that date (or nearest prior trading day)
-            actual = self._get_actual_price(close, pred_date)
+            # Find actual close for the prediction hour (or nearest prior hour)
+            actual = self._get_actual_price(close, pred_ts)
             if actual is None:
                 continue
 
@@ -127,7 +130,7 @@ class AccuracyTracker:
             within_band = low <= actual <= high
 
             evaluated_days.append({
-                "date": str(pred_date),
+                "date": pred_ts.strftime("%Y-%m-%d %H:%M:%S"),
                 "predicted": round(predicted, 2),
                 "actual": round(actual, 2),
                 "low_range": round(low, 2),
@@ -186,9 +189,9 @@ class AccuracyTracker:
         return result
 
     def _get_actual_price(self, close_series: pd.Series, target_date) -> Optional[float]:
-        """Get the closing price for a date, checking +/- 2 days for weekends."""
-        for offset in range(0, 4):
-            check = target_date - timedelta(days=offset)
+        """Get the close for a target hour, checking prior hours for missing bars."""
+        for offset in range(0, 13):
+            check = target_date - timedelta(hours=offset)
             idx = pd.Timestamp(check)
             if idx in close_series.index:
                 val = close_series.loc[idx]

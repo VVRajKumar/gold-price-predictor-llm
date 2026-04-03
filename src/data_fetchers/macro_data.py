@@ -20,8 +20,7 @@ class MacroDataFetcher:
         self._api_key = FRED_API_KEY
 
     _SERIES_FALLBACKS = {
-        # GOLDAMGBD228NLBM intermittently returns 400 for some ranges/accounts.
-        "gold_fixing_price": ["IR14270", "GOLDAMGBD228NLBM", "GOLDPMGBD228NLBM"],
+        # Reserved for series-specific fallback handling.
     }
 
     # ------------------------------------------------------------------ #

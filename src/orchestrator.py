@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from typing import Any
@@ -20,7 +21,7 @@ from pydantic import BaseModel, Field
 from .config import (
     AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY,
     AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION,
-    TEMPERATURE, PREDICTION_DAYS,
+    TEMPERATURE, PREDICTION_HOURS, CACHE_DIR,
 )
 from .agents.base_agent import AgentReport
 from .agents.geopolitics_agent import GeopoliticsAgent
@@ -68,7 +69,7 @@ sentiment, technical analysis, historical patterns).
 Your job is to:
 1. Weigh each analyst's findings by their confidence AND impact score.
 2. Identify consensus and disagreements.
-3. Produce a precise 7-day rolling prediction with price targets and confidence bands.
+3. Produce a precise hourly rolling prediction with price targets and confidence bands.
 4. Explain the bull case and bear case.
 5. List the top risk factors that could invalidate the prediction.
 
@@ -79,14 +80,14 @@ Return ONLY valid JSON with these EXACT keys (no markdown fences):
   "executive_summary": "3-4 paragraph synthesis of all agent findings",
   "daily_predictions": [
     {
-      "date": "YYYY-MM-DD",
+    "date": "YYYY-MM-DD HH:00",
       "predicted_price": float,
       "low_range": float,
       "high_range": float,
       "confidence": 0.0 to 1.0,
-      "key_driver": "what drives this day's move"
+            "key_driver": "what drives this hour's move"
     },
-    ... (7 entries total, one per day starting tomorrow)
+        ... (exactly one entry per hour for the next horizon, starting from next full hour)
   ],
   "risk_factors": ["risk 1", "risk 2", ...],
   "bull_case": "paragraph describing the bullish scenario",
@@ -255,8 +256,9 @@ class Orchestrator:
     # ------------------------------------------------------------------ #
     def _build_meta_prompt(self, reports: list[AgentReport], current_price: float) -> str:
         """Assemble the meta-reasoning prompt from all agent reports."""
-        tomorrow = now_ist() + timedelta(days=1)
-        dates = [(tomorrow + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(PREDICTION_DAYS)]
+        this_hour = now_ist().replace(minute=0, second=0, microsecond=0)
+        start_hour = this_hour + timedelta(hours=1)
+        dates = [(start_hour + timedelta(hours=i)).strftime("%Y-%m-%d %H:00") for i in range(PREDICTION_HOURS)]
 
         agent_summaries = []
         for r in reports:
@@ -272,11 +274,52 @@ class Orchestrator:
         return f"""Current gold price: ${current_price:.2f}
 Prediction dates needed: {', '.join(dates)}
 
+## Recent Forecast Error Feedback
+{self._build_feedback_context()}
+
 ## Agent Reports
 
 {''.join(agent_summaries)}
 
-Synthesise all of the above and produce your 7-day prediction plan as JSON."""
+Synthesise all of the above and produce your hourly prediction plan as JSON."""
+
+    def _build_feedback_context(self) -> str:
+        """Summarise recent forecast misses so the next run can self-correct."""
+        log_path = Path(CACHE_DIR) / "accuracy_log.json"
+        if not log_path.exists():
+            return "No prior evaluation data available."
+
+        try:
+            entries = json.loads(log_path.read_text(encoding="utf-8"))
+        except Exception:
+            return "Prior evaluation data unreadable."
+
+        if not isinstance(entries, list) or not entries:
+            return "No prior evaluation data available."
+
+        recent = entries[-8:]
+        signed_errors: list[float] = []
+        abs_pct_errors: list[float] = []
+        for ev in recent:
+            for item in ev.get("daily_results", []) or []:
+                try:
+                    signed_errors.append(float(item.get("error", 0.0)))
+                    abs_pct_errors.append(abs(float(item.get("pct_error", 0.0))))
+                except Exception:
+                    continue
+
+        if not signed_errors:
+            return "No prior evaluation data available."
+
+        mean_signed = sum(signed_errors) / len(signed_errors)
+        mean_abs_pct = sum(abs_pct_errors) / len(abs_pct_errors) if abs_pct_errors else 0.0
+        tendency = "over-predicting" if mean_signed > 0 else "under-predicting"
+        return (
+            f"Recent evaluated plans: {len(recent)}. "
+            f"Average signed error: {mean_signed:+.2f} USD ({tendency}). "
+            f"Average absolute percentage error: {mean_abs_pct:.2f}%. "
+            "Use this as calibration feedback for the next-hour forecast."
+        )
 
     # ------------------------------------------------------------------ #
     def generate_prediction(self) -> PredictionPlan:
@@ -340,6 +383,37 @@ Synthesise all of the above and produce your 7-day prediction plan as JSON."""
                 daily.append(DayPrediction(**dp))
             except Exception:
                 pass
+
+        # Normalise to fixed hourly horizon even when LLM returns fewer/misaligned rows.
+        start_hour = now_ist().replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        target_times = [start_hour + timedelta(hours=i) for i in range(PREDICTION_HOURS)]
+        normalised: list[DayPrediction] = []
+        for i, ts in enumerate(target_times):
+            src = daily[i] if i < len(daily) else (daily[-1] if daily else None)
+            if src is None:
+                base = current_price
+                normalised.append(
+                    DayPrediction(
+                        date=ts.strftime("%Y-%m-%d %H:00"),
+                        predicted_price=round(base, 2),
+                        low_range=round(base * 0.995, 2),
+                        high_range=round(base * 1.005, 2),
+                        confidence=0.4,
+                        key_driver="Fallback hourly baseline",
+                    )
+                )
+            else:
+                normalised.append(
+                    DayPrediction(
+                        date=ts.strftime("%Y-%m-%d %H:00"),
+                        predicted_price=float(src.predicted_price),
+                        low_range=float(src.low_range),
+                        high_range=float(src.high_range),
+                        confidence=float(src.confidence),
+                        key_driver=str(src.key_driver),
+                    )
+                )
+        daily = normalised
 
         plan = PredictionPlan(
             current_price=current_price,

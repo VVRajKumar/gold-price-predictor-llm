@@ -240,11 +240,11 @@ with c3:
     st.metric("Confidence", f"{plan.overall_confidence:.0%}")
 with c4:
     if plan.daily_predictions:
-        day7 = plan.daily_predictions[-1]
-        delta = day7.predicted_price - plan.current_price
-        st.metric("7-Day Target", f"${day7.predicted_price:,.2f}", f"{delta:+,.2f}")
+        horizon_target = plan.daily_predictions[-1]
+        delta = horizon_target.predicted_price - plan.current_price
+        st.metric("24-Hour Target", f"${horizon_target.predicted_price:,.2f}", f"{delta:+,.2f}")
     else:
-        st.metric("7-Day Target", "N/A")
+        st.metric("24-Hour Target", "N/A")
 with c5:
     try:
         st.metric("Last Updated", parse_iso_to_ist(plan.generated_at).strftime("%H:%M %b %d"))
@@ -257,32 +257,32 @@ st.divider()
 with st.expander("📋 Executive Summary", expanded=True):
     st.markdown(plan.executive_summary)
 
-# ── 7-Day Prediction Chart ──────────────────────────────────────────
-st.subheader("📅 7-Day Price Prediction")
+# ── Hourly Prediction Chart ──────────────────────────────────────────
+st.subheader("🕐 Next 24-Hour Price Prediction")
 
 if plan.daily_predictions:
     pred_df = pd.DataFrame([dp.model_dump() for dp in plan.daily_predictions])
     pred_df["date"] = pd.to_datetime(pred_df["date"])
 
-    # Also get recent actuals
-    gold_recent = market.fetch_ticker("GC=F", period_days=30)
+    # Also get recent hourly actuals
+    gold_recent = market.fetch_ticker("GC=F", period_days=5, interval="1h")
 
     fig = go.Figure()
 
     # Historical prices
     if not gold_recent.empty:
         close_series = pd.to_numeric(gold_recent["Close"], errors="coerce").dropna()
-        # Reindex to calendar days so weekends/holidays are visible on the timeline.
+        # Reindex hourly so missing bars do not break the timeline.
         if not close_series.empty:
             chart_end = close_series.index.max()
             pred_start = pred_df["date"].min() if not pred_df.empty else chart_end
             if pd.notna(pred_start):
-                chart_end = max(chart_end, pred_start - pd.Timedelta(days=1))
+                chart_end = max(chart_end, pred_start - pd.Timedelta(hours=1))
 
             daily_idx = pd.date_range(
                 start=close_series.index.min(),
                 end=chart_end,
-                freq="D",
+                freq="h",
             )
             close_series = close_series.reindex(daily_idx).ffill()
 
@@ -316,7 +316,7 @@ if plan.daily_predictions:
     fig.update_layout(
         template="plotly_dark", height=500,
         yaxis_title="Price (USD)",
-        xaxis_title="Date",
+        xaxis_title="Time",
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
         hovermode="x unified",
     )
@@ -597,11 +597,11 @@ if not is_streamlit_cloud:
                     trend_data = []
                     for ev in all_evals:
                         try:
-                            gen_at = parse_iso_to_ist(ev["plan_generated_at"]).strftime("%Y-%m-%d %H:%M")
+                            gen_dt = parse_iso_to_ist(ev["plan_generated_at"])
                         except Exception:
-                            gen_at = str(ev.get("plan_generated_at", ""))[:16]
+                            gen_dt = pd.to_datetime(ev.get("plan_generated_at", ""), errors="coerce")
                         trend_data.append({
-                            "Generated At": gen_at,
+                            "Generated At": gen_dt,
                             "Days Checked": ev["days_evaluated"],
                             "MAE ($)": ev["mae"],
                             "MAPE (%)": ev["mape"],
@@ -609,6 +609,8 @@ if not is_streamlit_cloud:
                             "Direction (%)": ev["directional_accuracy"],
                         })
                     trend_df = pd.DataFrame(trend_data)
+                    trend_df = trend_df.dropna(subset=["Generated At"]).sort_values("Generated At")
+                    trend_df["Generated At Display"] = trend_df["Generated At"].dt.strftime("%Y-%m-%d %H:%M:%S")
 
                     fig_trend = go.Figure()
                     fig_trend.add_trace(go.Scatter(
@@ -630,11 +632,17 @@ if not is_streamlit_cloud:
                         title="Accuracy Trend Over Time",
                         template="plotly_dark", height=350,
                         yaxis_title="Percentage",
+                        xaxis=dict(type="date", tickformat="%b %d\n%H:%M"),
                         legend=dict(orientation="h", yanchor="bottom", y=1.02),
                     )
                     st.plotly_chart(fig_trend, width="stretch")
 
-                    st.dataframe(trend_df, width="stretch", hide_index=True)
+                    st.dataframe(
+                        trend_df[["Generated At Display", "Days Checked", "MAE ($)", "MAPE (%)", "Band Hit (%)", "Direction (%)"]]
+                        .rename(columns={"Generated At Display": "Generated At"}),
+                        width="stretch",
+                        hide_index=True,
+                    )
 
         else:
             st.info(

@@ -16,7 +16,13 @@ import pandas as pd
 import numpy as np
 from loguru import logger
 
-from .config import CACHE_DIR, REFRESH_INTERVAL_MINUTES, PREDICTION_DAYS
+from .config import (
+    CACHE_DIR,
+    REFRESH_INTERVAL_MINUTES,
+    PREDICTION_HOURS,
+    PLAN_REFRESH_HOURS,
+    FORECAST_GRANULARITY,
+)
 from .orchestrator import Orchestrator, PredictionPlan
 from .data_fetchers.market_data import MarketDataFetcher
 from .accuracy_tracker import AccuracyTracker
@@ -150,6 +156,10 @@ class PredictionEngine:
 
     def _prophet_baseline(self) -> list[dict]:
         """Generate a simple Prophet forecast as a sanity-check baseline."""
+        if FORECAST_GRANULARITY.lower() == "hourly":
+            # Daily Prophet baseline is not aligned with hourly horizon.
+            return []
+
         try:
             from prophet import Prophet
 
@@ -168,9 +178,9 @@ class PredictionEngine:
             )
             model.fit(pdf)
 
-            future = model.make_future_dataframe(periods=PREDICTION_DAYS)
+            future = model.make_future_dataframe(periods=PREDICTION_HOURS)
             forecast = model.predict(future)
-            preds = forecast.tail(PREDICTION_DAYS)
+            preds = forecast.tail(PREDICTION_HOURS)
 
             return [
                 {
@@ -217,13 +227,20 @@ class PredictionEngine:
 
             return plan
 
-    def ensure_weekly_prediction(self) -> Optional[PredictionPlan]:
-        """Return the current-week plan, creating one if missing/new week."""
+    def ensure_hourly_prediction(self) -> Optional[PredictionPlan]:
+        """Return an active plan, refreshing automatically when it gets stale by hour."""
         with self._lock:
-            self._archive_previous_week_if_needed()
+            stale = self._current_plan is None
+            if self._current_plan is not None and not stale:
+                try:
+                    gen_dt = datetime.fromisoformat(self._current_plan.generated_at)
+                    now_dt = datetime.fromisoformat(iso_now_ist())
+                    stale = (now_dt - gen_dt).total_seconds() >= PLAN_REFRESH_HOURS * 3600
+                except Exception:
+                    stale = True
 
-            if self._current_plan is None:
-                logger.info("No active weekly plan found — generating a new weekly prediction")
+            if stale:
+                logger.info("No active hourly plan found (or stale) — generating new prediction")
                 plan = self._orchestrator.generate_prediction()
 
                 baseline = self._prophet_baseline()
@@ -241,9 +258,13 @@ class PredictionEngine:
                     tracker = self.get_accuracy_tracker()
                     tracker.store_plan(json.loads(plan.model_dump_json()))
                 except Exception as e:
-                    logger.warning(f"Could not store weekly plan for accuracy: {e}")
+                    logger.warning(f"Could not store hourly plan for accuracy: {e}")
 
             return self._current_plan
+
+    def ensure_weekly_prediction(self) -> Optional[PredictionPlan]:
+        """Backward-compatible wrapper retained for existing callers."""
+        return self.ensure_hourly_prediction()
 
     def get_current_plan(self) -> Optional[PredictionPlan]:
         return self._current_plan

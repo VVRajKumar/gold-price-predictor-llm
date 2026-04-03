@@ -43,7 +43,9 @@ TEMPERATURE = float(os.getenv("TEMPERATURE", "0.0"))
 
 # ── System Settings ─────────────────────────────────────────────────
 REFRESH_INTERVAL_MINUTES = int(os.getenv("REFRESH_INTERVAL_MINUTES", "30"))
-PREDICTION_DAYS = 7
+FORECAST_GRANULARITY = os.getenv("FORECAST_GRANULARITY", "hourly")
+PREDICTION_HOURS = int(os.getenv("PREDICTION_HOURS", "24"))
+PLAN_REFRESH_HOURS = int(os.getenv("PLAN_REFRESH_HOURS", "1"))
 HISTORICAL_LOOKBACK_DAYS = 365
 
 # ── Ticker Symbols ──────────────────────────────────────────────────
@@ -66,5 +68,4 @@ FRED_SERIES = {
     "us_debt": "GFDEBTN",
     "m2_money_supply": "M2SL",
     "inflation_expectation": "T5YIE",
-    "gold_fixing_price": "IR14270",
 }

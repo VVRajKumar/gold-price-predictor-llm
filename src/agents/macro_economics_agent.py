@@ -44,9 +44,10 @@ Return ONLY valid JSON, no markdown fences."""
 
     def gather_data(self) -> dict[str, Any]:
         macro_summary = self._macro.get_macro_summary()
-        # Also get DXY and Treasury yield snapshot
+        # Also get DXY, Treasury yield, and COMEX gold futures snapshot
         dxy_df = self._market.fetch_ticker("DX-Y.NYB", period_days=90)
         tnx_df = self._market.fetch_ticker("^TNX", period_days=90)
+        comex_df = self._market.fetch_ticker("GC=F", period_days=30)
 
         dxy_info = {}
         if not dxy_df.empty:
@@ -70,10 +71,21 @@ Return ONLY valid JSON, no markdown fences."""
                 ),
             }
 
+        comex_info = {}
+        if not comex_df.empty:
+            close = comex_df["Close"].squeeze()
+            comex_info = {
+                "symbol": "GC=F",
+                "current": round(float(close.iloc[-1]), 2),
+                "7d_change": round(float(close.iloc[-1]) - float(close.iloc[-min(7, len(close))]), 2),
+                "30d_change": round(float(close.iloc[-1]) - float(close.iloc[0]), 2),
+            }
+
         return {
             "macro_summary": macro_summary,
             "usd_index": dxy_info,
             "treasury_10y": tnx_info,
+            "comex_gold": comex_info,
         }
 
     def analyse(self, data: dict[str, Any]) -> AgentReport:
@@ -87,6 +99,9 @@ Return ONLY valid JSON, no markdown fences."""
 
 ## 10-Year Treasury Yield
 {json.dumps(data.get('treasury_10y', {}), indent=2)}
+
+## COMEX Gold Futures (GC=F)
+{json.dumps(data.get('comex_gold', {}), indent=2)}
 
 Provide your macro analysis as JSON."""
 
@@ -113,6 +128,7 @@ Provide your macro analysis as JSON."""
                 "usd_outlook": result.get("usd_outlook", "stable"),
                 **data.get("usd_index", {}),
                 **data.get("treasury_10y", {}),
+                **data.get("comex_gold", {}),
             },
             raw_llm_response=raw,
         )

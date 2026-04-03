@@ -297,14 +297,14 @@ if plan.daily_predictions:
     pred_df = pd.DataFrame([dp.model_dump() for dp in plan.daily_predictions])
     pred_df["date"] = pd.to_datetime(pred_df["date"])
 
-    # Also get recent hourly actuals (converted to INR/10g)
-    gold_recent = market.fetch_ticker("GC=F", period_days=5, interval="1h")
+    # Reuse the already-converted INR data from the OHLC chart above
+    # (avoids a second fetch+convert which can double-convert on Cloud)
+    gold_recent = gold_df.copy() if not gold_df.empty else pd.DataFrame()
 
     fig = go.Figure()
 
-    # Historical prices (convert to INR/10g using time-aligned daily FX rates)
+    # Historical prices (already in INR/10g from the OHLC section)
     if not gold_recent.empty:
-        gold_recent = market.convert_usd_to_inr(gold_recent, period_days=10)
         close_series = pd.to_numeric(gold_recent["Close"], errors="coerce").dropna()
         # Reindex hourly so missing bars do not break the timeline.
         if not close_series.empty:

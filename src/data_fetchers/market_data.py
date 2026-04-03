@@ -46,8 +46,9 @@ class MarketDataFetcher:
             return _cache[cache_key].copy()
 
         # Use UTC calendar dates so localhost and Streamlit Cloud fetch the same 1d candle window.
-        end_date = datetime.utcnow().date()
-        start_date = end_date - timedelta(days=period_days)
+        # yfinance 'end' is exclusive, so add 1 day to include today's candles.
+        end_date = datetime.utcnow().date() + timedelta(days=1)
+        start_date = end_date - timedelta(days=period_days + 1)
         logger.info(f"Fetching {ticker} from {start_date} to {end_date}")
 
         try:

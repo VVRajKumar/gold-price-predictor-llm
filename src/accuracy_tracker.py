@@ -39,6 +39,35 @@ class AccuracyTracker:
         self._stored_plans: list[dict] = self._load_stored_plans()
         self._last_checked: Optional[str] = None
         self._auto_running = False
+        self._purge_stale_entries()
+
+    # ── Purge pre-INR / pre-cutoff entries ───────────────────────────
+
+    def _purge_stale_entries(self):
+        """Remove accuracy log entries from before the INR migration cutoff
+        or with predictions in USD scale (< ₹30,000)."""
+        before = len(self._log)
+        self._log = [
+            e for e in self._log
+            if self._is_valid_entry(e)
+        ]
+        if len(self._log) < before:
+            logger.info(f"Purged {before - len(self._log)} stale accuracy entries")
+            self._save_log()
+
+    def _is_valid_entry(self, entry: dict) -> bool:
+        gen = entry.get("plan_generated_at", "")
+        try:
+            gen_dt = datetime.fromisoformat(str(gen))
+            if gen_dt.replace(tzinfo=None) < _HOURLY_SCORECARD_START:
+                return False
+        except (ValueError, TypeError):
+            return False
+        # Also reject entries with USD-scale predictions
+        for d in entry.get("daily_results", []):
+            if d.get("predicted", 0) < 30000:
+                return False
+        return True
 
     # ── Persistence ──────────────────────────────────────────────────
 

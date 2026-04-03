@@ -186,13 +186,26 @@ def validate_prediction_plan(
             high = round(pred + half, 2)
             corrections.append(f"hour {i}: band too wide → capped to ±{max_band/2:.0f}")
 
+        # ── Confidence decay: later hours → lower confidence ──
+        # Hours 1-6: no decay, 7-12: mild decay, 13-24: stronger decay
+        horizon_decay = 0.0
+        if i >= 12:
+            horizon_decay = 0.03 * (i - 11)  # e.g. hour 24 → 0.39
+        elif i >= 6:
+            horizon_decay = 0.015 * (i - 5)   # e.g. hour 12 → 0.105
+        dp_conf = min(dp_conf, max(0.3, dp_conf - horizon_decay))
+
         # ── Overconfidence for individual hours ──
         if dp_conf > _OVERCONFIDENCE_THRESHOLD:
             dp_conf = dp_conf - _CONFIDENCE_PENALTY
 
+        # ── Band widening over horizon ──
+        # Uncertainty grows with forecast distance: widen bands for later hours
+        horizon_widen = 1.0 + 0.04 * i  # hour 0→1.0x, hour 12→1.48x, hour 24→1.96x
+
         dp["predicted_price"] = round(pred, 2)
-        dp["low_range"] = round(low, 2)
-        dp["high_range"] = round(high, 2)
+        dp["low_range"] = round(pred - (pred - low) * horizon_widen, 2)
+        dp["high_range"] = round(pred + (high - pred) * horizon_widen, 2)
         dp["confidence"] = round(dp_conf, 3)
         validated_preds.append(dp)
 

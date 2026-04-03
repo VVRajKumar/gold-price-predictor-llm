@@ -78,6 +78,17 @@ Your job is to:
 5. Explain the bull case and bear case for Indian gold.
 6. List the top risk factors that could invalidate the prediction.
 
+CRITICAL REALISM RULES for hourly predictions:
+- Gold does NOT move monotonically. Include realistic pullbacks, consolidations, and
+  reversals within the 24h horizon (e.g., a bullish outlook may still have 2-3 dip hours).
+- Avoid uniform increments. Real price moves cluster around news events and market opens
+  (MCX 9am IST, COMEX 8:20pm IST). Some hours should be flat or slightly contrarian.
+- Confidence MUST decay with horizon: hours 1-6 can be 0.70-0.85, hours 7-12 should
+  drop to 0.55-0.70, hours 13-24 should be 0.40-0.60. The future is uncertain.
+- Widen bands for later hours. Hour 1 band ±₹200-₹400, hour 24 band ±₹600-₹1200.
+- Each hour's key_driver should reflect what is ACTUALLY driving that specific hour
+  (market session, data release, technical level), not recycle the same 5 reasons.
+
 Return ONLY valid JSON with these EXACT keys (no markdown fences):
 {
   "overall_outlook": "bullish" | "bearish" | "neutral",

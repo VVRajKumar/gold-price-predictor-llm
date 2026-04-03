@@ -239,8 +239,12 @@ class AccuracyTracker:
         return result
 
     def _get_actual_price(self, close_series: pd.Series, target_date) -> Optional[float]:
-        """Get the close for a target hour, checking prior hours for missing bars."""
-        for offset in range(0, 13):
+        """Get the close for a target hour, checking prior hours for missing bars.
+
+        Extends lookback up to 72 hours to handle weekends and market holidays
+        (e.g., Good Friday, Christmas) where no candles are available.
+        """
+        for offset in range(0, 73):
             check = target_date - timedelta(hours=offset)
             idx = pd.Timestamp(check)
             if idx in close_series.index:

@@ -677,13 +677,21 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                 )
 
     else:
-        st.info(
-            "📍 **No accuracy data yet.** Accuracy scoring requires at least one "
-            "prediction where predicted hours are now in the past. Generate a "
-            "prediction and check back after those hours to see how accurate the "
-            "system was!\n\n"
-            "The system **auto-checks every 1 hour** in the background."
+        # Show pending status with details
+        _n_plans = len(accuracy_tracker.get_stored_plans())
+        _latest_data = gold_df.index.max() if not gold_df.empty else None
+        _pending_msg = (
+            f"⏳ **Evaluation pending.** {_n_plans} prediction(s) stored and waiting "
+            f"for actual market data to compare against.\n\n"
         )
+        if _latest_data is not None:
+            _pending_msg += (
+                f"Latest market data: **{_latest_data.strftime('%Y-%m-%d %H:%M')} UTC**. "
+                f"Predictions will be scored once newer candles arrive "
+                f"(market may be closed for weekend/holiday).\n\n"
+            )
+        _pending_msg += "The system **auto-checks every 1 hour** in the background."
+        st.info(_pending_msg)
 
 else:
     st.info(

@@ -95,13 +95,72 @@ class MarketDataFetcher:
 
     # ------------------------------------------------------------------ #
     def get_usdinr_rate(self) -> float:
-        """Return latest USD/INR exchange rate, fallback to 83.5 if unavailable."""
+        """Return latest USD/INR exchange rate, fallback to 85.5 if unavailable."""
         df = self.fetch_ticker(USDINR_TICKER, period_days=7)
         if not df.empty:
             close = df["Close"].squeeze()
             if hasattr(close, "iloc") and len(close) > 0:
-                return float(close.iloc[-1])
-        return 83.5  # reasonable fallback
+                rate = float(close.iloc[-1])
+                logger.info(f"USD/INR rate: {rate:.2f}")
+                return rate
+        logger.warning("USD/INR rate unavailable, using fallback 85.5")
+        return 85.5  # updated fallback
+
+    # ------------------------------------------------------------------ #
+    def get_usdinr_series(self, period_days: int = 90, interval: str = "1d") -> pd.Series:
+        """Return a time-indexed Series of USD/INR close rates.
+
+        Used for time-aligned conversion of historical USD data to INR so each
+        candle uses the FX rate from its own trading day rather than today's
+        spot rate.
+        """
+        df = self.fetch_ticker(USDINR_TICKER, period_days=period_days, interval=interval)
+        if df.empty:
+            return pd.Series(dtype=float)
+        close = df["Close"].squeeze()
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:, 0]
+        return pd.to_numeric(close, errors="coerce").dropna()
+
+    # ------------------------------------------------------------------ #
+    def convert_usd_to_inr(
+        self,
+        usd_df: pd.DataFrame,
+        period_days: int = 90,
+        interval: str = "1d",
+    ) -> pd.DataFrame:
+        """Convert OHLC columns from USD/oz to INR/10g using time-aligned FX rates.
+
+        Each row is multiplied by the USD/INR rate from its own date/hour.
+        Falls back to the latest available rate for any gaps.
+        """
+        oz_to_10g = 10.0 / 31.1035
+        fx = self.get_usdinr_series(period_days=period_days + 30, interval=interval)
+
+        if fx.empty:
+            # Total fallback: use spot rate for everything
+            spot = self.get_usdinr_rate()
+            logger.warning(f"No FX series available; using spot {spot:.2f} for all rows")
+            for col in ("Open", "High", "Low", "Close"):
+                if col in usd_df.columns:
+                    usd_df[col] = usd_df[col] * spot * oz_to_10g
+            return usd_df
+
+        # Reindex FX to match gold data timestamps, forward-fill gaps
+        fx_aligned = fx.reindex(usd_df.index, method="ffill")
+        # For any remaining NaN at the start, back-fill
+        fx_aligned = fx_aligned.bfill()
+        # Last resort: fill with latest known rate
+        fx_aligned = fx_aligned.fillna(self.get_usdinr_rate())
+
+        for col in ("Open", "High", "Low", "Close"):
+            if col in usd_df.columns:
+                usd_df[col] = usd_df[col] * fx_aligned * oz_to_10g
+
+        logger.info(
+            f"FX conversion applied: rate range {fx_aligned.min():.2f}–{fx_aligned.max():.2f}"
+        )
+        return usd_df
 
     # ------------------------------------------------------------------ #
     def get_gold_inr_price(self, period_days: int = 7) -> float:
@@ -134,12 +193,19 @@ class MarketDataFetcher:
             logger.warning("Gold data returned but Close column has no valid values")
             return {"error": "No valid gold close prices available"}
 
-        # Convert USD/oz to INR/10g
-        usdinr = self.get_usdinr_rate()
-        factor = usdinr * 10.0 / 31.1035  # USD/oz -> INR/10g
-        close_inr = close * factor
-        high_inr = high * factor
-        low_inr = low * factor
+        # Convert USD/oz to INR/10g using time-aligned FX rates
+        fx = self.get_usdinr_series(period_days=period_days + 30)
+        if fx.empty:
+            factor = self.get_usdinr_rate() * 10.0 / 31.1035
+            close_inr = close * factor
+            high_inr = high * factor
+            low_inr = low * factor
+        else:
+            oz_to_10g = 10.0 / 31.1035
+            fx_aligned = fx.reindex(close.index, method="ffill").bfill().fillna(self.get_usdinr_rate())
+            close_inr = close * fx_aligned * oz_to_10g
+            high_inr = high * fx_aligned.reindex(high.index, method="ffill").bfill().fillna(self.get_usdinr_rate()) * oz_to_10g
+            low_inr = low * fx_aligned.reindex(low.index, method="ffill").bfill().fillna(self.get_usdinr_rate()) * oz_to_10g
 
         current = float(close_inr.iloc[-1])
         prev = float(close_inr.iloc[-2]) if len(close_inr) > 1 else current

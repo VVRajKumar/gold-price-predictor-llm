@@ -120,14 +120,11 @@ class AccuracyTracker:
         if gold_df.empty:
             return None
 
+        # Use time-aligned hourly FX rates for accurate conversion
+        gold_df = self._market.convert_usd_to_inr(gold_df, period_days=15, interval="1h")
         close = gold_df["Close"].squeeze()
         if isinstance(close, pd.DataFrame):
             close = close.iloc[:, 0]
-
-        # Convert USD/oz to INR/10g
-        usdinr = self._market.get_usdinr_rate()
-        oz_to_10g = 10.0 / 31.1035
-        close = close * usdinr * oz_to_10g
 
         now_ts = now_ist().replace(minute=0, second=0, microsecond=0).replace(tzinfo=None)
         evaluated_days = []

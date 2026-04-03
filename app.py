@@ -188,11 +188,8 @@ if not gold_df.empty:
         cutoff_ts = latest_ts - pd.Timedelta(days=90)
         gold_df = gold_df[gold_df.index >= cutoff_ts]
 
-    # Convert USD/oz to INR/10g for display
-    _usdinr_rate = market.get_usdinr_rate()
-    _oz_to_10g = 10.0 / 31.1035
-    for _col in ["Open", "High", "Low", "Close"]:
-        gold_df[_col] = gold_df[_col] * _usdinr_rate * _oz_to_10g
+    # Convert USD/oz to INR/10g using time-aligned daily FX rates
+    gold_df = market.convert_usd_to_inr(gold_df, period_days=90, interval="1d")
 
     range_start = gold_df.index.min()
     range_end = gold_df.index.max()
@@ -236,7 +233,8 @@ if plan is None:
     st.stop()
 
 # ── Top Metrics Row ──────────────────────────────────────────────────
-c1, c2, c3, c4, c5 = st.columns(5)
+_live_fx = market.get_usdinr_rate()
+c1, c2, c3, c4, c5, c6 = st.columns(6)
 with c1:
     st.metric("Current Price", f"₹{plan.current_price:,.2f}")
 with c2:
@@ -252,6 +250,8 @@ with c4:
     else:
         st.metric("24-Hour Target", "N/A")
 with c5:
+    st.metric("USD/INR Rate", f"₹{_live_fx:.2f}")
+with c6:
     try:
         st.metric("Last Updated", parse_iso_to_ist(plan.generated_at).strftime("%H:%M %b %d"))
     except Exception:
@@ -298,13 +298,10 @@ if plan.daily_predictions:
 
     fig = go.Figure()
 
-    # Historical prices (convert to INR/10g)
+    # Historical prices (convert to INR/10g using time-aligned hourly FX rates)
     if not gold_recent.empty:
+        gold_recent = market.convert_usd_to_inr(gold_recent, period_days=10, interval="1h")
         close_series = pd.to_numeric(gold_recent["Close"], errors="coerce").dropna()
-        # Convert USD/oz to INR/10g
-        _usdinr_hist = market.get_usdinr_rate()
-        _oz_to_10g_hist = 10.0 / 31.1035
-        close_series = close_series * _usdinr_hist * _oz_to_10g_hist
         # Reindex hourly so missing bars do not break the timeline.
         if not close_series.empty:
             chart_end = close_series.index.max()

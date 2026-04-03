@@ -251,6 +251,29 @@ with c5:
     except Exception:
         st.metric("Last Updated", plan.generated_at)
 
+# ── Quick Accuracy Badge (visible to all visitors) ───────────────────
+_quick_agg = accuracy_tracker.get_aggregate_stats()
+if _quick_agg and _quick_agg["total_predictions_evaluated"] > 0:
+    _mape = _quick_agg["overall_mape"]
+    _hit = _quick_agg["overall_band_hit_rate"]
+    _dir = _quick_agg["avg_directional_accuracy"]
+    _n = _quick_agg["total_predictions_evaluated"]
+    _mape_icon = "🟢" if _mape < 2 else ("🟡" if _mape < 5 else "🔴")
+    _hit_icon = "🟢" if _hit >= 70 else ("🟡" if _hit >= 50 else "🔴")
+    _dir_icon = "🟢" if _dir >= 60 else ("🟡" if _dir >= 50 else "🔴")
+    st.markdown(
+        f"""<div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);
+        border-radius:12px;padding:14px 20px;margin:10px 0;
+        border:1px solid #2d3748;display:flex;justify-content:space-around;
+        flex-wrap:wrap;gap:10px;text-align:center;">
+        <span>{_mape_icon} <b>MAPE</b> {_mape:.1f}%</span>
+        <span>{_hit_icon} <b>Band Hit</b> {_hit:.0f}%</span>
+        <span>{_dir_icon} <b>Direction</b> {_dir:.0f}%</span>
+        <span>📊 <b>{_n}</b> hours scored</span>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+
 st.divider()
 
 # ── Executive Summary ────────────────────────────────────────────────
@@ -435,223 +458,212 @@ if plan.risk_factors:
         st.markdown(f"**{i}.** {risk}")
 
 is_streamlit_cloud = str(ROOT).replace("\\", "/").startswith("/mount/src/")
-if not is_streamlit_cloud:
-    st.divider()
+st.divider()
 
 # ════════════════════════════════════════════════════════════════════
 # PREDICTION ACCURACY SCORECARD
 # ════════════════════════════════════════════════════════════════════
 history = engine.get_plan_history()
-if not is_streamlit_cloud:
-    st.subheader("🎯 Prediction Accuracy Scorecard")
-    # Auto-evaluate all stored plans against latest market data
-    stored_plans = accuracy_tracker.get_stored_plans()
+st.subheader("🎯 Prediction Accuracy Scorecard")
+# Auto-evaluate all stored plans against latest market data
+stored_plans = accuracy_tracker.get_stored_plans()
 
-    # Ensure all history plans are stored for tracking
-    import json as _json
-    if history:
-        for h in history:
-            plan_dict = _json.loads(h.model_dump_json())
-            accuracy_tracker.store_plan(plan_dict)
+# Ensure all history plans are stored for tracking
+import json as _json
+if history:
+    for h in history:
+        plan_dict = _json.loads(h.model_dump_json())
+        accuracy_tracker.store_plan(plan_dict)
 
-    # Also store the current plan
-    accuracy_tracker.store_plan(_json.loads(plan.model_dump_json()))
+# Also store the current plan
+accuracy_tracker.store_plan(_json.loads(plan.model_dump_json()))
 
-    # Re-evaluate all stored plans (picks up any new hour closes)
-    accuracy_tracker.refresh_all()
+# Re-evaluate all stored plans (picks up any new hour closes)
+accuracy_tracker.refresh_all()
 
-    all_evals = accuracy_tracker.get_all_evaluations()
-    agg_stats = accuracy_tracker.get_aggregate_stats()
+all_evals = accuracy_tracker.get_all_evaluations()
+agg_stats = accuracy_tracker.get_aggregate_stats()
 
-    if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
-        # Show when accuracy was last auto-updated
-        latest_eval = accuracy_tracker.get_latest_evaluation()
-        if latest_eval:
-            eval_time = latest_eval.get("evaluated_at", "")
-            try:
-                eval_dt = parse_iso_to_ist(eval_time)
-                st.caption(f"🔄 Auto-updated: {eval_dt.strftime('%H:%M %b %d, %Y')} "
-                           f"· {latest_eval['days_evaluated']}/{latest_eval['days_total']} hours scored "
-                           f"· Background check every 1h")
-            except Exception:
-                pass
+if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
+    # Show when accuracy was last auto-updated
+    latest_eval = accuracy_tracker.get_latest_evaluation()
+    if latest_eval:
+        eval_time = latest_eval.get("evaluated_at", "")
+        try:
+            eval_dt = parse_iso_to_ist(eval_time)
+            st.caption(f"🔄 Auto-updated: {eval_dt.strftime('%H:%M %b %d, %Y')} "
+                       f"· {latest_eval['days_evaluated']}/{latest_eval['days_total']} hours scored "
+                       f"· Background check every 1h")
+        except Exception:
+            pass
 
-    if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
-        # ── Aggregate Metrics Row ────────────────────────────────────
-        st.markdown("#### Overall Accuracy (All Past Predictions)")
-        m1, m2, m3, m4, m5 = st.columns(5)
-        with m1:
-            mape = agg_stats["overall_mape"]
-            mape_color = "🟢" if mape < 2 else ("🟡" if mape < 5 else "🔴")
-            st.metric(f"{mape_color} MAPE", f"{mape:.1f}%")
-        with m2:
-            st.metric("📏 MAE", f"${agg_stats['overall_mae']:,.2f}")
-        with m3:
-            hit = agg_stats["overall_band_hit_rate"]
-            hit_color = "🟢" if hit >= 70 else ("🟡" if hit >= 50 else "🔴")
-            st.metric(f"{hit_color} Band Hit Rate", f"{hit:.0f}%")
-        with m4:
-            da = agg_stats["avg_directional_accuracy"]
-            da_color = "🟢" if da >= 60 else ("🟡" if da >= 50 else "🔴")
-            st.metric(f"{da_color} Direction Accuracy", f"{da:.0f}%")
-        with m5:
-            st.metric("📊 Hours Evaluated", f"{agg_stats['total_predictions_evaluated']}")
+if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
+    # ── Aggregate Metrics Row ────────────────────────────────────
+    st.markdown("#### Overall Accuracy (All Past Predictions)")
+    m1, m2, m3, m4, m5 = st.columns(5)
+    with m1:
+        mape = agg_stats["overall_mape"]
+        mape_color = "🟢" if mape < 2 else ("🟡" if mape < 5 else "🔴")
+        st.metric(f"{mape_color} MAPE", f"{mape:.1f}%")
+    with m2:
+        st.metric("📏 MAE", f"${agg_stats['overall_mae']:,.2f}")
+    with m3:
+        hit = agg_stats["overall_band_hit_rate"]
+        hit_color = "🟢" if hit >= 70 else ("🟡" if hit >= 50 else "🔴")
+        st.metric(f"{hit_color} Band Hit Rate", f"{hit:.0f}%")
+    with m4:
+        da = agg_stats["avg_directional_accuracy"]
+        da_color = "🟢" if da >= 60 else ("🟡" if da >= 50 else "🔴")
+        st.metric(f"{da_color} Direction Accuracy", f"{da:.0f}%")
+    with m5:
+        st.metric("📊 Hours Evaluated", f"{agg_stats['total_predictions_evaluated']}")
 
-        st.caption(
-            "**MAPE** = Mean Absolute Percentage Error (lower is better) · "
-            "**MAE** = Mean Absolute Error in $ · "
-            "**Band Hit Rate** = % of hours actual price fell within predicted range · "
-            "**Direction** = % of hours predicted direction matched actual"
+    st.caption(
+        "**MAPE** = Mean Absolute Percentage Error (lower is better) · "
+        "**MAE** = Mean Absolute Error in $ · "
+        "**Band Hit Rate** = % of hours actual price fell within predicted range · "
+        "**Direction** = % of hours predicted direction matched actual"
+    )
+
+    # ── Predicted vs Actual Chart ────────────────────────────────
+    all_daily = []
+    for ev in all_evals:
+        for d in ev.get("daily_results", []):
+            all_daily.append(d)
+
+    if all_daily:
+        acc_df = pd.DataFrame(all_daily)
+        acc_df["date"] = pd.to_datetime(acc_df["date"])
+        acc_df = acc_df.sort_values("date").drop_duplicates(subset="date", keep="last")
+
+        fig_acc = go.Figure()
+
+        # Prediction band
+        fig_acc.add_trace(go.Scatter(
+                x=acc_df["date"], y=acc_df["high_range"],
+                mode="lines", name="Upper Band",
+                line=dict(width=0), showlegend=False,
+        ))
+        fig_acc.add_trace(go.Scatter(
+                x=acc_df["date"], y=acc_df["low_range"],
+                mode="lines", name="Prediction Range",
+                fill="tonexty", fillcolor="rgba(0,212,170,0.12)",
+                line=dict(width=0),
+        ))
+
+        # Predicted line
+        fig_acc.add_trace(go.Scatter(
+                x=acc_df["date"], y=acc_df["predicted"],
+                mode="lines+markers", name="Predicted",
+                line=dict(color="#00d4aa", width=2, dash="dash"),
+                marker=dict(size=7, symbol="diamond"),
+        ))
+
+        # Actual line
+        fig_acc.add_trace(go.Scatter(
+                x=acc_df["date"], y=acc_df["actual"],
+                mode="lines+markers", name="Actual",
+                line=dict(color="#ffd93d", width=2),
+                marker=dict(size=7),
+        ))
+
+        # Color markers for within/outside band
+        outside = acc_df[~acc_df["within_band"]]
+        if not outside.empty:
+            fig_acc.add_trace(go.Scatter(
+                    x=outside["date"], y=outside["actual"],
+                    mode="markers", name="Outside Band ✗",
+                    marker=dict(size=12, color="#ff6b6b", symbol="x"),
+            ))
+
+        fig_acc.update_layout(
+                title="Predicted vs Actual Gold Price",
+                template="plotly_dark", height=450,
+                yaxis_title="Price (USD)", xaxis_title="Time",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                hovermode="x unified",
         )
+        st.plotly_chart(fig_acc, width="stretch")
 
-        # ── Predicted vs Actual Chart ────────────────────────────────
-        all_daily = []
-        for ev in all_evals:
-            for d in ev.get("daily_results", []):
-                all_daily.append(d)
-
-        if all_daily:
-            acc_df = pd.DataFrame(all_daily)
-            acc_df["date"] = pd.to_datetime(acc_df["date"])
-            acc_df = acc_df.sort_values("date").drop_duplicates(subset="date", keep="last")
-
-            fig_acc = go.Figure()
-
-            # Prediction band
-            fig_acc.add_trace(go.Scatter(
-                    x=acc_df["date"], y=acc_df["high_range"],
-                    mode="lines", name="Upper Band",
-                    line=dict(width=0), showlegend=False,
-            ))
-            fig_acc.add_trace(go.Scatter(
-                    x=acc_df["date"], y=acc_df["low_range"],
-                    mode="lines", name="Prediction Range",
-                    fill="tonexty", fillcolor="rgba(0,212,170,0.12)",
-                    line=dict(width=0),
-            ))
-
-            # Predicted line
-            fig_acc.add_trace(go.Scatter(
-                    x=acc_df["date"], y=acc_df["predicted"],
-                    mode="lines+markers", name="Predicted",
-                    line=dict(color="#00d4aa", width=2, dash="dash"),
-                    marker=dict(size=7, symbol="diamond"),
-            ))
-
-            # Actual line
-            fig_acc.add_trace(go.Scatter(
-                    x=acc_df["date"], y=acc_df["actual"],
-                    mode="lines+markers", name="Actual",
-                    line=dict(color="#ffd93d", width=2),
-                    marker=dict(size=7),
-            ))
-
-            # Color markers for within/outside band
-            outside = acc_df[~acc_df["within_band"]]
-            if not outside.empty:
-                fig_acc.add_trace(go.Scatter(
-                        x=outside["date"], y=outside["actual"],
-                        mode="markers", name="Outside Band ✗",
-                        marker=dict(size=12, color="#ff6b6b", symbol="x"),
-                ))
-
-            fig_acc.update_layout(
-                    title="Predicted vs Actual Gold Price",
-                    template="plotly_dark", height=450,
-                    yaxis_title="Price (USD)", xaxis_title="Time",
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02),
-                    hovermode="x unified",
+        # ── Hourly Accuracy Table ────────────────────────────────
+        with st.expander("📋 Hourly Accuracy Breakdown", expanded=False):
+            display_df = acc_df[["date", "predicted", "actual", "low_range",
+                                 "high_range", "error", "pct_error", "within_band"]].copy()
+            display_df = display_df.rename(columns={
+                "date": "Hour",
+                "predicted": "Predicted ($)",
+                "actual": "Actual ($)",
+                "low_range": "Low ($)",
+                "high_range": "High ($)",
+                "error": "Error ($)",
+                "pct_error": "Error (%)",
+                "within_band": "In Range",
+            })
+            st.dataframe(
+                display_df.style.format({
+                    "Predicted ($)": "${:,.2f}",
+                    "Actual ($)": "${:,.2f}",
+                    "Low ($)": "${:,.2f}",
+                    "High ($)": "${:,.2f}",
+                    "Error ($)": "{:+,.2f}",
+                    "Error (%)": "{:.2f}%",
+                }),
+                width="stretch",
+                hide_index=True,
             )
-            st.plotly_chart(fig_acc, width="stretch")
 
-            # ── Hourly Accuracy Table ────────────────────────────────
-            with st.expander("📋 Hourly Accuracy Breakdown", expanded=False):
-                display_df = acc_df[["date", "predicted", "actual", "low_range",
-                                     "high_range", "error", "pct_error", "within_band"]].copy()
-                display_df = display_df.rename(columns={
-                    "date": "Hour",
-                    "predicted": "Predicted ($)",
-                    "actual": "Actual ($)",
-                    "low_range": "Low ($)",
-                    "high_range": "High ($)",
-                    "error": "Error ($)",
-                    "pct_error": "Error (%)",
-                    "within_band": "In Range",
-                })
+        # ── Per-Plan Accuracy History ────────────────────────────────
+        if len(all_evals) > 1:
+            with st.expander("📈 Accuracy Trend Across Predictions"):
+                trend_data = []
+                for ev in all_evals:
+                    try:
+                        gen_dt = parse_iso_to_ist(ev["plan_generated_at"])
+                    except Exception:
+                        gen_dt = pd.to_datetime(ev.get("plan_generated_at", ""), errors="coerce")
+                    trend_data.append({
+                        "Generated At": gen_dt,
+                        "Hours Checked": ev["days_evaluated"],
+                        "MAE ($)": ev["mae"],
+                        "MAPE (%)": ev["mape"],
+                        "Band Hit (%)": ev["band_hit_rate"],
+                        "Direction (%)": ev["directional_accuracy"],
+                    })
+                trend_df = pd.DataFrame(trend_data)
+                trend_df = trend_df.dropna(subset=["Generated At"]).sort_values("Generated At")
+                trend_df["Generated At Display"] = trend_df["Generated At"].dt.strftime("%Y-%m-%d %H:%M:%S")
+
+                fig_trend = go.Figure()
+                fig_trend.add_trace(go.Scatter(
+                    x=trend_df["Generated At"], y=trend_df["MAPE (%)"],
+                    mode="lines+markers", name="MAPE %",
+                    line=dict(color="#ff6b6b"),
+                ))
+                fig_trend.add_trace(go.Scatter(
+                    x=trend_df["Generated At"], y=trend_df["Band Hit (%)"],
+                    mode="lines+markers", name="Band Hit %",
+                    line=dict(color="#00d4aa"),
+                ))
+                fig_trend.add_trace(go.Scatter(
+                    x=trend_df["Generated At"], y=trend_df["Direction (%)"],
+                    mode="lines+markers", name="Direction %",
+                    line=dict(color="#ffd93d"),
+                ))
+                fig_trend.update_layout(
+                    title="Accuracy Trend Over Time",
+                    template="plotly_dark", height=350,
+                    yaxis_title="Percentage",
+                    xaxis=dict(type="date", tickformat="%b %d\n%H:%M"),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                )
+                st.plotly_chart(fig_trend, width="stretch")
+
                 st.dataframe(
-                    display_df.style.format({
-                        "Predicted ($)": "${:,.2f}",
-                        "Actual ($)": "${:,.2f}",
-                        "Low ($)": "${:,.2f}",
-                        "High ($)": "${:,.2f}",
-                        "Error ($)": "{:+,.2f}",
-                        "Error (%)": "{:.2f}%",
-                    }),
+                    trend_df[["Generated At Display", "Hours Checked", "MAE ($)", "MAPE (%)", "Band Hit (%)", "Direction (%)"]]
+                    .rename(columns={"Generated At Display": "Generated At"}),
                     width="stretch",
                     hide_index=True,
                 )
-
-            # ── Per-Plan Accuracy History ────────────────────────────────
-            if len(all_evals) > 1:
-                with st.expander("📈 Accuracy Trend Across Predictions"):
-                    trend_data = []
-                    for ev in all_evals:
-                        try:
-                            gen_dt = parse_iso_to_ist(ev["plan_generated_at"])
-                        except Exception:
-                            gen_dt = pd.to_datetime(ev.get("plan_generated_at", ""), errors="coerce")
-                        trend_data.append({
-                            "Generated At": gen_dt,
-                            "Hours Checked": ev["days_evaluated"],
-                            "MAE ($)": ev["mae"],
-                            "MAPE (%)": ev["mape"],
-                            "Band Hit (%)": ev["band_hit_rate"],
-                            "Direction (%)": ev["directional_accuracy"],
-                        })
-                    trend_df = pd.DataFrame(trend_data)
-                    trend_df = trend_df.dropna(subset=["Generated At"]).sort_values("Generated At")
-                    trend_df["Generated At Display"] = trend_df["Generated At"].dt.strftime("%Y-%m-%d %H:%M:%S")
-
-                    fig_trend = go.Figure()
-                    fig_trend.add_trace(go.Scatter(
-                        x=trend_df["Generated At"], y=trend_df["MAPE (%)"],
-                        mode="lines+markers", name="MAPE %",
-                        line=dict(color="#ff6b6b"),
-                    ))
-                    fig_trend.add_trace(go.Scatter(
-                        x=trend_df["Generated At"], y=trend_df["Band Hit (%)"],
-                        mode="lines+markers", name="Band Hit %",
-                        line=dict(color="#00d4aa"),
-                    ))
-                    fig_trend.add_trace(go.Scatter(
-                        x=trend_df["Generated At"], y=trend_df["Direction (%)"],
-                        mode="lines+markers", name="Direction %",
-                        line=dict(color="#ffd93d"),
-                    ))
-                    fig_trend.update_layout(
-                        title="Accuracy Trend Over Time",
-                        template="plotly_dark", height=350,
-                        yaxis_title="Percentage",
-                        xaxis=dict(type="date", tickformat="%b %d\n%H:%M"),
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02),
-                    )
-                    st.plotly_chart(fig_trend, width="stretch")
-
-                    st.dataframe(
-                        trend_df[["Generated At Display", "Hours Checked", "MAE ($)", "MAPE (%)", "Band Hit (%)", "Direction (%)"]]
-                        .rename(columns={"Generated At Display": "Generated At"}),
-                        width="stretch",
-                        hide_index=True,
-                    )
-
-        else:
-            st.info(
-                "📍 **No accuracy data yet.** Accuracy scoring requires at least one "
-                "prediction where predicted hours are now in the past. Generate a "
-                "prediction and check back after those hours to see how accurate the "
-                "system was!\n\n"
-                "The system **auto-checks every 1 hour** in the background."
-            )
 
     else:
         st.info(
@@ -662,8 +674,17 @@ if not is_streamlit_cloud:
             "The system **auto-checks every 1 hour** in the background."
         )
 
+else:
+    st.info(
+        "📍 **No accuracy data yet.** Accuracy scoring requires at least one "
+        "prediction where predicted hours are now in the past. Generate a "
+        "prediction and check back after those hours to see how accurate the "
+        "system was!\n\n"
+        "The system **auto-checks every 1 hour** in the background."
+    )
+
 # ── Prediction Generation History ────────────────────────────────────
-if not is_streamlit_cloud and len(history) > 1:
+if len(history) > 1:
     st.divider()
     st.subheader("📊 Prediction History")
     hist_data = []

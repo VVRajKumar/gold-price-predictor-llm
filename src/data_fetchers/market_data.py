@@ -43,7 +43,7 @@ class MarketDataFetcher:
         """Return OHLCV DataFrame for a single ticker."""
         cache_key = f"{ticker}_{period_days}_{interval}"
         if cache_key in _cache:
-            return _cache[cache_key]
+            return _cache[cache_key].copy()
 
         # Use UTC calendar dates so localhost and Streamlit Cloud fetch the same 1d candle window.
         end_date = datetime.utcnow().date()

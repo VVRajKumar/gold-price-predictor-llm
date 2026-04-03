@@ -22,6 +22,8 @@ from .config import (
     PREDICTION_HOURS,
     PLAN_REFRESH_HOURS,
     FORECAST_GRANULARITY,
+    ENABLE_XGBOOST_CORRECTION,
+    XGBOOST_BLEND_WEIGHT,
 )
 from .orchestrator import Orchestrator, PredictionPlan
 from .data_fetchers.market_data import MarketDataFetcher
@@ -160,6 +162,133 @@ class PredictionEngine:
             # Daily Prophet baseline is not aligned with hourly horizon.
             return []
 
+    def _build_xgb_feature(self, history: list[float]) -> np.ndarray:
+        """Create lag/rolling features from close-price history for one-step prediction."""
+        arr = np.asarray(history, dtype=float)
+        lag_1 = arr[-1]
+        lag_2 = arr[-2]
+        lag_3 = arr[-3]
+        lag_6 = arr[-6]
+        lag_12 = arr[-12]
+        lag_24 = arr[-24]
+        roll_6 = float(np.mean(arr[-6:]))
+        roll_12 = float(np.mean(arr[-12:]))
+        roll_24 = float(np.mean(arr[-24:]))
+        ret_1h = 0.0 if lag_2 == 0 else (lag_1 - lag_2) / lag_2
+        ret_6h = 0.0 if lag_6 == 0 else (lag_1 - lag_6) / lag_6
+        vol_12 = float(np.std(np.diff(arr[-13:]) / np.clip(arr[-13:-1], 1e-9, None)))
+        return np.array([
+            lag_1, lag_2, lag_3, lag_6, lag_12, lag_24,
+            roll_6, roll_12, roll_24,
+            ret_1h, ret_6h, vol_12,
+        ], dtype=float)
+
+    def _xgboost_hourly_baseline(self) -> list[dict]:
+        """Train a lightweight hourly XGBoost model and forecast next horizon recursively."""
+        if FORECAST_GRANULARITY.lower() != "hourly":
+            return []
+
+        try:
+            from xgboost import XGBRegressor
+        except Exception:
+            logger.warning("xgboost not installed – skipping XGBoost hourly baseline")
+            return []
+
+        try:
+            df = self._market.fetch_ticker("GC=F", period_days=30, interval="1h")
+            if df.empty or "Close" not in df:
+                return []
+
+            close = pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna()
+            if len(close) < 120:
+                return []
+
+            values = close.to_numpy(dtype=float)
+            X_rows: list[np.ndarray] = []
+            y_rows: list[float] = []
+            min_hist = 25
+            for i in range(min_hist, len(values)):
+                hist = values[:i].tolist()
+                X_rows.append(self._build_xgb_feature(hist))
+                y_rows.append(float(values[i]))
+
+            if len(X_rows) < 50:
+                return []
+
+            X = np.vstack(X_rows)
+            y = np.array(y_rows, dtype=float)
+
+            model = XGBRegressor(
+                n_estimators=220,
+                max_depth=4,
+                learning_rate=0.05,
+                subsample=0.9,
+                colsample_bytree=0.9,
+                random_state=42,
+                objective="reg:squarederror",
+                reg_alpha=0.0,
+                reg_lambda=1.0,
+            )
+            model.fit(X, y)
+
+            history = values.tolist()
+            last_ts = close.index.max()
+            recent_vol = float(close.pct_change().dropna().tail(24).std()) if len(close) > 25 else 0.002
+            recent_vol = max(recent_vol, 0.0015)
+
+            preds: list[dict] = []
+            for h in range(PREDICTION_HOURS):
+                feat = self._build_xgb_feature(history).reshape(1, -1)
+                pred = float(model.predict(feat)[0])
+                ts = pd.Timestamp(last_ts) + pd.Timedelta(hours=h + 1)
+                band = max(pred * (recent_vol * 1.6), 3.0)
+                preds.append({
+                    "date": ts.strftime("%Y-%m-%d %H:00"),
+                    "xgb_price": round(pred, 2),
+                    "xgb_low": round(pred - band, 2),
+                    "xgb_high": round(pred + band, 2),
+                })
+                history.append(pred)
+
+            return preds
+        except Exception as e:
+            logger.warning(f"XGBoost hourly baseline failed: {e}")
+            return []
+
+    def _blend_plan_with_xgb(self, plan: PredictionPlan, xgb_preds: list[dict]):
+        """Blend LLM forecast with XGBoost baseline to reduce hourly drift."""
+        if not xgb_preds or not plan.daily_predictions:
+            return
+
+        alpha = min(max(float(XGBOOST_BLEND_WEIGHT), 0.0), 1.0)
+        by_date = {str(p.get("date")): p for p in xgb_preds}
+
+        blended = []
+        for dp in plan.daily_predictions:
+            xgb_item = by_date.get(dp.date)
+            if xgb_item is None:
+                blended.append(dp)
+                continue
+
+            xgb_price = float(xgb_item.get("xgb_price", dp.predicted_price))
+            xgb_low = float(xgb_item.get("xgb_low", dp.low_range))
+            xgb_high = float(xgb_item.get("xgb_high", dp.high_range))
+
+            new_price = (1.0 - alpha) * float(dp.predicted_price) + alpha * xgb_price
+            new_low = (1.0 - alpha) * float(dp.low_range) + alpha * xgb_low
+            new_high = (1.0 - alpha) * float(dp.high_range) + alpha * xgb_high
+
+            blended.append(
+                dp.model_copy(update={
+                    "predicted_price": round(float(new_price), 2),
+                    "low_range": round(float(new_low), 2),
+                    "high_range": round(float(new_high), 2),
+                    "key_driver": f"{dp.key_driver} + XGBoost correction",
+                })
+            )
+
+        plan.daily_predictions = blended
+
         try:
             from prophet import Prophet
 
@@ -215,6 +344,17 @@ class PredictionEngine:
                     "predictions": baseline,
                 }
 
+            if ENABLE_XGBOOST_CORRECTION and FORECAST_GRANULARITY.lower() == "hourly":
+                xgb_baseline = self._xgboost_hourly_baseline()
+                if xgb_baseline:
+                    self._blend_plan_with_xgb(plan, xgb_baseline)
+                    plan.agent_reports["xgboost_baseline"] = {
+                        "type": "hourly_tabular_model",
+                        "summary": "XGBoost hourly baseline blended with LLM forecast.",
+                        "blend_weight": float(XGBOOST_BLEND_WEIGHT),
+                        "predictions": xgb_baseline,
+                    }
+
             self._current_plan = plan
             self._save_plan(plan)
 
@@ -250,6 +390,17 @@ class PredictionEngine:
                         "summary": "Prophet baseline generated from recent gold price time-series trend.",
                         "predictions": baseline,
                     }
+
+                if ENABLE_XGBOOST_CORRECTION and FORECAST_GRANULARITY.lower() == "hourly":
+                    xgb_baseline = self._xgboost_hourly_baseline()
+                    if xgb_baseline:
+                        self._blend_plan_with_xgb(plan, xgb_baseline)
+                        plan.agent_reports["xgboost_baseline"] = {
+                            "type": "hourly_tabular_model",
+                            "summary": "XGBoost hourly baseline blended with LLM forecast.",
+                            "blend_weight": float(XGBOOST_BLEND_WEIGHT),
+                            "predictions": xgb_baseline,
+                        }
 
                 self._current_plan = plan
                 self._save_plan(plan)

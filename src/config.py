@@ -46,6 +46,8 @@ REFRESH_INTERVAL_MINUTES = int(os.getenv("REFRESH_INTERVAL_MINUTES", "30"))
 FORECAST_GRANULARITY = os.getenv("FORECAST_GRANULARITY", "hourly")
 PREDICTION_HOURS = int(os.getenv("PREDICTION_HOURS", "24"))
 PLAN_REFRESH_HOURS = int(os.getenv("PLAN_REFRESH_HOURS", "1"))
+ENABLE_XGBOOST_CORRECTION = os.getenv("ENABLE_XGBOOST_CORRECTION", "true").strip().lower() in {"1", "true", "yes", "y", "on"}
+XGBOOST_BLEND_WEIGHT = float(os.getenv("XGBOOST_BLEND_WEIGHT", "0.35"))
 HISTORICAL_LOOKBACK_DAYS = 365
 
 # ── Ticker Symbols ──────────────────────────────────────────────────

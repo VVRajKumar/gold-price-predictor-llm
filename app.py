@@ -77,10 +77,10 @@ market = get_market()
 accuracy_tracker = engine.get_accuracy_tracker()
 
 # Streamlit can sometimes keep a stale cached engine object across hot reloads.
-# If weekly API is missing, rebuild once so app doesn't crash after deployment.
-if not hasattr(engine, "ensure_weekly_prediction"):
+# If weekly API is missing or market fetcher lacks INR helpers, rebuild once.
+if not hasattr(engine, "ensure_weekly_prediction") or not hasattr(market, "get_usdinr_rate"):
     st.cache_resource.clear()
-    engine = PredictionEngine()
+    engine = get_engine()
     market = get_market()
     accuracy_tracker = engine.get_accuracy_tracker()
 

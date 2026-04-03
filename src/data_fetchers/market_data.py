@@ -81,7 +81,7 @@ class MarketDataFetcher:
                 df = df.sort_index()
 
             _cache[cache_key] = df
-            return df
+            return df.copy()
         except Exception as e:
             logger.error(f"Error fetching {ticker}: {e}")
             return pd.DataFrame()
@@ -138,6 +138,15 @@ class MarketDataFetcher:
         """
         result = usd_df.copy()
         oz_to_10g = 10.0 / 31.1035
+
+        # Guard: if Close values are already in INR range (>10,000), skip conversion
+        if "Close" in result.columns:
+            median_close = pd.to_numeric(result["Close"], errors="coerce").median()
+            if pd.notna(median_close) and median_close > 10_000:
+                logger.warning(
+                    f"Data appears already converted (median Close={median_close:.0f}), skipping"
+                )
+                return result
 
         # Always use daily FX series – most reliable granularity for INR=X
         fx = self.get_usdinr_series(period_days=period_days + 30, interval="1d")

@@ -189,7 +189,7 @@ if not gold_df.empty:
         gold_df = gold_df[gold_df.index >= cutoff_ts]
 
     # Convert USD/oz to INR/10g using time-aligned daily FX rates
-    gold_df = market.convert_usd_to_inr(gold_df, period_days=90, interval="1d")
+    gold_df = market.convert_usd_to_inr(gold_df, period_days=90)
 
     range_start = gold_df.index.min()
     range_end = gold_df.index.max()
@@ -298,9 +298,9 @@ if plan.daily_predictions:
 
     fig = go.Figure()
 
-    # Historical prices (convert to INR/10g using time-aligned hourly FX rates)
+    # Historical prices (convert to INR/10g using time-aligned daily FX rates)
     if not gold_recent.empty:
-        gold_recent = market.convert_usd_to_inr(gold_recent, period_days=10, interval="1h")
+        gold_recent = market.convert_usd_to_inr(gold_recent, period_days=10)
         close_series = pd.to_numeric(gold_recent["Close"], errors="coerce").dropna()
         # Reindex hourly so missing bars do not break the timeline.
         if not close_series.empty:

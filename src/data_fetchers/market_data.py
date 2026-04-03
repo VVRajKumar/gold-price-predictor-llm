@@ -131,36 +131,41 @@ class MarketDataFetcher:
     ) -> pd.DataFrame:
         """Convert OHLC columns from USD/oz to INR/10g using time-aligned FX rates.
 
-        Each row is multiplied by the USD/INR rate from its own date/hour.
-        Falls back to the latest available rate for any gaps.
+        Always fetches **daily** FX rates (INR=X hourly is unreliable) and
+        forward-fills them to match the gold data timestamps.
+        Returns a NEW DataFrame — the input is never mutated.
         """
+        result = usd_df.copy()
         oz_to_10g = 10.0 / 31.1035
-        fx = self.get_usdinr_series(period_days=period_days + 30, interval=interval)
+
+        # Always use daily FX series – most reliable granularity for INR=X
+        fx = self.get_usdinr_series(period_days=period_days + 30, interval="1d")
 
         if fx.empty:
-            # Total fallback: use spot rate for everything
             spot = self.get_usdinr_rate()
             logger.warning(f"No FX series available; using spot {spot:.2f} for all rows")
             for col in ("Open", "High", "Low", "Close"):
-                if col in usd_df.columns:
-                    usd_df[col] = usd_df[col] * spot * oz_to_10g
-            return usd_df
+                if col in result.columns:
+                    result[col] = result[col] * spot * oz_to_10g
+            return result
 
-        # Reindex FX to match gold data timestamps, forward-fill gaps
-        fx_aligned = fx.reindex(usd_df.index, method="ffill")
-        # For any remaining NaN at the start, back-fill
+        # Normalise FX index to tz-naive for alignment
+        if isinstance(fx.index, pd.DatetimeIndex) and fx.index.tz is not None:
+            fx.index = fx.index.tz_convert(None)
+
+        # Reindex daily FX to match gold data timestamps (may be hourly), forward-fill
+        fx_aligned = fx.reindex(result.index, method="ffill")
         fx_aligned = fx_aligned.bfill()
-        # Last resort: fill with latest known rate
         fx_aligned = fx_aligned.fillna(self.get_usdinr_rate())
 
         for col in ("Open", "High", "Low", "Close"):
-            if col in usd_df.columns:
-                usd_df[col] = usd_df[col] * fx_aligned * oz_to_10g
+            if col in result.columns:
+                result[col] = result[col] * fx_aligned * oz_to_10g
 
         logger.info(
             f"FX conversion applied: rate range {fx_aligned.min():.2f}–{fx_aligned.max():.2f}"
         )
-        return usd_df
+        return result
 
     # ------------------------------------------------------------------ #
     def get_gold_inr_price(self, period_days: int = 7) -> float:

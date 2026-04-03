@@ -120,8 +120,8 @@ class AccuracyTracker:
         if gold_df.empty:
             return None
 
-        # Use time-aligned hourly FX rates for accurate conversion
-        gold_df = self._market.convert_usd_to_inr(gold_df, period_days=15, interval="1h")
+        # Use time-aligned daily FX rates for accurate conversion
+        gold_df = self._market.convert_usd_to_inr(gold_df, period_days=15)
         close = gold_df["Close"].squeeze()
         if isinstance(close, pd.DataFrame):
             close = close.iloc[:, 0]

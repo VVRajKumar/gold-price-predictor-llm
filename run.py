@@ -82,9 +82,9 @@ def main():
             print(plan.model_dump_json(indent=2))
         else:
             print("\n" + "=" * 70)
-            print("  🥇 GOLD PRICE PREDICTION – AGENTIC AI SYSTEM")
+            print("  🥇 INDIAN GOLD PRICE PREDICTION – AGENTIC AI SYSTEM")
             print("=" * 70)
-            print(f"\n  Current Price:  ${plan.current_price:,.2f}")
+            print(f"\n  Current Price:  ₹{plan.current_price:,.2f} /10g")
             print(f"  Outlook:        {plan.overall_outlook.upper()}")
             print(f"  Confidence:     {plan.overall_confidence:.0%}")
             print(f"  Generated:      {plan.generated_at}")
@@ -92,13 +92,13 @@ def main():
             print(f"\n  EXECUTIVE SUMMARY:")
             print(f"  {_summary_preview(plan.executive_summary, 500)}")
             print(f"\n  {'─' * 60}")
-            print(f"\n  7-DAY PREDICTIONS:")
+            print(f"\n  24-HOUR PREDICTIONS (INR/10g):")
             print(f"  {'Date':<12} {'Predicted':>10} {'Low':>10} {'High':>10} {'Conf':>6}  Driver")
             print(f"  {'─'*12} {'─'*10} {'─'*10} {'─'*10} {'─'*6}  {'─'*20}")
             for dp in plan.daily_predictions:
                 print(
-                    f"  {dp.date:<12} ${dp.predicted_price:>9,.2f} "
-                    f"${dp.low_range:>9,.2f} ${dp.high_range:>9,.2f} "
+                    f"  {dp.date:<12} ₹{dp.predicted_price:>9,.2f} "
+                    f"₹{dp.low_range:>9,.2f} ₹{dp.high_range:>9,.2f} "
                     f"{dp.confidence:>5.0%}  {dp.key_driver[:30]}"
                 )
 

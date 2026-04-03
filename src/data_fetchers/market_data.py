@@ -120,7 +120,7 @@ class MarketDataFetcher:
 
     # ------------------------------------------------------------------ #
     def get_gold_summary(self, period_days: int = 30) -> dict:
-        """Return a compact dict summarising recent gold price action."""
+        """Return a compact dict summarising recent gold price action in INR/10g."""
         df = self.fetch_ticker(GOLD_TICKER, period_days)
         if df.empty:
             return {"error": "No gold data available"}
@@ -134,20 +134,27 @@ class MarketDataFetcher:
             logger.warning("Gold data returned but Close column has no valid values")
             return {"error": "No valid gold close prices available"}
 
-        current = float(close.iloc[-1])
-        prev = float(close.iloc[-2]) if len(close) > 1 else current
+        # Convert USD/oz to INR/10g
+        usdinr = self.get_usdinr_rate()
+        factor = usdinr * 10.0 / 31.1035  # USD/oz -> INR/10g
+        close_inr = close * factor
+        high_inr = high * factor
+        low_inr = low * factor
+
+        current = float(close_inr.iloc[-1])
+        prev = float(close_inr.iloc[-2]) if len(close_inr) > 1 else current
         daily_change_pct = 0.0 if prev == 0 else (current - prev) / prev * 100
 
         return {
             "current_price": round(current, 2),
             "prev_close": round(prev, 2),
             "daily_change_pct": round(float(daily_change_pct), 3),
-            "30d_high": round(float(high.max()), 2) if not high.empty else round(current, 2),
-            "30d_low": round(float(low.min()), 2) if not low.empty else round(current, 2),
-            "30d_avg": round(float(close.mean()), 2),
-            "30d_volatility": round(float(close.pct_change().dropna().std() * 100), 4) if len(close) > 2 else 0.0,
+            "30d_high": round(float(high_inr.max()), 2) if not high_inr.empty else round(current, 2),
+            "30d_low": round(float(low_inr.min()), 2) if not low_inr.empty else round(current, 2),
+            "30d_avg": round(float(close_inr.mean()), 2),
+            "30d_volatility": round(float(close_inr.pct_change().dropna().std() * 100), 4) if len(close_inr) > 2 else 0.0,
             "volume_latest": int(volume.iloc[-1]) if not volume.empty else 0,
-            "data_points": int(len(close)),
+            "data_points": int(len(close_inr)),
             "as_of": close.index[-1].strftime("%Y-%m-%d"),
             "currency": "INR",
             "unit": "per 10 grams",

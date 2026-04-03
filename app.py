@@ -457,7 +457,7 @@ if not is_streamlit_cloud:
     # Also store the current plan
     accuracy_tracker.store_plan(_json.loads(plan.model_dump_json()))
 
-    # Re-evaluate all stored plans (picks up any new day closes)
+    # Re-evaluate all stored plans (picks up any new hour closes)
     accuracy_tracker.refresh_all()
 
     all_evals = accuracy_tracker.get_all_evaluations()
@@ -471,8 +471,8 @@ if not is_streamlit_cloud:
             try:
                 eval_dt = parse_iso_to_ist(eval_time)
                 st.caption(f"🔄 Auto-updated: {eval_dt.strftime('%H:%M %b %d, %Y')} "
-                           f"· {latest_eval['days_evaluated']}/{latest_eval['days_total']} days scored "
-                           f"· Background check every 6h")
+                           f"· {latest_eval['days_evaluated']}/{latest_eval['days_total']} hours scored "
+                           f"· Background check every 1h")
             except Exception:
                 pass
 
@@ -495,13 +495,13 @@ if not is_streamlit_cloud:
             da_color = "🟢" if da >= 60 else ("🟡" if da >= 50 else "🔴")
             st.metric(f"{da_color} Direction Accuracy", f"{da:.0f}%")
         with m5:
-            st.metric("📊 Days Evaluated", f"{agg_stats['total_predictions_evaluated']}")
+            st.metric("📊 Hours Evaluated", f"{agg_stats['total_predictions_evaluated']}")
 
         st.caption(
             "**MAPE** = Mean Absolute Percentage Error (lower is better) · "
             "**MAE** = Mean Absolute Error in $ · "
-            "**Band Hit Rate** = % of days actual price fell within predicted range · "
-            "**Direction** = % of days predicted direction matched actual"
+            "**Band Hit Rate** = % of hours actual price fell within predicted range · "
+            "**Direction** = % of hours predicted direction matched actual"
         )
 
         # ── Predicted vs Actual Chart ────────────────────────────────
@@ -558,18 +558,18 @@ if not is_streamlit_cloud:
             fig_acc.update_layout(
                     title="Predicted vs Actual Gold Price",
                     template="plotly_dark", height=450,
-                    yaxis_title="Price (USD)", xaxis_title="Date",
+                    yaxis_title="Price (USD)", xaxis_title="Time",
                     legend=dict(orientation="h", yanchor="bottom", y=1.02),
                     hovermode="x unified",
             )
             st.plotly_chart(fig_acc, width="stretch")
 
-            # ── Daily Accuracy Table ─────────────────────────────────
-            with st.expander("📋 Daily Accuracy Breakdown", expanded=False):
+            # ── Hourly Accuracy Table ────────────────────────────────
+            with st.expander("📋 Hourly Accuracy Breakdown", expanded=False):
                 display_df = acc_df[["date", "predicted", "actual", "low_range",
                                      "high_range", "error", "pct_error", "within_band"]].copy()
                 display_df = display_df.rename(columns={
-                    "date": "Date",
+                    "date": "Hour",
                     "predicted": "Predicted ($)",
                     "actual": "Actual ($)",
                     "low_range": "Low ($)",
@@ -602,7 +602,7 @@ if not is_streamlit_cloud:
                             gen_dt = pd.to_datetime(ev.get("plan_generated_at", ""), errors="coerce")
                         trend_data.append({
                             "Generated At": gen_dt,
-                            "Days Checked": ev["days_evaluated"],
+                            "Hours Checked": ev["days_evaluated"],
                             "MAE ($)": ev["mae"],
                             "MAPE (%)": ev["mape"],
                             "Band Hit (%)": ev["band_hit_rate"],
@@ -638,7 +638,7 @@ if not is_streamlit_cloud:
                     st.plotly_chart(fig_trend, width="stretch")
 
                     st.dataframe(
-                        trend_df[["Generated At Display", "Days Checked", "MAE ($)", "MAPE (%)", "Band Hit (%)", "Direction (%)"]]
+                        trend_df[["Generated At Display", "Hours Checked", "MAE ($)", "MAPE (%)", "Band Hit (%)", "Direction (%)"]]
                         .rename(columns={"Generated At Display": "Generated At"}),
                         width="stretch",
                         hide_index=True,
@@ -647,21 +647,19 @@ if not is_streamlit_cloud:
         else:
             st.info(
                 "📍 **No accuracy data yet.** Accuracy scoring requires at least one "
-                "prediction where the predicted dates are now in the past. Generate a "
-                "prediction and check back after those dates to see how accurate the "
+                "prediction where predicted hours are now in the past. Generate a "
+                "prediction and check back after those hours to see how accurate the "
                 "system was!\n\n"
-                "The system **auto-checks every 6 hours** in the background, or click "
-                "**Check Accuracy Now** in the sidebar."
+                "The system **auto-checks every 1 hour** in the background."
             )
 
     else:
         st.info(
             "📍 **No accuracy data yet.** Accuracy scoring requires at least one "
-            "prediction where the predicted dates are now in the past. Generate a "
-            "prediction and check back after those dates to see how accurate the "
+            "prediction where predicted hours are now in the past. Generate a "
+            "prediction and check back after those hours to see how accurate the "
             "system was!\n\n"
-            "The system **auto-checks every 6 hours** in the background, or click "
-            "**Check Accuracy Now** in the sidebar."
+            "The system **auto-checks every 1 hour** in the background."
         )
 
 # ── Prediction Generation History ────────────────────────────────────

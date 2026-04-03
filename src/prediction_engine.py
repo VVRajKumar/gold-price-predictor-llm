@@ -430,7 +430,7 @@ class PredictionEngine:
     def get_accuracy_tracker(self) -> AccuracyTracker:
         if self._accuracy is None:
             self._accuracy = AccuracyTracker()
-            self._accuracy.start_auto_check(interval_hours=6)
+            self._accuracy.start_auto_check(interval_hours=1)
         return self._accuracy
 
     # ── Auto-refresh loop ───────────────────────────────────────────

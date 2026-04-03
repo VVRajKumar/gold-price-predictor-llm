@@ -180,16 +180,16 @@ else:
     plan = engine.get_current_plan()
 
 # Always keep the live OHLC chart visible.
-st.subheader("🕯️ Live Indian Gold OHLC (90D) – INR/10g")
-gold_df = market.fetch_ticker("GC=F", period_days=90)
+st.subheader("🕯️ Live Indian Gold OHLC (10D) – INR/10g")
+gold_df = market.fetch_ticker("GC=F", period_days=10, interval="1h")
 if not gold_df.empty:
     if isinstance(gold_df.index, pd.DatetimeIndex):
         latest_ts = gold_df.index.max()
-        cutoff_ts = latest_ts - pd.Timedelta(days=90)
+        cutoff_ts = latest_ts - pd.Timedelta(days=10)
         gold_df = gold_df[gold_df.index >= cutoff_ts]
 
     # Convert USD/oz to INR/10g using time-aligned daily FX rates
-    gold_df = market.convert_usd_to_inr(gold_df, period_days=90)
+    gold_df = market.convert_usd_to_inr(gold_df, period_days=10)
 
     range_start = gold_df.index.min()
     range_end = gold_df.index.max()
@@ -204,13 +204,13 @@ if not gold_df.empty:
         name="Gold (INR/10g)",
     ))
     fig_ohlc.update_layout(
-        title="Indian Gold – Last 90 Days (₹ per 10 grams)",
+        title="Indian Gold – Last 10 Days (₹ per 10 grams)",
         template="plotly_dark",
         height=450,
         xaxis_rangeslider_visible=False,
         xaxis=dict(
             fixedrange=True,
-            range=[range_start, range_end + pd.Timedelta(days=1)],
+            range=[range_start, range_end + pd.Timedelta(hours=2)],
             rangebreaks=[dict(bounds=["sat", "mon"])],
         ),
         yaxis=dict(fixedrange=True, title="Price (₹/10g)"),
@@ -227,7 +227,7 @@ if not gold_df.empty:
     if isinstance(range_start, pd.Timestamp) and isinstance(range_end, pd.Timestamp):
         st.caption(
             f"Plotted range: {range_start.strftime('%Y-%m-%d')} to {range_end.strftime('%Y-%m-%d')} "
-            f"({len(gold_df)} trading sessions in last 90 calendar days)"
+            f"({len(gold_df)} hourly sessions in last 10 calendar days)"
         )
 else:
     st.warning("Live gold OHLC data is temporarily unavailable.")

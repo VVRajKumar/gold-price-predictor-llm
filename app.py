@@ -208,7 +208,11 @@ if not gold_df.empty:
         template="plotly_dark",
         height=450,
         xaxis_rangeslider_visible=False,
-        xaxis=dict(fixedrange=True),
+        xaxis=dict(
+            fixedrange=True,
+            range=[range_start, range_end + pd.Timedelta(days=1)],
+            rangebreaks=[dict(bounds=["sat", "mon"])],
+        ),
         yaxis=dict(fixedrange=True, title="Price (₹/10g)"),
     )
     st.plotly_chart(

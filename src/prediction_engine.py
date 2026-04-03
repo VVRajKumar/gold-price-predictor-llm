@@ -130,8 +130,16 @@ class PredictionEngine:
                         f"₹30,000 – likely stale USD-era cache; discarding"
                     )
                 else:
+                    # Re-apply guardrails so confidence decay, band widening,
+                    # and XGBoost noise are enforced on old stored plans too.
+                    from .guardrails import validate_prediction_plan
+                    plan_dict = json.loads(plan.model_dump_json())
+                    corrected = validate_prediction_plan(
+                        plan_dict, plan.current_price, len(plan.daily_predictions)
+                    )
+                    plan = PredictionPlan(**corrected)
                     self._current_plan = plan
-                    logger.info("Loaded cached prediction plan")
+                    logger.info("Loaded cached prediction plan (guardrails re-applied)")
             except Exception as e:
                 logger.warning(f"Could not load cached plan: {e}")
 

@@ -45,13 +45,12 @@ _MIN_HISTORY = 25            # minimum samples for feature construction
 _TRAIN_PERIOD_DAYS = 90      # 3 months of hourly data (~2160 bars)
 _MIN_TRAIN_SAMPLES = 200     # hard floor after cleanup
 
-# ── Sentinel feature names (used by SHAP display) ────────────────────
+# ── Internal feature names (used for model training) ─────────────────
 FEATURE_NAMES = (
     [f"lag_{l}" for l in _LAGS]
     + [f"roll_{w}" for w in _ROLL_WINDOWS]
     + ["ret_1h", "ret_6h", "vol_12"]
     + ["hour_sin", "hour_cos", "dow_sin", "dow_cos"]
-    # sentiment features injected by agents
     + [
         "sentiment_score",
         "geopolitical_risk",
@@ -63,6 +62,34 @@ FEATURE_NAMES = (
         "trend_strength",
     ]
 )
+
+# ── Human-friendly display names for dashboard / SHAP charts ─────────
+FEATURE_DISPLAY_NAMES: dict[str, str] = {
+    "lag_1":              "Price 1 Hour Ago",
+    "lag_2":              "Price 2 Hours Ago",
+    "lag_3":              "Price 3 Hours Ago",
+    "lag_6":              "Price 6 Hours Ago",
+    "lag_12":             "Price 12 Hours Ago",
+    "lag_24":             "Price 24 Hours Ago",
+    "roll_6":             "6-Hour Average Price",
+    "roll_12":            "12-Hour Average Price",
+    "roll_24":            "24-Hour Average Price",
+    "ret_1h":             "1-Hour Price Change %",
+    "ret_6h":             "6-Hour Price Change %",
+    "vol_12":             "12-Hour Volatility",
+    "hour_sin":           "Time of Day (sine)",
+    "hour_cos":           "Time of Day (cosine)",
+    "dow_sin":            "Day of Week (sine)",
+    "dow_cos":            "Day of Week (cosine)",
+    "sentiment_score":    "Market Sentiment",
+    "geopolitical_risk":  "Geopolitical Risk",
+    "macro_outlook":      "Macro-Economic Outlook",
+    "technical_signal":   "Technical Analysis Signal",
+    "etf_flow_signal":    "ETF Fund Flows",
+    "oil_energy_signal":  "Oil & Energy Impact",
+    "historical_seasonal":"Seasonal Pattern",
+    "trend_strength":     "Trend Strength",
+}
 
 
 def _build_feature_vector(
@@ -359,8 +386,9 @@ class MLEnsemble:
             n_features = min(len(FEATURE_NAMES), len(mean_abs_shap))
             importance = []
             for i in range(n_features):
+                raw_name = FEATURE_NAMES[i]
                 importance.append({
-                    "feature": FEATURE_NAMES[i],
+                    "feature": FEATURE_DISPLAY_NAMES.get(raw_name, raw_name),
                     "importance": round(float(mean_abs_shap[i]), 4),
                 })
             importance.sort(key=lambda x: x["importance"], reverse=True)
@@ -373,10 +401,14 @@ class MLEnsemble:
                 drivers = []
                 for idx in top_idx:
                     if idx < n_features:
+                        raw_name = FEATURE_NAMES[idx]
+                        display_name = FEATURE_DISPLAY_NAMES.get(raw_name, raw_name)
                         direction = "↑" if h_shap[idx] > 0 else "↓"
-                        drivers.append(
-                            f"{FEATURE_NAMES[idx]} {direction} ({h_shap[idx]:+.2f})"
-                        )
+                        drivers.append({
+                            "name": display_name,
+                            "direction": direction,
+                            "value": round(float(h_shap[idx]), 2),
+                        })
                 hourly_drivers.append({
                     "hour": h + 1,
                     "drivers": drivers,

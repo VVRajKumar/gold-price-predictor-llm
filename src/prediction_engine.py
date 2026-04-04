@@ -28,6 +28,7 @@ from .config import (
 from .orchestrator import Orchestrator, PredictionPlan
 from .data_fetchers.market_data import MarketDataFetcher
 from .accuracy_tracker import AccuracyTracker
+from .residual_learner import ResidualLearner
 from .guardrails import validate_xgb_predictions, validate_price_series
 from . import cloud_storage
 from .time_utils import iso_now_ist
@@ -43,6 +44,7 @@ class PredictionEngine:
         self._orchestrator = Orchestrator()
         self._market = MarketDataFetcher()
         self._accuracy: Optional[AccuracyTracker] = None
+        self._residual_learner = ResidualLearner()
         self._current_plan: Optional[PredictionPlan] = None
         self._weekly_archive: list[dict] = []
         self._lock = threading.Lock()
@@ -288,6 +290,9 @@ class PredictionEngine:
                 current_inr = preds[0]["xgb_price"] if preds else 70000.0
             preds = validate_xgb_predictions(preds, current_inr)
 
+            # ── Residual correction: apply learned bias from past errors ──
+            preds = self._residual_learner.correct_predictions(preds)
+
             return preds
         except Exception as e:
             logger.warning(f"XGBoost hourly baseline failed: {e}")
@@ -456,6 +461,10 @@ class PredictionEngine:
                     try:
                         tracker = self.get_accuracy_tracker()
                         tracker.store_plan(json.loads(plan.model_dump_json()))
+                        # Update residual learner with latest accuracy data
+                        self._residual_learner.update_from_accuracy_log(
+                            tracker.get_all_evaluations()
+                        )
                     except Exception as e:
                         logger.warning(f"Could not store hourly plan for accuracy: {e}")
 

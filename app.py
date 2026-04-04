@@ -51,6 +51,7 @@ _FRIENDLY_NAMES = {
 # Prose-friendly replacements (executive summary, key drivers, etc.)
 # Ordered longest-first to avoid partial replacement issues
 _TEXT_REPLACEMENTS = [
+    # Technical feature codes → friendly names
     ("roll_24", "24-hour moving average"), ("roll_12", "12-hour moving average"),
     ("roll_6", "short-term moving average"),
     ("lag_24", "24-hour price trend"), ("lag_12", "12-hour price trend"),
@@ -60,6 +61,12 @@ _TEXT_REPLACEMENTS = [
     ("vol_12", "recent volatility"),
     ("hour_sin", "market session timing"), ("hour_cos", "market session timing"),
     ("dow_sin", "day-of-week seasonality"), ("dow_cos", "day-of-week seasonality"),
+    # LLM-generated generic phrases from older cached predictions
+    ("Lagged price effects", "Recent price momentum"),
+    ("lagged price effects", "recent price momentum"),
+    ("short-term rolling averages", "short-term moving average trends"),
+    ("intraday seasonality", "time-of-day effects"),
+    ("Intraday seasonality", "Time-of-day effects"),
 ]
 
 def _friendly(name: str) -> str:

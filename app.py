@@ -710,7 +710,10 @@ if history:
 accuracy_tracker.store_plan(_json.loads(plan.model_dump_json()))
 
 # Re-evaluate all stored plans (picks up any new hour closes)
-accuracy_tracker.refresh_all()
+try:
+    accuracy_tracker.refresh_all()
+except Exception:
+    pass  # Non-critical: scorecard will just show stale data
 
 all_evals = accuracy_tracker.get_all_evaluations()
 agg_stats = accuracy_tracker.get_aggregate_stats()

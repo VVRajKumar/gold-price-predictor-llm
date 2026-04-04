@@ -174,6 +174,15 @@ class AccuracyTracker:
             predicted = dp["predicted_price"]
             low = dp["low_range"]
             high = dp["high_range"]
+
+            # Guard against None / non-numeric values from cached data
+            try:
+                predicted = float(predicted)
+                low = float(low)
+                high = float(high)
+            except (TypeError, ValueError):
+                continue
+
             error = predicted - actual
             abs_error = abs(error)
             pct_error = (abs_error / actual) * 100 if actual != 0 else 0

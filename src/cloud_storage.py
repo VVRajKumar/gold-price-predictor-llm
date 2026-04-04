@@ -100,6 +100,7 @@ def _push_file(filename: str, content: str):
             timeout=_TIMEOUT,
         )
         resp.raise_for_status()
+        logger.info(f"[cloud_storage] Pushed {filename} to Gist ({len(content)} bytes)")
     except Exception as e:
         logger.warning(f"[cloud_storage] Gist push failed for {filename}: {e}")
 
@@ -113,6 +114,7 @@ def sync_from_cloud():
     session is never overwritten.
     """
     if not is_available():
+        logger.debug("[cloud_storage] Gist credentials not configured – skipping sync")
         return
 
     remote = _pull_gist()
@@ -120,19 +122,31 @@ def sync_from_cloud():
     for filename in _TRACKED_FILES:
         local_path = CACHE_DIR / filename
         if local_path.exists():
+            logger.debug(f"[cloud_storage] {filename} exists locally – skipping")
             continue  # local is authoritative during a session
         content = remote.get(filename)
         if content:
             local_path.write_text(content, encoding="utf-8")
             restored += 1
-            logger.info(f"[cloud_storage] Restored {filename} from Gist")
+            logger.info(f"[cloud_storage] Restored {filename} from Gist ({len(content)} bytes)")
+        else:
+            logger.warning(f"[cloud_storage] {filename} not found in Gist")
 
     if restored:
         logger.info(f"[cloud_storage] Restored {restored} file(s) from cloud")
 
 
+def _is_ephemeral_env() -> bool:
+    """Detect Streamlit Cloud or other ephemeral environments."""
+    return str(CACHE_DIR).replace("\\", "/").startswith("/mount/src/")
+
+
 def persist(filename: str, data: Any):
-    """Write JSON to local file **and** push to Gist (fire-and-forget thread)."""
+    """Write JSON to local file **and** push to Gist.
+
+    On ephemeral environments (Streamlit Cloud) the push is synchronous
+    so data survives app sleep.  Locally it remains a background push.
+    """
     content = json.dumps(data, indent=2, default=str)
     local_path = CACHE_DIR / filename
     local_path.write_text(content, encoding="utf-8")
@@ -140,12 +154,15 @@ def persist(filename: str, data: Any):
     if not is_available():
         return
 
-    # Push in background so it doesn't block the main thread
-    t = threading.Thread(
-        target=_push_file, args=(filename, content),
-        daemon=True, name=f"gist-push-{filename}",
-    )
-    t.start()
+    if _is_ephemeral_env():
+        # Synchronous push – critical on Cloud where daemon threads die on sleep
+        _push_file(filename, content)
+    else:
+        t = threading.Thread(
+            target=_push_file, args=(filename, content),
+            daemon=True, name=f"gist-push-{filename}",
+        )
+        t.start()
 
 
 def load(filename: str) -> Any:

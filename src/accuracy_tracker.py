@@ -297,6 +297,14 @@ class AccuracyTracker:
         Called automatically when market data updates (new day closes).
         Returns the number of plans that had new evaluable days.
         """
+        # On Cloud, local cache may have been wiped while the cached object
+        # is still alive.  Re-load from disk/Gist if in-memory state is empty.
+        if not self._stored_plans:
+            self._stored_plans = self._load_stored_plans()
+        if not self._log:
+            self._log = self._load_log()
+            self._purge_stale_entries()
+
         updated = 0
         for plan_dict in self._stored_plans:
             before_count = self._evaluable_day_count(plan_dict.get("generated_at", ""))

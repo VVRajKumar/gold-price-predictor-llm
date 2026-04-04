@@ -164,13 +164,39 @@ class MarketDataFetcher:
             fx.index = fx.index.tz_convert(None)
 
         # Reindex daily FX to match gold data timestamps (may be hourly), forward-fill
-        fx_aligned = fx.reindex(result.index, method="ffill")
-        fx_aligned = fx_aligned.bfill()
-        fx_aligned = fx_aligned.fillna(self.get_usdinr_rate())
+        try:
+            fx_aligned = fx.reindex(result.index, method="ffill")
+            fx_aligned = fx_aligned.bfill()
+            fx_aligned = fx_aligned.fillna(self.get_usdinr_rate())
+        except Exception as e:
+            # Fallback: if reindex fails (index type mismatch on some envs),
+            # map each timestamp to the nearest daily FX rate manually.
+            logger.warning(f"FX reindex failed ({e}), using date-based merge")
+            spot = self.get_usdinr_rate()
+            fx_map = dict(zip(fx.index.date if hasattr(fx.index, 'date') else fx.index, fx.values))
+            rates = []
+            for ts in result.index:
+                d = ts.date() if hasattr(ts, 'date') else ts
+                rates.append(fx_map.get(d, spot))
+            fx_aligned = pd.Series(rates, index=result.index)
 
         for col in ("Open", "High", "Low", "Close"):
             if col in result.columns:
-                result[col] = result[col] * fx_aligned * oz_to_10g
+                result[col] = pd.to_numeric(result[col], errors="coerce").values * fx_aligned.values * oz_to_10g
+
+        # Verify conversion actually produced INR-scale values
+        if "Close" in result.columns:
+            post_median = pd.to_numeric(result["Close"], errors="coerce").median()
+            if pd.notna(post_median) and post_median < 10_000:
+                logger.error(
+                    f"FX conversion appears to have failed (post-median={post_median:.0f}),"
+                    f" forcing spot-rate conversion"
+                )
+                spot = self.get_usdinr_rate()
+                for col2 in ("Open", "High", "Low", "Close"):
+                    if col2 in result.columns:
+                        # Values are still in USD, apply full conversion
+                        result[col2] = pd.to_numeric(result[col2], errors="coerce") * spot * oz_to_10g
 
         logger.info(
             f"FX conversion applied: rate range {fx_aligned.min():.2f}–{fx_aligned.max():.2f}"

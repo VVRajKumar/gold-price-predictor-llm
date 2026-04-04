@@ -128,10 +128,14 @@ class PredictionEngine:
                     # and XGBoost noise are enforced on old stored plans too.
                     from .guardrails import validate_prediction_plan
                     plan_dict = json.loads(plan.model_dump_json())
+                    saved_reports = plan_dict.get("agent_reports", {})
                     corrected = validate_prediction_plan(
                         plan_dict, plan.current_price, len(plan.daily_predictions)
                     )
                     plan = PredictionPlan(**corrected)
+                    # Restore agent_reports (guardrails don't handle these)
+                    if saved_reports:
+                        plan.agent_reports = saved_reports
                     self._current_plan = plan
                     logger.info("Loaded cached prediction plan (guardrails re-applied)")
             except Exception as e:

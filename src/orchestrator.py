@@ -35,6 +35,9 @@ from .agents.historical_pattern_agent import HistoricalPatternAgent
 from .data_fetchers.market_data import MarketDataFetcher
 from .guardrails import validate_prediction_plan, adjust_confidence_from_track_record
 from .time_utils import iso_now_ist, now_ist
+from .ml_ensemble import MLEnsemble
+from .signal_extractor import extract_signals
+from .narrator import LLMNarrator, compute_ml_confidence
 
 
 # ── Prediction schema ──────────────────────────────────────────────
@@ -60,56 +63,6 @@ class PredictionPlan(BaseModel):
     bull_case: str = ""
     bear_case: str = ""
     agent_reports: dict[str, dict] = Field(default_factory=dict)  # slim copies
-
-
-META_SYSTEM_PROMPT = """You are the Chief Gold Strategist for the INDIAN gold market.
-You are the most senior analyst in a multi-agent gold prediction system.
-All prices are in INR (Indian Rupees) per 10 grams.
-
-You have received independent reports from 8 specialist analysts (geopolitics, trend,
-ETF flows, macro-economics, oil/energy, sentiment, technical analysis, historical patterns),
-all focused on the Indian gold market.
-
-Your job is to:
-1. Weigh each analyst's findings by their confidence AND impact score.
-2. Identify consensus and disagreements.
-3. Produce a precise hourly rolling prediction with price targets in INR per 10g and confidence bands.
-4. Consider the dual drivers: global gold price (COMEX) AND USD/INR exchange rate.
-5. Explain the bull case and bear case for Indian gold.
-6. List the top risk factors that could invalidate the prediction.
-
-CRITICAL REALISM RULES for hourly predictions:
-- Gold does NOT move monotonically. Include realistic pullbacks, consolidations, and
-  reversals within the 24h horizon (e.g., a bullish outlook may still have 2-3 dip hours).
-- Avoid uniform increments. Real price moves cluster around news events and market opens
-  (MCX 9am IST, COMEX 8:20pm IST). Some hours should be flat or slightly contrarian.
-- Confidence MUST decay with horizon: hours 1-6 can be 0.70-0.85, hours 7-12 should
-  drop to 0.55-0.70, hours 13-24 should be 0.40-0.60. The future is uncertain.
-- Widen bands for later hours. Hour 1 band ±₹200-₹400, hour 24 band ±₹600-₹1200.
-- Each hour's key_driver should reflect what is ACTUALLY driving that specific hour
-  (market session, data release, technical level), not recycle the same 5 reasons.
-
-Return ONLY valid JSON with these EXACT keys (no markdown fences):
-{
-  "overall_outlook": "bullish" | "bearish" | "neutral",
-  "overall_confidence": 0.0 to 1.0,
-  "executive_summary": "3-4 paragraph synthesis of all agent findings for Indian gold",
-  "daily_predictions": [
-    {
-      "date": "YYYY-MM-DD HH:00",
-      "predicted_price": float (INR per 10g),
-      "low_range": float,
-      "high_range": float,
-      "confidence": 0.0 to 1.0,
-      "key_driver": "what drives this hour's move"
-    },
-    ... (exactly one entry per hour for the next horizon, starting from next full hour)
-  ],
-  "risk_factors": ["risk 1", "risk 2", ...],
-  "bull_case": "paragraph describing the bullish scenario for Indian gold",
-  "bear_case": "paragraph describing the bearish scenario for Indian gold"
-}
-"""
 
 
 def _extract_summary_text(text: str) -> str:
@@ -233,6 +186,8 @@ class Orchestrator:
             request_timeout=90,
         )
         self._market = MarketDataFetcher()
+        self._ml_ensemble = MLEnsemble()
+        self._narrator = LLMNarrator()
 
     # ------------------------------------------------------------------ #
     def run_all_agents(self) -> list[AgentReport]:
@@ -270,35 +225,6 @@ class Orchestrator:
         return reports
 
     # ------------------------------------------------------------------ #
-    def _build_meta_prompt(self, reports: list[AgentReport], current_price: float) -> str:
-        """Assemble the meta-reasoning prompt from all agent reports."""
-        this_hour = now_ist().replace(minute=0, second=0, microsecond=0)
-        start_hour = this_hour + timedelta(hours=1)
-        dates = [(start_hour + timedelta(hours=i)).strftime("%Y-%m-%d %H:00") for i in range(PREDICTION_HOURS)]
-
-        agent_summaries = []
-        for r in reports:
-            summary_for_prompt = _format_summary(r.summary, 800)
-            agent_summaries.append(
-                f"### {r.agent_name}\n"
-                f"- Outlook: {r.outlook} | Confidence: {r.confidence:.2f} | "
-                f"Impact: {r.impact_score:.2f} | Bias: {r.prediction_bias:+.2f}\n"
-                f"- Summary: {summary_for_prompt}\n"
-                f"- Key factors: {', '.join(r.key_factors[:5])}\n"
-            )
-
-        return f"""Current Indian gold price: \u20b9{current_price:,.2f} per 10 grams
-Prediction dates needed: {', '.join(dates)}
-
-## Recent Forecast Error Feedback
-{self._build_feedback_context()}
-
-## Agent Reports
-
-{''.join(agent_summaries)}
-
-Synthesise all of the above and produce your hourly prediction plan for Indian gold (INR per 10g) as JSON."""
-
     def _build_feedback_context(self) -> str:
         """Summarise recent forecast misses so the next run can self-correct."""
         log_path = Path(CACHE_DIR) / "accuracy_log.json"
@@ -372,8 +298,21 @@ Synthesise all of the above and produce your hourly prediction plan for Indian g
 
     # ------------------------------------------------------------------ #
     def generate_prediction(self) -> PredictionPlan:
-        """Full pipeline: agents → meta-reasoning → PredictionPlan."""
-        logger.info("=== Orchestrator: starting full prediction cycle ===")
+        """ML-first pipeline: agents → signals → ML ensemble → narrator → PredictionPlan.
+
+        Architecture:
+          1. Get current gold price
+          2. Run all 8 specialist agents (intelligence gathering)
+          3. Extract numeric signals from agent reports
+          4. Train ML ensemble (XGBoost + LightGBM + Ridge stacking)
+          5. ML ensemble forecasts next 24 hours (all prices come from ML)
+          6. Compute SHAP explainability
+          7. LLM narrator writes prose (executive summary, bull/bear, risk factors)
+          8. Assemble PredictionPlan
+
+        The LLM NEVER generates price numbers — only narrative.
+        """
+        logger.info("=== Orchestrator: starting ML-first prediction cycle ===")
 
         # 1. Get current gold price in INR per 10 grams
         current_price = self._market.get_gold_inr_price()
@@ -390,116 +329,136 @@ Synthesise all of the above and produce your hourly prediction plan for Indian g
 
         logger.info(f"Current Indian gold price: \u20b9{current_price:,.2f} per 10g")
 
-        # 2. Run all agents
+        # 2. Run all agents (intelligence gathering, NOT price prediction)
         reports = self.run_all_agents()
         logger.info(f"Received {len(reports)} agent reports")
 
-        # 3. Meta-reasoning
-        meta_prompt = self._build_meta_prompt(reports, current_price)
-        try:
-            response = self._llm.invoke([
-                SystemMessage(content=META_SYSTEM_PROMPT),
-                HumanMessage(content=meta_prompt),
-            ])
-            raw = response.content
-            result = json.loads(raw)
-        except json.JSONDecodeError:
-            logger.warning("Meta-reasoning returned invalid JSON – using defaults")
-            result = {
-                "overall_outlook": "neutral",
-                "overall_confidence": 0.3,
-                "executive_summary": raw if 'raw' in dir() else "Analysis unavailable",
-                "daily_predictions": [],
-                "risk_factors": [],
-                "bull_case": "",
-                "bear_case": "",
+        # Build slim agent report dict for plan + narrator
+        agent_report_dict = {
+            r.agent_name: {
+                "outlook": r.outlook,
+                "confidence": r.confidence,
+                "impact_score": r.impact_score,
+                "prediction_bias": r.prediction_bias,
+                "summary": _format_summary(r.summary, 700),
+                "key_factors": r.key_factors[:5],
+                "data_points": _json_safe(r.data_points),
             }
-        except Exception as e:
-            logger.error(f"Meta-reasoning LLM call failed: {e}")
-            result = {
-                "overall_outlook": "neutral",
-                "overall_confidence": 0.0,
-                "executive_summary": f"Meta-reasoning failed: {e}",
-                "daily_predictions": [],
-                "risk_factors": [],
-                "bull_case": "",
-                "bear_case": "",
-            }
+            for r in reports
+        }
 
-        # 4. ── Guardrail: validate meta-LLM output ──
-        result = validate_prediction_plan(result, current_price, PREDICTION_HOURS)
+        # 3. Extract numeric signals from agent reports → ML features
+        agent_signals = extract_signals(agent_report_dict)
+        logger.info(f"Agent signals: {agent_signals}")
 
-        # 5. ── Guardrail: track-record confidence adjustment ──
-        result["overall_confidence"] = adjust_confidence_from_track_record(
-            result["overall_confidence"],
+        # 4. Train ML ensemble
+        ml_trained = self._ml_ensemble.train(agent_signals)
+        if not ml_trained:
+            logger.warning("ML ensemble training failed — falling back to basic forecast")
+
+        # 5. ML ensemble predicts next 24 hours
+        ml_predictions = []
+        if ml_trained:
+            ml_predictions = self._ml_ensemble.predict(agent_signals)
+            logger.info(f"ML ensemble produced {len(ml_predictions)} hourly predictions")
+
+        # 6. SHAP explainability
+        shap_explanation = None
+        if ml_trained:
+            shap_explanation = self._ml_ensemble.get_shap_explanation()
+            if shap_explanation:
+                logger.info(
+                    f"SHAP: {shap_explanation['total_features']} features, "
+                    f"top driver: {shap_explanation['feature_importance'][0]['feature']}"
+                )
+
+        # 7. LLM narrator writes prose (NO price generation)
+        feedback_ctx = self._build_feedback_context()
+        narrative = self._narrator.narrate(
+            ml_predictions=ml_predictions,
+            agent_reports=agent_report_dict,
+            shap_explanation=shap_explanation,
+            current_price=current_price,
+            feedback_context=feedback_ctx,
+        )
+
+        # 8. Assemble PredictionPlan
+        #    Prices come from ML, narrative from LLM
+        start_hour = now_ist().replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        target_times = [start_hour + timedelta(hours=i) for i in range(PREDICTION_HOURS)]
+        hourly_drivers = narrative.get("hourly_drivers", [])
+
+        daily: list[DayPrediction] = []
+        for i, ts in enumerate(target_times):
+            ml_item = ml_predictions[i] if i < len(ml_predictions) else None
+            driver = hourly_drivers[i] if i < len(hourly_drivers) else "Market activity"
+
+            if ml_item:
+                # Confidence decays with horizon (derived from band width)
+                price = float(ml_item.get("xgb_price", current_price))
+                lo = float(ml_item.get("xgb_low", price * 0.995))
+                hi = float(ml_item.get("xgb_high", price * 1.005))
+                band_pct = (hi - lo) / price * 100 if price > 0 else 1.0
+                # Tighter bands → higher confidence for that hour
+                hour_conf = max(0.20, min(0.90, 0.85 - band_pct * 0.15))
+                daily.append(DayPrediction(
+                    date=ts.strftime("%Y-%m-%d %H:00"),
+                    predicted_price=round(price, 2),
+                    low_range=round(lo, 2),
+                    high_range=round(hi, 2),
+                    confidence=round(hour_conf, 2),
+                    key_driver=driver,
+                ))
+            else:
+                daily.append(DayPrediction(
+                    date=ts.strftime("%Y-%m-%d %H:00"),
+                    predicted_price=round(current_price, 2),
+                    low_range=round(current_price * 0.995, 2),
+                    high_range=round(current_price * 1.005, 2),
+                    confidence=0.3,
+                    key_driver="Fallback baseline (ML unavailable)",
+                ))
+
+        # Overall confidence from ML band widths (NOT from LLM)
+        ml_confidence = compute_ml_confidence(ml_predictions, current_price)
+
+        # Track-record adjustment
+        ml_confidence = adjust_confidence_from_track_record(
+            ml_confidence,
             mape=self._get_recent_mape(),
             band_hit_rate=self._get_recent_band_hit_rate(),
         )
 
-        # 6. Build PredictionPlan
-        daily = []
-        for dp in result.get("daily_predictions", []):
-            try:
-                daily.append(DayPrediction(**dp))
-            except Exception:
-                pass
-
-        # Normalise to fixed hourly horizon even when LLM returns fewer/misaligned rows.
-        start_hour = now_ist().replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-        target_times = [start_hour + timedelta(hours=i) for i in range(PREDICTION_HOURS)]
-        normalised: list[DayPrediction] = []
-        for i, ts in enumerate(target_times):
-            src = daily[i] if i < len(daily) else (daily[-1] if daily else None)
-            if src is None:
-                base = current_price
-                normalised.append(
-                    DayPrediction(
-                        date=ts.strftime("%Y-%m-%d %H:00"),
-                        predicted_price=round(base, 2),
-                        low_range=round(base * 0.995, 2),
-                        high_range=round(base * 1.005, 2),
-                        confidence=0.4,
-                        key_driver="Fallback hourly baseline",
-                    )
-                )
-            else:
-                normalised.append(
-                    DayPrediction(
-                        date=ts.strftime("%Y-%m-%d %H:00"),
-                        predicted_price=float(src.predicted_price),
-                        low_range=float(src.low_range),
-                        high_range=float(src.high_range),
-                        confidence=float(src.confidence),
-                        key_driver=str(src.key_driver),
-                    )
-                )
-        daily = normalised
+        # Store SHAP + component info in agent_reports for UI display
+        if shap_explanation:
+            agent_report_dict["_ml_ensemble"] = {
+                "type": "ml_ensemble",
+                "model": "XGBoost + LightGBM + Ridge (stacked)",
+                "shap": shap_explanation,
+            }
 
         plan = PredictionPlan(
             current_price=current_price,
-            overall_outlook=result.get("overall_outlook", "neutral"),
-            overall_confidence=float(result.get("overall_confidence", 0.5)),
-            executive_summary=result.get("executive_summary", ""),
+            overall_outlook=narrative.get("overall_outlook", "neutral"),
+            overall_confidence=float(ml_confidence),
+            executive_summary=narrative.get("executive_summary", ""),
             daily_predictions=daily,
-            risk_factors=result.get("risk_factors", []),
-            bull_case=result.get("bull_case", ""),
-            bear_case=result.get("bear_case", ""),
-            agent_reports={
-                r.agent_name: {
-                    "outlook": r.outlook,
-                    "confidence": r.confidence,
-                    "impact_score": r.impact_score,
-                    "prediction_bias": r.prediction_bias,
-                    "summary": _format_summary(r.summary, 700),
-                    "key_factors": r.key_factors[:5],
-                    "data_points": _json_safe(r.data_points),
-                }
-                for r in reports
-            },
+            risk_factors=narrative.get("risk_factors", []),
+            bull_case=narrative.get("bull_case", ""),
+            bear_case=narrative.get("bear_case", ""),
+            agent_reports=agent_report_dict,
         )
 
+        # Apply guardrails on the final plan
+        plan_dict = json.loads(plan.model_dump_json())
+        corrected = validate_prediction_plan(plan_dict, current_price, PREDICTION_HOURS)
+        plan = PredictionPlan(**corrected)
+        # Restore agent_reports (guardrails don't modify these)
+        plan.agent_reports = agent_report_dict
+
         logger.info(
-            f"=== Prediction complete: {plan.overall_outlook} "
-            f"(conf={plan.overall_confidence:.2f}) ==="
+            f"=== ML-first prediction complete: {plan.overall_outlook} "
+            f"(conf={plan.overall_confidence:.2f}, "
+            f"ml_preds={len(ml_predictions)}, shap={'yes' if shap_explanation else 'no'}) ==="
         )
         return plan

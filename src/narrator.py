@@ -1,0 +1,248 @@
+"""
+LLM Narrator – generates human-readable narrative from ML predictions.
+
+The narrator receives:
+  * ML ensemble predictions (prices, bands, component breakdowns)
+  * Agent reports (same 8 agents, run for intelligence gathering)
+  * SHAP feature importances
+  * Accuracy feedback
+
+It produces:
+  * executive_summary  – 3-4 paragraph synthesis
+  * overall_outlook    – bullish / bearish / neutral
+  * overall_confidence – 0-1 (derived from ML band width, NOT hallucinated)
+  * bull_case / bear_case / risk_factors
+  * per-hour key_driver strings
+
+CRITICAL: The narrator NEVER generates price numbers.  All prices come from
+the ML ensemble.  The LLM only writes prose + classifies outlook.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+from typing import Any, Optional
+
+from langchain_openai import AzureChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
+from loguru import logger
+
+from .config import (
+    AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY,
+    AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION,
+    TEMPERATURE, PREDICTION_HOURS, CACHE_DIR,
+)
+from .time_utils import now_ist
+
+
+_NARRATOR_SYSTEM = """You are a senior Gold Market Analyst writing a briefing for institutional investors.
+
+You are given:
+1. ML model predictions (prices, confidence bands, component model outputs)
+2. SHAP feature importance (which factors drove the ML prediction)
+3. Eight specialist agent reports covering geopolitics, trend, ETF flows, macro,
+   oil/energy, sentiment, technicals, and historical patterns
+4. Recent accuracy feedback
+
+YOUR ROLE: Narrate and explain the ML prediction.  You do NOT predict prices.
+The ML models have already generated all the numbers.  Your job is to:
+- Explain WHY the ML model predicts what it does (using SHAP + agent context)
+- Provide an overall outlook classification (bullish / bearish / neutral)
+- Write a bull case, bear case, and list risk factors
+- For each prediction hour, write a brief key_driver string explaining
+  what event/factor influences that hour (market sessions, data releases, etc.)
+
+Return ONLY valid JSON with these EXACT keys:
+{
+  "overall_outlook": "bullish" | "bearish" | "neutral",
+  "executive_summary": "3-4 paragraph market briefing explaining the ML prediction",
+  "bull_case": "paragraph on bullish scenario",
+  "bear_case": "paragraph on bearish scenario",
+  "risk_factors": ["risk1", "risk2", ...],
+  "hourly_drivers": ["driver for hour 1", "driver for hour 2", ..., "driver for hour 24"]
+}
+
+Do NOT include any price numbers in your output (prices are from the ML model).
+Do NOT wrap in markdown fences.
+"""
+
+
+class LLMNarrator:
+    """Generates prose narrative from ML predictions + agent intelligence."""
+
+    def __init__(self):
+        self._llm = AzureChatOpenAI(
+            azure_endpoint=AZURE_OPENAI_ENDPOINT,
+            azure_deployment=AZURE_OPENAI_DEPLOYMENT,
+            api_key=AZURE_OPENAI_API_KEY,
+            api_version=AZURE_OPENAI_API_VERSION,
+            temperature=TEMPERATURE,
+            request_timeout=90,
+        )
+
+    def narrate(
+        self,
+        ml_predictions: list[dict],
+        agent_reports: dict[str, dict],
+        shap_explanation: Optional[dict],
+        current_price: float,
+        feedback_context: str = "",
+    ) -> dict[str, Any]:
+        """
+        Produce narrative content.
+
+        Returns dict with keys: overall_outlook, executive_summary,
+        bull_case, bear_case, risk_factors, hourly_drivers.
+        """
+        prompt = self._build_prompt(
+            ml_predictions, agent_reports, shap_explanation,
+            current_price, feedback_context,
+        )
+
+        try:
+            response = self._llm.invoke([
+                SystemMessage(content=_NARRATOR_SYSTEM),
+                HumanMessage(content=prompt),
+            ])
+            result = json.loads(response.content)
+        except json.JSONDecodeError:
+            logger.warning("Narrator returned invalid JSON – using defaults")
+            result = self._defaults()
+        except Exception as e:
+            logger.error(f"Narrator LLM call failed: {e}")
+            result = self._defaults()
+
+        # Validate
+        outlook = str(result.get("overall_outlook", "neutral")).lower()
+        if outlook not in {"bullish", "bearish", "neutral"}:
+            outlook = "neutral"
+        result["overall_outlook"] = outlook
+
+        return result
+
+    def _build_prompt(
+        self,
+        ml_predictions: list[dict],
+        agent_reports: dict[str, dict],
+        shap_explanation: Optional[dict],
+        current_price: float,
+        feedback_context: str,
+    ) -> str:
+        sections = []
+
+        # Current price
+        sections.append(f"Current Indian gold price: ₹{current_price:,.2f} per 10g")
+
+        # ML prediction summary
+        if ml_predictions:
+            first = ml_predictions[0]
+            last = ml_predictions[-1]
+            sections.append(
+                f"\n## ML Ensemble Predictions (next {len(ml_predictions)} hours)\n"
+                f"- Hour 1: ₹{first.get('xgb_price', 0):,.2f} "
+                f"[₹{first.get('xgb_low', 0):,.2f} – ₹{first.get('xgb_high', 0):,.2f}]\n"
+                f"- Hour {len(ml_predictions)}: ₹{last.get('xgb_price', 0):,.2f} "
+                f"[₹{last.get('xgb_low', 0):,.2f} – ₹{last.get('xgb_high', 0):,.2f}]\n"
+                f"- Direction: {'UP' if last.get('xgb_price', 0) > first.get('xgb_price', 0) else 'DOWN'}\n"
+                f"- Model components (Hour 1): "
+                f"XGBoost=₹{first.get('component_xgb', 0):,.2f}, "
+                f"LightGBM=₹{first.get('component_lgb', 0):,.2f}, "
+                f"Ridge=₹{first.get('component_ridge', 0):,.2f}"
+            )
+
+        # SHAP explanation
+        if shap_explanation:
+            top_features = shap_explanation.get("feature_importance", [])[:10]
+            if top_features:
+                feat_lines = [
+                    f"  {f['feature']}: {f['importance']:.4f}"
+                    for f in top_features
+                ]
+                sections.append(
+                    "\n## SHAP Feature Importance (top 10 drivers)\n"
+                    + "\n".join(feat_lines)
+                )
+
+            hourly = shap_explanation.get("hourly_drivers", [])
+            if hourly:
+                h_lines = [
+                    f"  Hour {h['hour']}: {', '.join(h['drivers'])}"
+                    for h in hourly[:6]  # show first 6 hours
+                ]
+                sections.append(
+                    "\n## Per-Hour Key Drivers (from SHAP)\n" + "\n".join(h_lines)
+                )
+
+        # Agent summaries (for context, not for price prediction)
+        if agent_reports:
+            agent_sec = ["\n## Agent Intelligence Reports\n"]
+            for name, report in agent_reports.items():
+                if not isinstance(report, dict):
+                    continue
+                agent_sec.append(
+                    f"### {name.replace('_', ' ').title()}\n"
+                    f"- Outlook: {report.get('outlook', 'N/A')} | "
+                    f"Confidence: {report.get('confidence', 0):.2f} | "
+                    f"Bias: {report.get('prediction_bias', 0):+.2f}\n"
+                    f"- Summary: {str(report.get('summary', ''))[:500]}\n"
+                    f"- Key factors: {', '.join(report.get('key_factors', [])[:5])}\n"
+                )
+            sections.append("".join(agent_sec))
+
+        # Feedback
+        if feedback_context:
+            sections.append(f"\n## Recent Accuracy Feedback\n{feedback_context}")
+
+        sections.append(
+            "\nBased on all of the above, write your narrative briefing as JSON."
+        )
+
+        return "\n".join(sections)
+
+    @staticmethod
+    def _defaults() -> dict:
+        return {
+            "overall_outlook": "neutral",
+            "executive_summary": "Analysis could not be generated.",
+            "bull_case": "",
+            "bear_case": "",
+            "risk_factors": [],
+            "hourly_drivers": ["Market activity" for _ in range(PREDICTION_HOURS)],
+        }
+
+
+def compute_ml_confidence(predictions: list[dict], current_price: float) -> float:
+    """
+    Derive overall confidence from ML band widths (NOT from LLM).
+
+    Narrow bands relative to price → high confidence.
+    Wide bands → low confidence.
+    """
+    if not predictions or current_price <= 0:
+        return 0.4
+
+    band_pcts = []
+    for p in predictions:
+        lo = p.get("xgb_low", 0)
+        hi = p.get("xgb_high", 0)
+        mid = p.get("xgb_price", current_price)
+        if mid > 0:
+            band_pcts.append((hi - lo) / mid * 100)
+
+    if not band_pcts:
+        return 0.4
+
+    avg_band_pct = sum(band_pcts) / len(band_pcts)
+
+    # Map: 0.5% band → 0.85 conf, 1% → 0.75, 2% → 0.60, 4% → 0.40, 8% → 0.20
+    if avg_band_pct <= 0.5:
+        conf = 0.85
+    elif avg_band_pct <= 2.0:
+        conf = 0.85 - (avg_band_pct - 0.5) * 0.167  # linear decay
+    elif avg_band_pct <= 5.0:
+        conf = 0.60 - (avg_band_pct - 2.0) * 0.067
+    else:
+        conf = max(0.20, 0.40 - (avg_band_pct - 5.0) * 0.04)
+
+    return round(max(0.10, min(0.90, conf)), 2)

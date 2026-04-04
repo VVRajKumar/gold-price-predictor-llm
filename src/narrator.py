@@ -191,6 +191,27 @@ class LLMNarrator:
         current_price: float,
         feedback_context: str,
     ) -> str:
+        try:
+            return self._build_prompt_inner(
+                ml_predictions, agent_reports, shap_explanation,
+                current_price, feedback_context,
+            )
+        except Exception as e:
+            logger.warning(f"Narrator prompt build failed ({e}), using minimal prompt")
+            return (
+                f"Current Indian gold price: ₹{current_price:,.2f} per 10g.\n"
+                f"ML model predicts {len(ml_predictions)} hours.\n"
+                "Write your narrative briefing as JSON."
+            )
+
+    def _build_prompt_inner(
+        self,
+        ml_predictions: list[dict],
+        agent_reports: dict[str, dict],
+        shap_explanation: Optional[dict],
+        current_price: float,
+        feedback_context: str,
+    ) -> str:
         sections = []
 
         # Current price

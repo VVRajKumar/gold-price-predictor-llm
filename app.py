@@ -296,7 +296,13 @@ with c4:
     if plan.daily_predictions and _valid_price:
         horizon_target = plan.daily_predictions[-1]
         delta = horizon_target.predicted_price - plan.current_price
-        st.metric("24-Hour Target", f"₹{horizon_target.predicted_price:,.2f}", f"₹{delta:+,.2f}")
+        st.metric(
+            "24-Hour Target",
+            f"₹{horizon_target.predicted_price:,.2f}",
+            delta=round(delta, 2),
+            delta_color="normal",
+            help=f"Change from current price: ₹{delta:+,.2f}",
+        )
     else:
         st.metric("24-Hour Target", "N/A")
 with c5:

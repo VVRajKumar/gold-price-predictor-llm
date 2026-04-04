@@ -24,6 +24,8 @@ import json
 import math
 from typing import Any, Optional
 
+import re
+
 from langchain_openai import AzureChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from loguru import logger
@@ -34,6 +36,47 @@ from .config import (
     TEMPERATURE, PREDICTION_HOURS, CACHE_DIR,
 )
 from .time_utils import now_ist
+
+# ── Technical → human-friendly name replacements ─────────────────────
+# Order matters: longer patterns first to avoid partial matches
+_TECHNICAL_REPLACEMENTS = [
+    ("roll_24", "24-hour moving average"),
+    ("roll_12", "12-hour moving average"),
+    ("roll_6", "short-term moving average"),
+    ("lag_24", "24-hour price trend"),
+    ("lag_12", "12-hour price trend"),
+    ("lag_6", "6-hour price trend"),
+    ("lag_3", "3-hour price trend"),
+    ("lag_2", "short-term price trend"),
+    ("lag_1", "recent price momentum"),
+    ("ret_6h", "6-hour returns"),
+    ("ret_1h", "1-hour returns"),
+    ("vol_12", "recent volatility"),
+    ("hour_sin", "market session timing"),
+    ("hour_cos", "market session timing"),
+    ("dow_sin", "day-of-week seasonality"),
+    ("dow_cos", "day-of-week seasonality"),
+]
+
+
+def _sanitize_technical_names(result: dict) -> dict:
+    """Replace any leftover internal feature codes with friendly names."""
+    def _clean(text: str) -> str:
+        for code, friendly in _TECHNICAL_REPLACEMENTS:
+            text = text.replace(code, friendly)
+        return text
+
+    for key in ("executive_summary", "bull_case", "bear_case"):
+        if key in result and isinstance(result[key], str):
+            result[key] = _clean(result[key])
+
+    if "risk_factors" in result and isinstance(result["risk_factors"], list):
+        result["risk_factors"] = [_clean(r) if isinstance(r, str) else r for r in result["risk_factors"]]
+
+    if "hourly_drivers" in result and isinstance(result["hourly_drivers"], list):
+        result["hourly_drivers"] = [_clean(d) if isinstance(d, str) else d for d in result["hourly_drivers"]]
+
+    return result
 
 
 _NARRATOR_SYSTEM = """You are a senior Gold Market Analyst writing a briefing for institutional investors.
@@ -52,6 +95,22 @@ The ML models have already generated all the numbers.  Your job is to:
 - Write a bull case, bear case, and list risk factors
 - For each prediction hour, write a brief key_driver string explaining
   what event/factor influences that hour (market sessions, data releases, etc.)
+
+CRITICAL NAMING RULES – NEVER use internal feature codes in your output.
+Always use these human-readable names instead:
+  lag_1 → "recent price momentum"      lag_2 → "short-term price trend"
+  lag_3 → "3-hour price trend"         lag_6 → "6-hour price trend"
+  lag_12 → "12-hour price trend"       lag_24 → "24-hour price trend"
+  roll_6 → "short-term moving average" roll_12 → "12-hour moving average"
+  roll_24 → "24-hour moving average"
+  ret_1h → "1-hour returns"            ret_6h → "6-hour returns"
+  vol_12 → "recent volatility"
+  hour_sin / hour_cos → "time-of-day effects" or "market session timing"
+  dow_sin / dow_cos → "day-of-week seasonality"
+  sentiment_score → "market sentiment"  geopolitical_risk → "geopolitical risk"
+  macro_outlook → "macro-economic outlook"  technical_signal → "technical indicators"
+  etf_flow_signal → "ETF fund flows"   oil_energy_signal → "oil & energy impact"
+  historical_seasonal → "seasonal patterns"  trend_strength → "trend strength"
 
 Return ONLY valid JSON with these EXACT keys:
 {
@@ -118,6 +177,9 @@ class LLMNarrator:
         if outlook not in {"bullish", "bearish", "neutral"}:
             outlook = "neutral"
         result["overall_outlook"] = outlook
+
+        # Sanitize: replace any leftover technical feature names in all text fields
+        result = _sanitize_technical_names(result)
 
         return result
 

@@ -30,6 +30,46 @@ from src.prediction_engine import PredictionEngine
 from src.data_fetchers.market_data import MarketDataFetcher
 from src.time_utils import now_ist, parse_iso_to_ist
 
+# ── Display-time name helpers ────────────────────────────────────────
+# Chart-friendly names (short labels for SHAP bar chart / table headers)
+_FRIENDLY_NAMES = {
+    "lag_1": "Price 1 Hour Ago", "lag_2": "Price 2 Hours Ago",
+    "lag_3": "Price 3 Hours Ago", "lag_6": "Price 6 Hours Ago",
+    "lag_12": "Price 12 Hours Ago", "lag_24": "Price 24 Hours Ago",
+    "roll_6": "6-Hour Average Price", "roll_12": "12-Hour Average Price",
+    "roll_24": "24-Hour Average Price",
+    "ret_1h": "1-Hour Price Change %", "ret_6h": "6-Hour Price Change %",
+    "vol_12": "12-Hour Volatility",
+    "hour_sin": "Time of Day (sine)", "hour_cos": "Time of Day (cosine)",
+    "dow_sin": "Day of Week (sine)", "dow_cos": "Day of Week (cosine)",
+    "sentiment_score": "Market Sentiment", "geopolitical_risk": "Geopolitical Risk",
+    "macro_outlook": "Macro-Economic Outlook", "technical_signal": "Technical Analysis Signal",
+    "etf_flow_signal": "ETF Fund Flows", "oil_energy_signal": "Oil & Energy Impact",
+    "historical_seasonal": "Seasonal Pattern", "trend_strength": "Trend Strength",
+}
+
+# Prose-friendly replacements (executive summary, key drivers, etc.)
+# Ordered longest-first to avoid partial replacement issues
+_TEXT_REPLACEMENTS = [
+    ("roll_24", "24-hour moving average"), ("roll_12", "12-hour moving average"),
+    ("roll_6", "short-term moving average"),
+    ("lag_24", "24-hour price trend"), ("lag_12", "12-hour price trend"),
+    ("lag_6", "6-hour price trend"), ("lag_3", "3-hour price trend"),
+    ("lag_2", "short-term price trend"), ("lag_1", "recent price momentum"),
+    ("ret_6h", "6-hour returns"), ("ret_1h", "1-hour returns"),
+    ("vol_12", "recent volatility"),
+    ("hour_sin", "market session timing"), ("hour_cos", "market session timing"),
+    ("dow_sin", "day-of-week seasonality"), ("dow_cos", "day-of-week seasonality"),
+]
+
+def _friendly(name: str) -> str:
+    return _FRIENDLY_NAMES.get(name, name)
+
+def _clean_text(text: str) -> str:
+    for code, friendly in _TEXT_REPLACEMENTS:
+        text = text.replace(code, friendly)
+    return text
+
 # ── Page config ──────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Indian Gold Price Predictor – Agentic AI",
@@ -159,13 +199,16 @@ if view_mode == "Weekly Archive":
         week_id = item.get("week_id", "Unknown Week")
         outlook = str(plan_dict.get("overall_outlook", "neutral")).upper()
         with st.expander(f"{week_id} — {outlook}"):
-            st.markdown(plan_dict.get("executive_summary", "No summary available."))
+            _arch_summary = plan_dict.get("executive_summary", "No summary available.")
+            st.markdown(_clean_text(_arch_summary) if _arch_summary else "No summary available.")
 
             daily = plan_dict.get("daily_predictions", [])
             if daily:
                 adf = pd.DataFrame(daily)
                 if "date" in adf.columns:
                     adf["date"] = pd.to_datetime(adf["date"])
+                if "key_driver" in adf.columns:
+                    adf["key_driver"] = adf["key_driver"].apply(lambda x: _clean_text(str(x)) if x else x)
                 st.dataframe(
                     adf[["date", "predicted_price", "low_range", "high_range", "confidence", "key_driver"]],
                     width="stretch",
@@ -291,7 +334,7 @@ st.divider()
 
 # ── Executive Summary ────────────────────────────────────────────────
 with st.expander("📋 Executive Summary", expanded=True):
-    _summary = plan.executive_summary
+    _summary = _clean_text(plan.executive_summary) if plan.executive_summary else ""
     # Guard: if LLM returned raw JSON instead of prose, show it cleanly
     if _summary and (_summary.strip().startswith("{") or _summary.strip().startswith("[")):
         st.code(_summary, language="json")
@@ -365,8 +408,10 @@ if plan.daily_predictions:
     st.plotly_chart(fig, width="stretch")
 
     # Daily breakdown table
+    _display_df = pred_df[["date", "predicted_price", "low_range", "high_range", "confidence", "key_driver"]].copy()
+    _display_df["key_driver"] = _display_df["key_driver"].apply(lambda x: _clean_text(str(x)) if x else x)
     st.dataframe(
-        pred_df[["date", "predicted_price", "low_range", "high_range", "confidence", "key_driver"]]
+        _display_df
         .rename(columns={
             "date": "Date",
             "predicted_price": "Predicted (₹)",
@@ -399,27 +444,6 @@ st.caption(
 
 _ml_info = plan.agent_reports.get("_ml_ensemble", {})
 _shap = _ml_info.get("shap") if isinstance(_ml_info, dict) else None
-
-# Display-time name mapping (handles both cached old names and new names)
-_FRIENDLY_NAMES = {
-    "lag_1": "Price 1 Hour Ago", "lag_2": "Price 2 Hours Ago",
-    "lag_3": "Price 3 Hours Ago", "lag_6": "Price 6 Hours Ago",
-    "lag_12": "Price 12 Hours Ago", "lag_24": "Price 24 Hours Ago",
-    "roll_6": "6-Hour Average Price", "roll_12": "12-Hour Average Price",
-    "roll_24": "24-Hour Average Price",
-    "ret_1h": "1-Hour Price Change %", "ret_6h": "6-Hour Price Change %",
-    "vol_12": "12-Hour Volatility",
-    "hour_sin": "Time of Day (sine)", "hour_cos": "Time of Day (cosine)",
-    "dow_sin": "Day of Week (sine)", "dow_cos": "Day of Week (cosine)",
-    "sentiment_score": "Market Sentiment", "geopolitical_risk": "Geopolitical Risk",
-    "macro_outlook": "Macro-Economic Outlook", "technical_signal": "Technical Analysis Signal",
-    "etf_flow_signal": "ETF Fund Flows", "oil_energy_signal": "Oil & Energy Impact",
-    "historical_seasonal": "Seasonal Pattern", "trend_strength": "Trend Strength",
-}
-
-def _friendly(name: str) -> str:
-    """Convert internal feature name to human-friendly display name."""
-    return _FRIENDLY_NAMES.get(name, name)
 
 if _shap:
     # ── Row 1: How It Works (3 cards) ────────────────────────────────

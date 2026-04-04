@@ -229,7 +229,7 @@ class LLMNarrator:
             hourly = shap_explanation.get("hourly_drivers", [])
             if hourly:
                 h_lines = [
-                    f"  Hour {h['hour']}: {', '.join(h['drivers'])}"
+                    f"  Hour {h['hour']}: {', '.join(str(d) for d in h.get('drivers', []))}"
                     for h in hourly[:6]  # show first 6 hours
                 ]
                 sections.append(
@@ -242,13 +242,18 @@ class LLMNarrator:
             for name, report in agent_reports.items():
                 if not isinstance(report, dict):
                     continue
+                bias = report.get('prediction_bias', 0)
+                bias = bias if isinstance(bias, (int, float)) else 0
+                conf = report.get('confidence', 0)
+                conf = conf if isinstance(conf, (int, float)) else 0
+                kf = report.get('key_factors', []) or []
                 agent_sec.append(
                     f"### {name.replace('_', ' ').title()}\n"
                     f"- Outlook: {report.get('outlook', 'N/A')} | "
-                    f"Confidence: {report.get('confidence', 0):.2f} | "
-                    f"Bias: {report.get('prediction_bias', 0):+.2f}\n"
+                    f"Confidence: {conf:.2f} | "
+                    f"Bias: {bias:+.2f}\n"
                     f"- Summary: {str(report.get('summary', ''))[:500]}\n"
-                    f"- Key factors: {', '.join(report.get('key_factors', [])[:5])}\n"
+                    f"- Key factors: {', '.join(str(k) for k in kf[:5])}\n"
                 )
             sections.append("".join(agent_sec))
 

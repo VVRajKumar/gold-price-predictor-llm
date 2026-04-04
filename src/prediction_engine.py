@@ -114,7 +114,8 @@ class PredictionEngine:
         )
 
     def _save_plan(self, plan: PredictionPlan):
-        self._cache_path.write_text(plan.model_dump_json(indent=2), encoding="utf-8")
+        content = json.loads(plan.model_dump_json())
+        cloud_storage.persist("latest_prediction.json", content)
 
     def _load_cached_plan(self):
         if self._cache_path.exists():
@@ -418,35 +419,51 @@ class PredictionEngine:
 
             if stale:
                 logger.info("No active hourly plan found (or stale) — generating new prediction")
-                plan = self._orchestrator.generate_prediction()
+                prev_plan = self._current_plan  # keep as fallback
+                try:
+                    plan = self._orchestrator.generate_prediction()
 
-                baseline = self._prophet_baseline()
-                if baseline:
-                    plan.agent_reports["prophet_baseline"] = {
-                        "type": "statistical_model",
-                        "summary": "Prophet baseline generated from recent gold price time-series trend.",
-                        "predictions": baseline,
-                    }
+                    # Validate the new plan before accepting it
+                    if (not np.isfinite(plan.current_price)
+                            or plan.current_price <= 0
+                            or plan.current_price < 30_000):
+                        raise ValueError(
+                            f"Generated plan has invalid current_price: {plan.current_price}"
+                        )
 
-                if ENABLE_XGBOOST_CORRECTION and FORECAST_GRANULARITY.lower() == "hourly":
-                    xgb_baseline = self._xgboost_hourly_baseline()
-                    if xgb_baseline:
-                        self._blend_plan_with_xgb(plan, xgb_baseline)
-                        plan.agent_reports["xgboost_baseline"] = {
-                            "type": "hourly_tabular_model",
-                            "summary": "XGBoost hourly baseline blended with LLM forecast.",
-                            "blend_weight": float(XGBOOST_BLEND_WEIGHT),
-                            "predictions": xgb_baseline,
+                    baseline = self._prophet_baseline()
+                    if baseline:
+                        plan.agent_reports["prophet_baseline"] = {
+                            "type": "statistical_model",
+                            "summary": "Prophet baseline generated from recent gold price time-series trend.",
+                            "predictions": baseline,
                         }
 
-                self._current_plan = plan
-                self._save_plan(plan)
+                    if ENABLE_XGBOOST_CORRECTION and FORECAST_GRANULARITY.lower() == "hourly":
+                        xgb_baseline = self._xgboost_hourly_baseline()
+                        if xgb_baseline:
+                            self._blend_plan_with_xgb(plan, xgb_baseline)
+                            plan.agent_reports["xgboost_baseline"] = {
+                                "type": "hourly_tabular_model",
+                                "summary": "XGBoost hourly baseline blended with LLM forecast.",
+                                "blend_weight": float(XGBOOST_BLEND_WEIGHT),
+                                "predictions": xgb_baseline,
+                            }
 
-                try:
-                    tracker = self.get_accuracy_tracker()
-                    tracker.store_plan(json.loads(plan.model_dump_json()))
+                    self._current_plan = plan
+                    self._save_plan(plan)
+
+                    try:
+                        tracker = self.get_accuracy_tracker()
+                        tracker.store_plan(json.loads(plan.model_dump_json()))
+                    except Exception as e:
+                        logger.warning(f"Could not store hourly plan for accuracy: {e}")
+
                 except Exception as e:
-                    logger.warning(f"Could not store hourly plan for accuracy: {e}")
+                    logger.error(f"Prediction generation failed: {e}")
+                    if prev_plan is not None:
+                        logger.info("Keeping previous valid plan as fallback")
+                        self._current_plan = prev_plan
 
             return self._current_plan
 

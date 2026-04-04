@@ -237,24 +237,26 @@ if plan is None:
     st.stop()
 
 # ── Top Metrics Row ──────────────────────────────────────────────────
+import math as _math
 _live_fx = market.get_usdinr_rate()
+_valid_price = _math.isfinite(plan.current_price) and plan.current_price > 0
 c1, c2, c3, c4, c5, c6 = st.columns(6)
 with c1:
-    st.metric("Current Price", f"₹{plan.current_price:,.2f}")
+    st.metric("Current Price", f"₹{plan.current_price:,.2f}" if _valid_price else "N/A")
 with c2:
     color = outlook_color(plan.overall_outlook)
     st.metric("Outlook", f"{outlook_emoji(plan.overall_outlook)} {plan.overall_outlook.upper()}")
 with c3:
     st.metric("Confidence", f"{plan.overall_confidence:.0%}")
 with c4:
-    if plan.daily_predictions:
+    if plan.daily_predictions and _valid_price:
         horizon_target = plan.daily_predictions[-1]
         delta = horizon_target.predicted_price - plan.current_price
         st.metric("24-Hour Target", f"₹{horizon_target.predicted_price:,.2f}", f"₹{delta:+,.2f}")
     else:
         st.metric("24-Hour Target", "N/A")
 with c5:
-    st.metric("USD/INR Rate", f"₹{_live_fx:.2f}")
+    st.metric("USD/INR Rate", f"₹{_live_fx:.2f}" if _math.isfinite(_live_fx) else "N/A")
 with c6:
     try:
         st.metric("Last Updated", parse_iso_to_ist(plan.generated_at).strftime("%H:%M %b %d"))
@@ -288,7 +290,12 @@ st.divider()
 
 # ── Executive Summary ────────────────────────────────────────────────
 with st.expander("📋 Executive Summary", expanded=True):
-    st.markdown(plan.executive_summary)
+    _summary = plan.executive_summary
+    # Guard: if LLM returned raw JSON instead of prose, show it cleanly
+    if _summary and (_summary.strip().startswith("{") or _summary.strip().startswith("[")):
+        st.code(_summary, language="json")
+    else:
+        st.markdown(_summary or "No executive summary available.")
 
 # ── Hourly Prediction Chart ──────────────────────────────────────────
 st.subheader("🕐 Next 24-Hour Price Prediction")

@@ -400,6 +400,27 @@ st.caption(
 _ml_info = plan.agent_reports.get("_ml_ensemble", {})
 _shap = _ml_info.get("shap") if isinstance(_ml_info, dict) else None
 
+# Display-time name mapping (handles both cached old names and new names)
+_FRIENDLY_NAMES = {
+    "lag_1": "Price 1 Hour Ago", "lag_2": "Price 2 Hours Ago",
+    "lag_3": "Price 3 Hours Ago", "lag_6": "Price 6 Hours Ago",
+    "lag_12": "Price 12 Hours Ago", "lag_24": "Price 24 Hours Ago",
+    "roll_6": "6-Hour Average Price", "roll_12": "12-Hour Average Price",
+    "roll_24": "24-Hour Average Price",
+    "ret_1h": "1-Hour Price Change %", "ret_6h": "6-Hour Price Change %",
+    "vol_12": "12-Hour Volatility",
+    "hour_sin": "Time of Day (sine)", "hour_cos": "Time of Day (cosine)",
+    "dow_sin": "Day of Week (sine)", "dow_cos": "Day of Week (cosine)",
+    "sentiment_score": "Market Sentiment", "geopolitical_risk": "Geopolitical Risk",
+    "macro_outlook": "Macro-Economic Outlook", "technical_signal": "Technical Analysis Signal",
+    "etf_flow_signal": "ETF Fund Flows", "oil_energy_signal": "Oil & Energy Impact",
+    "historical_seasonal": "Seasonal Pattern", "trend_strength": "Trend Strength",
+}
+
+def _friendly(name: str) -> str:
+    """Convert internal feature name to human-friendly display name."""
+    return _FRIENDLY_NAMES.get(name, name)
+
 if _shap:
     # ── Row 1: How It Works (3 cards) ────────────────────────────────
     st.markdown("#### How It Works")
@@ -443,6 +464,9 @@ if _shap:
 
     _feat_imp = _shap.get("feature_importance", [])
     if _feat_imp:
+        # Translate any old internal names to friendly display names
+        for item in _feat_imp:
+            item["feature"] = _friendly(item["feature"])
         shap_df = pd.DataFrame(_feat_imp[:12])
         # Color code: price features green, agent signals cyan, time features gray
         _price_feats = {"Price 1 Hour Ago", "Price 2 Hours Ago", "Price 3 Hours Ago",
@@ -507,16 +531,31 @@ if _shap:
                         if isinstance(d, dict):
                             color = "#00d4aa" if d["value"] > 0 else "#e74c3c"
                             arrow = d["direction"]
+                            dname = _friendly(d["name"])
                             drivers_html += (
                                 f'<div style="margin:4px 0;">'
                                 f'<span style="color:{color};font-weight:bold">{arrow}</span> '
-                                f'{d["name"]} '
+                                f'{dname} '
                                 f'<span style="color:{color}">({d["value"]:+.1f})</span>'
                                 f'</div>'
                             )
                         else:
-                            # fallback for old string format
-                            drivers_html += f'<div style="margin:4px 0;">{d}</div>'
+                            # fallback for old string format — parse and rename
+                            import re as _re
+                            _m = _re.match(r'(\S+)\s+([↑↓])\s+\(([^)]+)\)', str(d))
+                            if _m:
+                                _fn, _dir, _val = _m.groups()
+                                _cval = float(_val)
+                                _clr = '#00d4aa' if _cval > 0 else '#e74c3c'
+                                drivers_html += (
+                                    f'<div style="margin:4px 0;">'
+                                    f'<span style="color:{_clr};font-weight:bold">{_dir}</span> '
+                                    f'{_friendly(_fn)} '
+                                    f'<span style="color:{_clr}">({_cval:+.1f})</span>'
+                                    f'</div>'
+                                )
+                            else:
+                                drivers_html += f'<div style="margin:4px 0;">{d}</div>'
                     st.markdown(
                         f'<div class="metric-card">'
                         f'<h4 style="margin-bottom:8px">Hour {hd["hour"]}</h4>'

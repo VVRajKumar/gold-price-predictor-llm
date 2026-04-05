@@ -99,6 +99,11 @@ class AccuracyTracker:
 
     # ── Store a plan for future evaluation ───────────────────────────
 
+    # Fields to keep in stored plans (everything else is stripped to reduce payload)
+    _PLAN_KEEP_FIELDS = {"generated_at", "current_price", "daily_predictions", "overall_outlook", "overall_confidence"}
+    _MAX_STORED_PLANS = 20
+    _MAX_LOG_ENTRIES = 30
+
     def store_plan(self, plan_dict: dict):
         """Persist a prediction plan so it can be re-evaluated later as days pass."""
         gen_at = plan_dict.get("generated_at", "")
@@ -112,10 +117,12 @@ class AccuracyTracker:
             pass
         existing_ids = {p.get("generated_at") for p in self._stored_plans}
         if gen_at not in existing_ids:
-            self._stored_plans.append(plan_dict)
-            # Keep last 50 plans
-            if len(self._stored_plans) > 50:
-                self._stored_plans = self._stored_plans[-50:]
+            # Strip bulky fields not needed for accuracy evaluation
+            slim_plan = {k: v for k, v in plan_dict.items() if k in self._PLAN_KEEP_FIELDS}
+            self._stored_plans.append(slim_plan)
+            # Keep last _MAX_STORED_PLANS plans
+            if len(self._stored_plans) > self._MAX_STORED_PLANS:
+                self._stored_plans = self._stored_plans[-self._MAX_STORED_PLANS:]
             self._save_stored_plans()
             logger.info(f"Stored plan {gen_at} for future accuracy tracking")
 
@@ -195,7 +202,6 @@ class AccuracyTracker:
                 "low_range": round(low, 2),
                 "high_range": round(high, 2),
                 "error": round(error, 2),
-                "abs_error": round(abs_error, 2),
                 "pct_error": round(pct_error, 2),
                 "within_band": within_band,
             })
@@ -204,7 +210,7 @@ class AccuracyTracker:
             return None
 
         # Compute aggregate metrics
-        errors = [d["abs_error"] for d in evaluated_days]
+        errors = [abs(d["error"]) for d in evaluated_days]
         pct_errors = [d["pct_error"] for d in evaluated_days]
         band_hits = [d["within_band"] for d in evaluated_days]
 
@@ -244,6 +250,9 @@ class AccuracyTracker:
                 if r["plan_generated_at"] == generated_at:
                     self._log[i] = result
                     break
+        # Cap accuracy log to _MAX_LOG_ENTRIES entries (trim oldest)
+        if len(self._log) > self._MAX_LOG_ENTRIES:
+            self._log = self._log[-self._MAX_LOG_ENTRIES:]
         self._save_log()
         return result
 
@@ -281,7 +290,7 @@ class AccuracyTracker:
         if not all_days:
             return None
 
-        errors = [d["abs_error"] for d in all_days]
+        errors = [d.get("abs_error", abs(d.get("error", 0))) for d in all_days]
         pct_errors = [d["pct_error"] for d in all_days]
         band_hits = [d["within_band"] for d in all_days]
 

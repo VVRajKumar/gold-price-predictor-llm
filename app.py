@@ -6,7 +6,7 @@ Run with:  streamlit run app.py
 import sys
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 import streamlit as st
 import plotly.graph_objects as go
@@ -712,21 +712,39 @@ st.subheader("🎯 Prediction Accuracy Scorecard")
 # Auto-evaluate all stored plans against latest market data
 stored_plans = accuracy_tracker.get_stored_plans()
 
-# Ensure all history plans are stored for tracking
+# Ensure all history plans are stored for tracking (only if not already stored)
 import json as _json
+stored_plan_ids = {p.get("generated_at") for p in stored_plans}
 if history:
     for h in history:
         plan_dict = _json.loads(h.model_dump_json())
-        accuracy_tracker.store_plan(plan_dict)
+        if plan_dict.get("generated_at") not in stored_plan_ids:
+            accuracy_tracker.store_plan(plan_dict)
 
-# Also store the current plan
-accuracy_tracker.store_plan(_json.loads(plan.model_dump_json()))
+# Also store the current plan (only if not already stored)
+_current_plan_dict = _json.loads(plan.model_dump_json())
+if _current_plan_dict.get("generated_at") not in stored_plan_ids:
+    accuracy_tracker.store_plan(_current_plan_dict)
 
-# Re-evaluate all stored plans (picks up any new hour closes)
-try:
-    accuracy_tracker.refresh_all()
-except Exception:
-    pass  # Non-critical: scorecard will just show stale data
+# Re-evaluate stored plans only if the last check was more than 1 hour ago
+_ACCURACY_REFRESH_THROTTLE_SECONDS = 3600  # 1 hour
+_last_checked = accuracy_tracker.last_checked
+_should_refresh = True
+if _last_checked:
+    try:
+        _last_dt = datetime.fromisoformat(str(_last_checked))
+        if _last_dt.tzinfo is None:
+            _last_dt = _last_dt.replace(tzinfo=timezone.utc)
+        _age_seconds = (datetime.now(timezone.utc) - _last_dt).total_seconds()
+        if _age_seconds < _ACCURACY_REFRESH_THROTTLE_SECONDS:
+            _should_refresh = False
+    except Exception:
+        pass
+if _should_refresh:
+    try:
+        accuracy_tracker.refresh_all()
+    except Exception:
+        pass  # Non-critical: scorecard will just show stale data
 
 all_evals = accuracy_tracker.get_all_evaluations()
 agg_stats = accuracy_tracker.get_aggregate_stats()
@@ -740,7 +758,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
             eval_dt = parse_iso_to_ist(eval_time)
             st.caption(f"🔄 Auto-updated: {eval_dt.strftime('%H:%M %b %d, %Y')} "
                        f"· {latest_eval['days_evaluated']}/{latest_eval['days_total']} hours scored "
-                       f"· Background check every 1h")
+                       f"· Background check every 2h")
         except Exception:
             pass
 
@@ -926,7 +944,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                 f"Predictions will be scored once newer candles arrive "
                 f"(market may be closed for weekend/holiday).\n\n"
             )
-        _pending_msg += "The system **auto-checks every 1 hour** in the background."
+        _pending_msg += "The system **auto-checks every 2 hours** in the background."
         st.info(_pending_msg)
 
 else:
@@ -935,7 +953,7 @@ else:
         "prediction where predicted hours are now in the past. Generate a "
         "prediction and check back after those hours to see how accurate the "
         "system was!\n\n"
-        "The system **auto-checks every 1 hour** in the background."
+        "The system **auto-checks every 2 hours** in the background."
     )
 
 # ── Prediction Generation History ────────────────────────────────────

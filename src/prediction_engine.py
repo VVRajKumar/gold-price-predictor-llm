@@ -108,6 +108,17 @@ class PredictionEngine:
 
     def _save_plan(self, plan: PredictionPlan):
         content = json.loads(plan.model_dump_json())
+        # Strip large fields that aren't needed for plan persistence/display
+        # and bloat the Gist payload.
+        agent_reports = content.get("agent_reports") or {}
+        # Remove hourly SHAP drivers (large per-hour breakdown; feature_importance kept)
+        ml_report = agent_reports.get("_ml_ensemble") or {}
+        shap_data = ml_report.get("shap") or {}
+        shap_data.pop("hourly_drivers", None)
+        # Remove verbose data_points from every agent report
+        for report in agent_reports.values():
+            if isinstance(report, dict):
+                report.pop("data_points", None)
         cloud_storage.persist("latest_prediction.json", content)
 
     def _load_cached_plan(self):
@@ -257,7 +268,7 @@ class PredictionEngine:
     def get_accuracy_tracker(self) -> AccuracyTracker:
         if self._accuracy is None:
             self._accuracy = AccuracyTracker()
-            self._accuracy.start_auto_check(interval_hours=1)
+            self._accuracy.start_auto_check(interval_hours=2)
         return self._accuracy
 
     # ── Auto-refresh loop ───────────────────────────────────────────

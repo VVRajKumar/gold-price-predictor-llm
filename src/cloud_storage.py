@@ -20,9 +20,11 @@ so local development is unaffected.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -54,6 +56,11 @@ def _get_secret(key: str) -> str:
 _gist_token: Optional[str] = None
 _gist_id: Optional[str] = None
 _lock = threading.Lock()
+# TTL guard: skip cloud sync if last pull was within this many seconds
+_SYNC_TTL_SECONDS = 300  # 5 minutes
+_last_sync_time: float = 0.0
+# Per-file content hash cache: avoid pushing when content hasn't changed
+_file_content_hashes: dict[str, str] = {}
 
 
 def _init():
@@ -111,13 +118,22 @@ def sync_from_cloud():
     """Pull tracked files from Gist → local cache (runs once on startup).
 
     Only restores files that don't already exist locally, so an in-progress
-    session is never overwritten.
+    session is never overwritten.  Skips the pull entirely if it was done
+    less than 5 minutes ago (TTL guard) to avoid redundant Gist API calls.
     """
+    global _last_sync_time
     if not is_available():
         logger.debug("[cloud_storage] Gist credentials not configured – skipping sync")
         return
 
+    # TTL check: skip pull if synced recently
+    now = time.monotonic()
+    if now - _last_sync_time < _SYNC_TTL_SECONDS:
+        logger.debug("[cloud_storage] Sync skipped – within TTL window")
+        return
+
     remote = _pull_gist()
+    _last_sync_time = time.monotonic()
     restored = 0
     for filename in _TRACKED_FILES:
         local_path = CACHE_DIR / filename
@@ -146,6 +162,8 @@ def persist(filename: str, data: Any):
 
     On ephemeral environments (Streamlit Cloud) the push is synchronous
     so data survives app sleep.  Locally it remains a background push.
+    Skips the Gist push when the serialised content hasn't changed since
+    the last push (hash-based deduplication).
     """
     content = json.dumps(data, indent=2, default=str)
     local_path = CACHE_DIR / filename
@@ -153,6 +171,13 @@ def persist(filename: str, data: Any):
 
     if not is_available():
         return
+
+    # Hash-based dedup: skip push if content is identical to last push
+    content_hash = hashlib.sha256(content.encode()).hexdigest()
+    if _file_content_hashes.get(filename) == content_hash:
+        logger.debug(f"[cloud_storage] {filename} unchanged – skipping Gist push")
+        return
+    _file_content_hashes[filename] = content_hash
 
     if _is_ephemeral_env():
         # Synchronous push – critical on Cloud where daemon threads die on sleep

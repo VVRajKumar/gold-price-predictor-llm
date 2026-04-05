@@ -294,13 +294,11 @@ class AccuracyTracker:
         pct_errors = [d["pct_error"] for d in all_days]
         band_hits = [d["within_band"] for d in all_days]
 
-        mape = round(np.mean(pct_errors), 2)
         return {
             "total_predictions_evaluated": len(all_days),
             "total_plans_evaluated": len(self._log),
             "overall_mae": round(np.mean(errors), 2),
-            "overall_mape": mape,
-            "overall_accuracy": round(100 - mape, 1),
+            "overall_mape": round(np.mean(pct_errors), 2),
             "overall_band_hit_rate": round(sum(band_hits) / len(band_hits) * 100, 1),
             "best_mae": round(min(r["mae"] for r in self._log), 2),
             "worst_mae": round(max(r["mae"] for r in self._log), 2),

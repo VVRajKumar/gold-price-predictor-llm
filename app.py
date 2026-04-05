@@ -323,10 +323,12 @@ with c6:
 # ── Quick Accuracy Badge (visible to all visitors) ───────────────────
 _quick_agg = accuracy_tracker.get_aggregate_stats()
 if _quick_agg and _quick_agg["total_predictions_evaluated"] > 0:
+    _acc = _quick_agg["overall_accuracy"]
     _mape = _quick_agg["overall_mape"]
     _hit = _quick_agg["overall_band_hit_rate"]
     _dir = _quick_agg["avg_directional_accuracy"]
     _n = _quick_agg["total_predictions_evaluated"]
+    _acc_icon = "🟢" if _acc >= 98 else ("🟡" if _acc >= 95 else "🔴")
     _mape_icon = "🟢" if _mape < 2 else ("🟡" if _mape < 5 else "🔴")
     _hit_icon = "🟢" if _hit >= 70 else ("🟡" if _hit >= 50 else "🔴")
     _dir_icon = "🟢" if _dir >= 60 else ("🟡" if _dir >= 50 else "🔴")
@@ -335,6 +337,7 @@ if _quick_agg and _quick_agg["total_predictions_evaluated"] > 0:
         border-radius:12px;padding:14px 20px;margin:10px 0;
         border:1px solid #2d3748;display:flex;justify-content:space-around;
         flex-wrap:wrap;gap:10px;text-align:center;">
+        <span>{_acc_icon} <b>Accuracy</b> {_acc:.1f}%</span>
         <span>{_mape_icon} <b>MAPE</b> {_mape:.1f}%</span>
         <span>{_hit_icon} <b>Band Hit</b> {_hit:.0f}%</span>
         <span>{_dir_icon} <b>Direction</b> {_dir:.0f}%</span>
@@ -765,7 +768,11 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
 if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
     # ── Aggregate Metrics Row ────────────────────────────────────
     st.markdown("#### Overall Accuracy (All Past Predictions)")
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m0, m1, m2, m3, m4, m5 = st.columns(6)
+    with m0:
+        acc = agg_stats["overall_accuracy"]
+        acc_color = "🟢" if acc >= 98 else ("🟡" if acc >= 95 else "🔴")
+        st.metric(f"{acc_color} Prediction Accuracy", f"{acc:.1f}%")
     with m1:
         mape = agg_stats["overall_mape"]
         mape_color = "🟢" if mape < 2 else ("🟡" if mape < 5 else "🔴")
@@ -784,6 +791,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         st.metric("📊 Hours Evaluated", f"{agg_stats['total_predictions_evaluated']}")
 
     st.caption(
+        "**Accuracy** = 100 − MAPE (higher is better) · "
         "**MAPE** = Mean Absolute Percentage Error (lower is better) · "
         "**MAE** = Mean Absolute Error in ₹ · "
         "**Band Hit Rate** = % of hours actual price fell within predicted range · "

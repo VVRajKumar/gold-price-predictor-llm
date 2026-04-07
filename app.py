@@ -175,6 +175,34 @@ with st.sidebar:
     st.divider()
     st.caption(f"v1.0 · Updated {now_ist().strftime('%H:%M')}")
 
+    # ── Admin: delete a bad prediction entry ─────────────────────────
+    st.divider()
+    with st.expander("🛠️ Admin", expanded=False):
+        st.caption(
+            "Remove a corrupted or erroneous prediction from all logs "
+            "(accuracy log + stored plans) and from the GitHub Gist."
+        )
+        del_ts = st.text_input(
+            "Timestamp prefix to delete",
+            placeholder="e.g. 2026-04-06 10:10",
+            key="admin_delete_ts",
+            help=(
+                "Enter the start of the 'Generated At' timestamp shown in "
+                "the Accuracy Trend table. Partial prefixes work – e.g. "
+                "'2026-04-06 10:10' removes any entry that starts with that string."
+            ),
+        )
+        if st.button("🗑️ Delete entry", key="admin_delete_btn", type="secondary"):
+            if del_ts.strip():
+                n = accuracy_tracker.delete_plan_entry(del_ts.strip())
+                if n:
+                    st.success(f"Removed {n} entry/entries matching '{del_ts.strip()}' from all logs and Gist.")
+                    st.rerun()
+                else:
+                    st.warning(f"No entries found matching '{del_ts.strip()}'.")
+            else:
+                st.warning("Please enter a timestamp prefix.")
+
 
 # ════════════════════════════════════════════════════════════════════
 st.title("🥇 Indian Gold Price Prediction System (₹/10g)")

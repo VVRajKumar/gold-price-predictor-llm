@@ -377,3 +377,34 @@ class AccuracyTracker:
 
     def stop_auto_check(self):
         self._auto_running = False
+
+    # ── Admin: delete a specific plan entry ──────────────────────────
+
+    def delete_plan_entry(self, generated_at_prefix: str) -> int:
+        """Remove all entries whose ``generated_at`` starts with *generated_at_prefix*.
+
+        Cleans both the accuracy log and the stored-plans list, then persists
+        both to local disk and to the GitHub Gist so the deletion survives
+        across server restarts.
+
+        Returns the total number of entries removed (log + stored_plans combined).
+        """
+        prefix = generated_at_prefix.strip()
+        if not prefix:
+            return 0
+
+        before_log = len(self._log)
+        before_plans = len(self._stored_plans)
+
+        self._log = [e for e in self._log if not str(e.get("plan_generated_at", "")).startswith(prefix)]
+        self._stored_plans = [p for p in self._stored_plans if not str(p.get("generated_at", "")).startswith(prefix)]
+
+        removed = (before_log - len(self._log)) + (before_plans - len(self._stored_plans))
+        if removed:
+            self._save_log()
+            self._save_stored_plans()
+            logger.info(
+                f"Deleted {before_log - len(self._log)} accuracy log entry(ies) and "
+                f"{before_plans - len(self._stored_plans)} stored plan(s) matching '{prefix}'"
+            )
+        return removed

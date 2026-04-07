@@ -490,16 +490,21 @@ class MLEnsemble:
 
             # Add agent signal contributions as pseudo-importance entries
             # so the UI shows them alongside SHAP features.
-            if agent_signals:
+            # Scale to USD terms (matching SHAP value units) using the
+            # reference price from the most recent lag_1 feature.
+            if agent_signals and self._last_X_pred is not None and len(self._last_X_pred) > 0:
                 agent_multiplier = _compute_agent_adjustment(agent_signals)
-                agent_adj_pct = abs(agent_multiplier - 1.0) * 100
+                ref_price = float(self._last_X_pred[0][0])  # lag_1 = latest price (USD/oz)
+                agent_dollar_impact = abs(agent_multiplier - 1.0) * ref_price
                 total_weight = sum(_AGENT_WEIGHTS.values())
                 for name in AGENT_SIGNAL_NAMES:
                     val = agent_signals.get(name, 0.0)
                     weight = _AGENT_WEIGHTS.get(name, 0.5)
-                    # Contribution proportional to |signal × weight| relative to
-                    # the overall agent adjustment magnitude.
-                    contribution = abs(val) * weight / total_weight * agent_adj_pct
+                    # Contribution in USD: proportional to |signal × weight|
+                    # relative to total agent dollar impact on the prediction.
+                    contribution = abs(val) * weight / total_weight * agent_dollar_impact
+                    if contribution < 0.001:
+                        continue  # skip agents with negligible contribution
                     display_name = FEATURE_DISPLAY_NAMES.get(name, name)
                     importance.append({
                         "feature": f"{display_name} (Agent)",
@@ -542,7 +547,7 @@ class MLEnsemble:
                 }
 
             return {
-                "feature_importance": importance[:15],
+                "feature_importance": importance[:20],
                 "hourly_drivers": hourly_drivers,
                 "model_type": "XGBoost + LightGBM + Ridge (stacked) + Agent Signal Adjustment",
                 "total_features": n_features,

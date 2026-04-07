@@ -514,8 +514,8 @@ if _shap:
         # Translate any old internal names to friendly display names
         for item in _feat_imp:
             item["feature"] = _friendly(item["feature"])
-        shap_df = pd.DataFrame(_feat_imp[:12])
-        # Color code: price features green, agent signals cyan, time features gray
+        shap_df = pd.DataFrame(_feat_imp[:20])
+        # Color code: price features green, agent signals teal, time features gray
         _price_feats = {"Price 1 Hour Ago", "Price 2 Hours Ago", "Price 3 Hours Ago",
                         "Price 6 Hours Ago", "Price 12 Hours Ago", "Price 24 Hours Ago",
                         "6-Hour Average Price", "12-Hour Average Price", "24-Hour Average Price",
@@ -525,10 +525,12 @@ if _shap:
                         "Seasonal Pattern", "Trend Strength"}
         colors = []
         for _, row in shap_df.iterrows():
-            if row["feature"] in _price_feats:
-                colors.append("#00d4aa")   # green - price features
-            elif row["feature"] in _agent_feats:
+            fname = row["feature"]
+            # Agent entries have "(Agent)" suffix
+            if fname.endswith(" (Agent)"):
                 colors.append("#4ecdc4")   # teal - agent signals
+            elif fname in _price_feats:
+                colors.append("#00d4aa")   # green - price features
             else:
                 colors.append("#636e72")   # gray - time features
 
@@ -541,7 +543,7 @@ if _shap:
         ))
         fig_shap.update_layout(
             template="plotly_dark",
-            height=420,
+            height=max(420, 28 * len(shap_df)),
             yaxis=dict(autorange="reversed", title=""),
             xaxis=dict(title="Influence Score (higher = more impact)"),
             showlegend=False,

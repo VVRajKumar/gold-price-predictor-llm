@@ -387,7 +387,7 @@ class MLEnsemble:
                 # This is where the 8 specialist agents actually influence the
                 # predicted price.  The adjustment decays slightly for later
                 # hours (agents have strongest signal for near-term).
-                horizon_decay = max(0.3, 1.0 - 0.03 * h)  # hour 0→1.0, hour 24→0.28
+                horizon_decay = max(0.3, 1.0 - 0.03 * h)  # hour 0→1.0, hour 24→0.30
                 effective_multiplier = 1.0 + (agent_multiplier - 1.0) * horizon_decay
                 p_final_usd *= effective_multiplier
 

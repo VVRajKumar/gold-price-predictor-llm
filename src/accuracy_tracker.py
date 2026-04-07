@@ -29,6 +29,14 @@ _PLANS_STORE_PATH = CACHE_DIR / "stored_plans.json"
 # Only evaluate/store plans generated on or after this cutoff (hourly scorecard start)
 _HOURLY_SCORECARD_START = datetime(2026, 4, 4, 0, 0, 0)
 
+# Known-bad plan IDs (prefix-matched against generated_at / plan_generated_at).
+# Entries whose timestamp *starts with* any of these strings will be removed from
+# both the accuracy log and stored_plans on every startup, and the cleaned data is
+# pushed back to the GitHub Gist automatically.
+_BLOCKED_PLAN_PREFIXES: frozenset[str] = frozenset({
+    "2026-04-06 10:10",   # runaway auto-regressive prediction (MAPE 78.85%)
+})
+
 
 class AccuracyTracker:
     """Track and score past predictions vs actual prices."""
@@ -41,22 +49,51 @@ class AccuracyTracker:
         self._auto_running = False
         self._purge_stale_entries()
 
-    # ── Purge pre-INR / pre-cutoff entries ───────────────────────────
+    # ── Purge pre-INR / pre-cutoff / blocked entries ─────────────────
+
+    @staticmethod
+    def _is_blocked(timestamp: str) -> bool:
+        """Return True if *timestamp* starts with any prefix in _BLOCKED_PLAN_PREFIXES.
+
+        Normalises the date/time separator to a space so that both
+        ``"2026-04-06 10:10:00"`` and ``"2026-04-06T10:10:00+05:30"`` are
+        caught by the same ``"2026-04-06 10:10"`` prefix.
+        """
+        # Normalise ISO 'T' separator → space so prefixes are format-agnostic
+        ts = str(timestamp).replace("T", " ", 1)
+        return any(ts.startswith(prefix) for prefix in _BLOCKED_PLAN_PREFIXES)
 
     def _purge_stale_entries(self):
-        """Remove accuracy log entries from before the INR migration cutoff
-        or with predictions in USD scale (< ₹30,000)."""
-        before = len(self._log)
-        self._log = [
-            e for e in self._log
-            if self._is_valid_entry(e)
+        """Remove accuracy log entries that are:
+        - generated before the INR migration cutoff, or
+        - have USD-scale predicted prices (< ₹30,000), or
+        - match a known-bad plan prefix in _BLOCKED_PLAN_PREFIXES.
+
+        Also removes matching entries from stored_plans so both files stay in
+        sync. Persists to Gist when anything is removed.
+        """
+        before_log = len(self._log)
+        self._log = [e for e in self._log if self._is_valid_entry(e)]
+        removed_log = before_log - len(self._log)
+
+        before_plans = len(self._stored_plans)
+        self._stored_plans = [
+            p for p in self._stored_plans
+            if not self._is_blocked(p.get("generated_at", ""))
         ]
-        if len(self._log) < before:
-            logger.info(f"Purged {before - len(self._log)} stale accuracy entries")
+        removed_plans = before_plans - len(self._stored_plans)
+
+        if removed_log:
+            logger.info(f"Purged {removed_log} stale/blocked accuracy log entries")
             self._save_log()
+        if removed_plans:
+            logger.info(f"Purged {removed_plans} stale/blocked stored plan(s)")
+            self._save_stored_plans()
 
     def _is_valid_entry(self, entry: dict) -> bool:
         gen = entry.get("plan_generated_at", "")
+        if self._is_blocked(gen):
+            return False
         try:
             gen_dt = datetime.fromisoformat(str(gen))
             if gen_dt.replace(tzinfo=None) < _HOURLY_SCORECARD_START:
@@ -321,7 +358,8 @@ class AccuracyTracker:
             self._stored_plans = self._load_stored_plans()
         if not self._log:
             self._log = self._load_log()
-            self._purge_stale_entries()
+        # Always re-run purge after a reload to apply any new blocklist entries
+        self._purge_stale_entries()
 
         updated = 0
         for plan_dict in self._stored_plans:

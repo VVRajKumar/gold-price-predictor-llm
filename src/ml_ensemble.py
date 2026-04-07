@@ -301,6 +301,9 @@ class MLEnsemble:
             preds: list[dict] = []
             X_for_shap: list[np.ndarray] = []
 
+            # Reference USD price for sanity checks in the auto-regressive loop
+            ref_usd_price = float(values[-1])  # last known actual USD/oz price
+
             for h in range(PREDICTION_HOURS):
                 ts = pd.Timestamp(last_ts) + pd.Timedelta(hours=h + 1)
                 feat = _build_feature_vector(history, ts, agent_signals).reshape(1, -1)
@@ -314,9 +317,27 @@ class MLEnsemble:
                 stack = np.array([[p_xgb, p_lgb, p_ridge]])
                 p_final_usd = float(self._meta_model.predict(stack)[0])
 
+                # ── Per-step USD sanity check ──
+                # Prevent runaway drift: cap each prediction within ±10% of the
+                # reference price and ±2% of the previous step.
+                if ref_usd_price > 0:
+                    max_total_dev = ref_usd_price * 0.10
+                    p_final_usd = max(ref_usd_price - max_total_dev,
+                                      min(p_final_usd, ref_usd_price + max_total_dev))
+                prev_usd = history[-1] if history else ref_usd_price
+                if prev_usd > 0:
+                    max_step = prev_usd * 0.02
+                    p_final_usd = max(prev_usd - max_step,
+                                      min(p_final_usd, prev_usd + max_step))
+
                 # Quantile bands (USD/oz)
                 lo_usd = float(self._xgb_lo.predict(feat)[0])
                 hi_usd = float(self._xgb_hi.predict(feat)[0])
+
+                # Clamp quantile bands to same total deviation envelope
+                if ref_usd_price > 0:
+                    lo_usd = max(ref_usd_price * 0.90, lo_usd)
+                    hi_usd = min(ref_usd_price * 1.10, hi_usd)
 
                 # Convert to INR/10g
                 p_final_inr = p_final_usd * usdinr * oz_to_10g

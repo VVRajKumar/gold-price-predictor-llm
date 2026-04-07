@@ -851,10 +851,24 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                     marker=dict(size=12, color="#ff6b6b", symbol="x"),
             ))
 
+        # Compute a sensible y-axis range using the actual prices as the
+        # anchor, ignoring wild prediction outliers that would ruin the chart.
+        _actual_vals = acc_df["actual"].dropna()
+        if not _actual_vals.empty:
+            _y_center = _actual_vals.median()
+            _y_iqr = _actual_vals.quantile(0.75) - _actual_vals.quantile(0.25)
+            _y_spread = max(_y_iqr * 3, _y_center * 0.05)  # at least ±5% of median
+            _y_min = _y_center - _y_spread
+            _y_max = _y_center + _y_spread
+            _y_range = [max(0, _y_min * 0.98), _y_max * 1.02]
+        else:
+            _y_range = None  # fallback to plotly auto
+
         fig_acc.update_layout(
                 title="Predicted vs Actual Indian Gold Price (₹/10g)",
                 template="plotly_dark", height=450,
                 yaxis_title="Price (₹/10g)", xaxis_title="Time",
+                yaxis=dict(range=_y_range) if _y_range else {},
                 legend=dict(orientation="h", yanchor="bottom", y=1.02),
                 hovermode="x unified",
         )

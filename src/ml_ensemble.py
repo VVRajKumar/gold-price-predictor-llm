@@ -46,22 +46,45 @@ _TRAIN_PERIOD_DAYS = 90      # 3 months of hourly data (~2160 bars)
 _MIN_TRAIN_SAMPLES = 200     # hard floor after cleanup
 
 # ── Internal feature names (used for model training) ─────────────────
+# NOTE: Only 16 time-series features are used for training, because agent
+# signals are a static snapshot (same value for every historical row) and
+# therefore carry zero information for the tree models.  Agent signals are
+# applied as a *post-prediction* directional adjustment instead.
 FEATURE_NAMES = (
     [f"lag_{l}" for l in _LAGS]
     + [f"roll_{w}" for w in _ROLL_WINDOWS]
     + ["ret_1h", "ret_6h", "vol_12"]
     + ["hour_sin", "hour_cos", "dow_sin", "dow_cos"]
-    + [
-        "sentiment_score",
-        "geopolitical_risk",
-        "macro_outlook",
-        "technical_signal",
-        "etf_flow_signal",
-        "oil_energy_signal",
-        "historical_seasonal",
-        "trend_strength",
-    ]
 )
+
+# The 8 agent-derived signal names (used for post-prediction adjustment)
+AGENT_SIGNAL_NAMES = [
+    "sentiment_score",
+    "geopolitical_risk",
+    "macro_outlook",
+    "technical_signal",
+    "etf_flow_signal",
+    "oil_energy_signal",
+    "historical_seasonal",
+    "trend_strength",
+]
+
+# Weights for how strongly each agent signal influences the final price.
+# Higher weight = more influence.  Sum of weights doesn't need to be 1;
+# they are normalised internally.
+_AGENT_WEIGHTS: dict[str, float] = {
+    "sentiment_score":    1.0,
+    "geopolitical_risk":  0.8,
+    "macro_outlook":      1.0,
+    "technical_signal":   1.2,   # technical analysis has strong short-term signal
+    "etf_flow_signal":    0.7,
+    "oil_energy_signal":  0.6,
+    "historical_seasonal":0.5,
+    "trend_strength":     1.0,
+}
+
+# Maximum % adjustment agents can apply to the base ML prediction.
+_MAX_AGENT_ADJUSTMENT_PCT = 1.5
 
 # ── Human-friendly display names for dashboard / SHAP charts ─────────
 FEATURE_DISPLAY_NAMES: dict[str, str] = {
@@ -95,9 +118,14 @@ FEATURE_DISPLAY_NAMES: dict[str, str] = {
 def _build_feature_vector(
     history: list[float],
     timestamp: Optional[pd.Timestamp] = None,
-    agent_signals: Optional[dict[str, float]] = None,
 ) -> np.ndarray:
-    """Build one feature row from price history + optional agent signals."""
+    """Build one feature row from price history (16 time-series features).
+
+    Agent signals are NOT included here because they are a static snapshot
+    (identical for every historical training row) and would carry zero
+    information for the tree models.  They are applied as a post-prediction
+    directional adjustment instead — see ``_compute_agent_adjustment``.
+    """
     arr = np.asarray(history, dtype=np.float64)
     feats: list[float] = []
 
@@ -133,18 +161,39 @@ def _build_feature_vector(
     feats.append(math.sin(2 * math.pi * dow / 7))
     feats.append(math.cos(2 * math.pi * dow / 7))
 
-    # Agent-derived signals (numeric features extracted by LLM agents)
-    sig = agent_signals or {}
-    feats.append(sig.get("sentiment_score", 0.0))
-    feats.append(sig.get("geopolitical_risk", 0.0))
-    feats.append(sig.get("macro_outlook", 0.0))
-    feats.append(sig.get("technical_signal", 0.0))
-    feats.append(sig.get("etf_flow_signal", 0.0))
-    feats.append(sig.get("oil_energy_signal", 0.0))
-    feats.append(sig.get("historical_seasonal", 0.0))
-    feats.append(sig.get("trend_strength", 0.0))
-
     return np.array(feats, dtype=np.float64)
+
+
+def _compute_agent_adjustment(
+    agent_signals: Optional[dict[str, float]],
+) -> float:
+    """Compute a directional adjustment factor from agent signals.
+
+    Returns a multiplier in the range ``1 - MAX_ADJ … 1 + MAX_ADJ``
+    (e.g. 0.985 … 1.015 for ±1.5 %).
+
+    The composite signal is a weighted average of the 8 agent scores,
+    each in [-1, +1], mapped to a bounded percentage adjustment.
+    """
+    if not agent_signals:
+        return 1.0
+
+    weighted_sum = 0.0
+    total_weight = 0.0
+    for name, weight in _AGENT_WEIGHTS.items():
+        val = agent_signals.get(name, 0.0)
+        weighted_sum += val * weight
+        total_weight += weight
+
+    if total_weight == 0:
+        return 1.0
+
+    # Composite signal in [-1, +1]
+    composite = max(-1.0, min(1.0, weighted_sum / total_weight))
+
+    # Map to a bounded percentage adjustment
+    adjustment_pct = composite * _MAX_AGENT_ADJUSTMENT_PCT / 100.0
+    return 1.0 + adjustment_pct
 
 
 class MLEnsemble:
@@ -169,6 +218,11 @@ class MLEnsemble:
         """
         Fetch data, build features, train all base + meta + quantile models.
         Returns True on success.
+
+        ``agent_signals`` is accepted for interface compatibility but is NOT
+        used during training — agent signals are constant across all
+        historical rows and carry zero information for tree models.
+        They are applied as a post-prediction adjustment in ``predict()``.
         """
         try:
             from xgboost import XGBRegressor
@@ -194,12 +248,12 @@ class MLEnsemble:
         values = np.array(values_list, dtype=float)
         timestamps = close.index
 
-        # 2. Build feature matrix
+        # 2. Build feature matrix (16 time-series features only, no agent signals)
         X_rows, y_rows = [], []
         for i in range(_MIN_HISTORY, len(values)):
             hist = values[:i].tolist()
             ts = timestamps[i] if i < len(timestamps) else None
-            X_rows.append(_build_feature_vector(hist, ts, agent_signals))
+            X_rows.append(_build_feature_vector(hist, ts))
             y_rows.append(float(values[i]))
 
         if len(X_rows) < 100:
@@ -274,6 +328,10 @@ class MLEnsemble:
         """
         Forecast the next PREDICTION_HOURS hourly prices in INR/10g.
 
+        The base forecast comes from the ML ensemble (16 time-series features).
+        Agent signals are applied as a **post-prediction directional adjustment**
+        so the 8 specialist agents genuinely influence the final price.
+
         Returns list of dicts with keys:
             date, predicted_price, low_range, high_range,
             xgb_price, lgb_price, ridge_price (component prices for transparency)
@@ -298,6 +356,14 @@ class MLEnsemble:
             usdinr = self._market.get_usdinr_rate()
             oz_to_10g = 10.0 / 31.1035
 
+            # Compute agent adjustment multiplier (applied after ML prediction)
+            agent_multiplier = _compute_agent_adjustment(agent_signals)
+            agent_adj_pct = (agent_multiplier - 1.0) * 100
+            logger.info(
+                f"Agent signal adjustment: {agent_adj_pct:+.3f}% "
+                f"(multiplier={agent_multiplier:.5f}, signals={agent_signals})"
+            )
+
             preds: list[dict] = []
             X_for_shap: list[np.ndarray] = []
 
@@ -306,7 +372,7 @@ class MLEnsemble:
 
             for h in range(PREDICTION_HOURS):
                 ts = pd.Timestamp(last_ts) + pd.Timedelta(hours=h + 1)
-                feat = _build_feature_vector(history, ts, agent_signals).reshape(1, -1)
+                feat = _build_feature_vector(history, ts).reshape(1, -1)
 
                 # Base predictions (USD/oz)
                 p_xgb = float(self._xgb_model.predict(feat)[0])
@@ -316,6 +382,14 @@ class MLEnsemble:
                 # Meta-learner stacked prediction
                 stack = np.array([[p_xgb, p_lgb, p_ridge]])
                 p_final_usd = float(self._meta_model.predict(stack)[0])
+
+                # ── Apply agent signal adjustment (directional bias) ──
+                # This is where the 8 specialist agents actually influence the
+                # predicted price.  The adjustment decays slightly for later
+                # hours (agents have strongest signal for near-term).
+                horizon_decay = max(0.3, 1.0 - 0.03 * h)  # hour 0→1.0, hour 24→0.28
+                effective_multiplier = 1.0 + (agent_multiplier - 1.0) * horizon_decay
+                p_final_usd *= effective_multiplier
 
                 # ── Per-step USD sanity check ──
                 # Prevent runaway drift: cap each prediction within ±10% of the
@@ -386,10 +460,11 @@ class MLEnsemble:
 
     # ── SHAP Explainability ──────────────────────────────────────────
 
-    def get_shap_explanation(self) -> Optional[dict]:
+    def get_shap_explanation(self, agent_signals: Optional[dict[str, float]] = None) -> Optional[dict]:
         """
         Compute SHAP values for the most recent prediction.
-        Returns dict with feature importances and per-hour breakdowns.
+        Returns dict with feature importances, per-hour breakdowns,
+        and agent signal contribution breakdown.
         """
         if self._xgb_model is None or self._last_X_pred is None:
             return None
@@ -412,6 +487,25 @@ class MLEnsemble:
                     "feature": FEATURE_DISPLAY_NAMES.get(raw_name, raw_name),
                     "importance": round(float(mean_abs_shap[i]), 4),
                 })
+
+            # Add agent signal contributions as pseudo-importance entries
+            # so the UI shows them alongside SHAP features.
+            if agent_signals:
+                agent_multiplier = _compute_agent_adjustment(agent_signals)
+                agent_adj_pct = abs(agent_multiplier - 1.0) * 100
+                total_weight = sum(_AGENT_WEIGHTS.values())
+                for name in AGENT_SIGNAL_NAMES:
+                    val = agent_signals.get(name, 0.0)
+                    weight = _AGENT_WEIGHTS.get(name, 0.5)
+                    # Contribution proportional to |signal × weight| relative to
+                    # the overall agent adjustment magnitude.
+                    contribution = abs(val) * weight / total_weight * agent_adj_pct
+                    display_name = FEATURE_DISPLAY_NAMES.get(name, name)
+                    importance.append({
+                        "feature": f"{display_name} (Agent)",
+                        "importance": round(contribution, 4),
+                    })
+
             importance.sort(key=lambda x: x["importance"], reverse=True)
 
             # Per-hour top 3 drivers
@@ -435,11 +529,24 @@ class MLEnsemble:
                     "drivers": drivers,
                 })
 
+            # Agent signal summary for transparency
+            agent_summary = None
+            if agent_signals:
+                agent_multiplier = _compute_agent_adjustment(agent_signals)
+                agent_summary = {
+                    "composite_adjustment_pct": round((agent_multiplier - 1.0) * 100, 3),
+                    "signals": {
+                        FEATURE_DISPLAY_NAMES.get(k, k): round(v, 3)
+                        for k, v in agent_signals.items()
+                    },
+                }
+
             return {
                 "feature_importance": importance[:15],
                 "hourly_drivers": hourly_drivers,
-                "model_type": "XGBoost + LightGBM + Ridge (stacked)",
+                "model_type": "XGBoost + LightGBM + Ridge (stacked) + Agent Signal Adjustment",
                 "total_features": n_features,
+                "agent_signal_adjustment": agent_summary,
             }
 
         except ImportError:

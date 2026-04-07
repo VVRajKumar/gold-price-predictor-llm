@@ -365,7 +365,7 @@ class Orchestrator:
         # 6. SHAP explainability
         shap_explanation = None
         if ml_trained:
-            shap_explanation = self._ml_ensemble.get_shap_explanation()
+            shap_explanation = self._ml_ensemble.get_shap_explanation(agent_signals)
             if shap_explanation:
                 logger.info(
                     f"SHAP: {shap_explanation['total_features']} features, "

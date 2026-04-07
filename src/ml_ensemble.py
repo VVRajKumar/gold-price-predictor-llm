@@ -305,7 +305,7 @@ class MLEnsemble:
             # before feeding predictions back into the auto-regressive history.
             # Without this cap, one bad step contaminates every subsequent lag
             # feature and causes exponentially growing errors.
-            prev_usd = float(values[-1]) if len(values) > 0 else None
+            prev_step_usd = float(values[-1]) if len(values) > 0 else None
 
             for h in range(PREDICTION_HOURS):
                 ts = pd.Timestamp(last_ts) + pd.Timedelta(hours=h + 1)
@@ -325,11 +325,11 @@ class MLEnsemble:
                 # previous USD price *before* appending to history.  This
                 # prevents a single bad step from corrupting all subsequent
                 # lag features and causing exponential error amplification.
-                if prev_usd is not None and prev_usd > 0 and math.isfinite(p_final_usd):
-                    move_pct = (p_final_usd - prev_usd) / prev_usd * 100
+                if prev_step_usd is not None and prev_step_usd > 0 and math.isfinite(p_final_usd):
+                    move_pct = (p_final_usd - prev_step_usd) / prev_step_usd * 100
                     if abs(move_pct) > MAX_HOURLY_MOVE_PCT:
-                        direction = 1 if p_final_usd > prev_usd else -1
-                        p_final_usd = prev_usd * (1 + direction * MAX_HOURLY_MOVE_PCT / 100)
+                        direction = 1 if p_final_usd > prev_step_usd else -1
+                        p_final_usd = prev_step_usd * (1 + direction * MAX_HOURLY_MOVE_PCT / 100)
                         logger.debug(
                             f"AR guardrail (step {h+1}): USD move {move_pct:.1f}% "
                             f"capped to {direction * MAX_HOURLY_MOVE_PCT:.1f}%"
@@ -366,7 +366,7 @@ class MLEnsemble:
                 # Feed the *capped* USD price back into history so all
                 # subsequent lag features stay in a plausible range.
                 history.append(p_final_usd)
-                prev_usd = p_final_usd
+                prev_step_usd = p_final_usd
 
             # Validate predictions
             current_inr = self._market.get_gold_inr_price()

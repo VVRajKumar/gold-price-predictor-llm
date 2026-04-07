@@ -29,7 +29,11 @@ _MAX_HOURLY_MOVE_PCT = 5.0
 # Public alias so other modules can reference the same constant.
 MAX_HOURLY_MOVE_PCT = _MAX_HOURLY_MOVE_PCT
 
-# Band width limits (as % of predicted price)
+# Maximum total drift from the current actual price across the whole
+# forecast horizon.  The per-step cap can compound to very large values
+# over many steps; this hard limit anchors every prediction to within
+# ±12% of the price at plan-generation time.
+_MAX_TOTAL_DRIFT_PCT = 12.0
 _MIN_BAND_PCT = 0.1     # band cannot be tighter than 0.1% of price
 _MAX_BAND_PCT = 8.0      # band cannot be wider than 8% of price
 
@@ -169,7 +173,6 @@ def validate_prediction_plan(
         # ── Absolute drift cap (anchored to current_price) ──
         # The per-step cap can compound over 24 steps; this hard limit
         # prevents exponential drift from the actual current price.
-        _MAX_TOTAL_DRIFT_PCT = 12.0
         if current_price > 0:
             total_drift_pct = abs(pred - current_price) / current_price * 100
             if total_drift_pct > _MAX_TOTAL_DRIFT_PCT:
@@ -297,10 +300,6 @@ def validate_xgb_predictions(
        many compounding steps have occurred.  This stops the sequential
        per-step cap from allowing exponential drift over a 24-hour horizon.
     """
-    # Maximum total drift from current price across the whole horizon.
-    # Gold is unlikely to move more than ±12% over any 24-hour window.
-    _MAX_TOTAL_DRIFT_PCT = 12.0
-
     validated: list[dict] = []
     prev = current_price_inr
 

@@ -11,7 +11,6 @@ from datetime import datetime, timezone, timedelta
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
-import numpy as np
 import pandas as pd
 
 # ── Fix imports ──────────────────────────────────────────────────────
@@ -77,6 +76,23 @@ def _clean_text(text: str) -> str:
     for code, friendly in _TEXT_REPLACEMENTS:
         text = text.replace(code, friendly)
     return text
+
+
+def _iqr_y_range(values):
+    """Compute a y-axis range that excludes outliers using the IQR method.
+
+    Uses 3× IQR (a standard statistical fence for "far outliers") with a
+    floor of 15% of the median so the axis always has reasonable padding
+    even when the data has very low variance.  Returns ``[lo, hi]`` or
+    ``None`` when there is not enough data.
+    """
+    vals = pd.Series(values).dropna()
+    if len(vals) < 4:
+        return None
+    q1, q3 = vals.quantile(0.25), vals.quantile(0.75)
+    iqr = q3 - q1
+    fence = max(iqr * 3, vals.median() * 0.15)
+    return [max(0, q1 - fence), q3 + fence]
 
 # ── Page config ──────────────────────────────────────────────────────
 st.set_page_config(
@@ -443,17 +459,10 @@ if plan.daily_predictions:
 
     # Smart y-axis clamping: use actual historical prices as anchor
     _pred_y_range = None
-    _anchor_vals = []
     if not gold_recent.empty:
         _hist_close = pd.to_numeric(gold_recent["Close"], errors="coerce").dropna()
         if not _hist_close.empty:
-            _anchor_vals.extend(_hist_close.values.tolist())
-    if _anchor_vals:
-        _anchor_arr = np.array(_anchor_vals)
-        _aq1, _aq3 = np.percentile(_anchor_arr, [25, 75])
-        _a_iqr = _aq3 - _aq1
-        _a_fence = max(_a_iqr * 3, np.median(_anchor_arr) * 0.15)
-        _pred_y_range = [max(0, _aq1 - _a_fence), _aq3 + _a_fence]
+            _pred_y_range = _iqr_y_range(_hist_close)
 
     _pred_layout = dict(
         template="plotly_dark", height=500,
@@ -905,16 +914,8 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
 
         # Compute smart y-axis bounds using IQR on actual prices
         _y_range = None
-        if _auto_clamp and len(_filtered_df) >= 4:
-            _actual_vals = _filtered_df["actual"].dropna()
-            if not _actual_vals.empty:
-                _q1 = _actual_vals.quantile(0.25)
-                _q3 = _actual_vals.quantile(0.75)
-                _iqr = _q3 - _q1
-                _fence = max(_iqr * 3, _actual_vals.median() * 0.15)
-                _y_lo = max(0, _q1 - _fence)
-                _y_hi = _q3 + _fence
-                _y_range = [_y_lo, _y_hi]
+        if _auto_clamp:
+            _y_range = _iqr_y_range(_filtered_df["actual"])
 
         fig_acc = go.Figure()
 

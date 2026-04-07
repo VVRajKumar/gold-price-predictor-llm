@@ -159,6 +159,7 @@ class ETFDataFetcher:
             close_first = _safe_float(close.iloc[0])
 
             if close_first == 0:
+                logger.warning(f"ETF {ticker}: zero initial price, skipping summary")
                 continue
 
             price_change = (close_last - close_first) / close_first * 100
@@ -222,6 +223,7 @@ class ETFDataFetcher:
             close_first = _safe_float(close.iloc[0])
 
             if close_first == 0:
+                logger.warning(f"Fund {ticker}: zero initial price, skipping summary")
                 continue
 
             price_change = (close_last - close_first) / close_first * 100

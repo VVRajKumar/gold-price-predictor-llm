@@ -64,14 +64,11 @@ TREASURY_10Y = "^TNX"         # US 10-Year Treasury (global reference)
 
 GOLD_ETF_TICKERS = [
     "GOLDBEES.NS",       # Nippon India ETF Gold BeES
-    "ICICIGOLD.NS",      # ICICI Prud Gold ETF
     "SBIGETF.NS",        # SBI Gold ETF
     "HDFCGOLD.NS",       # HDFC Gold ETF
-    "KOTAKGOLD.NS",      # Kotak Gold ETF
     "TATAGOLD.NS",       # Tata Gold ETF
 ]
 GOLD_FUND_TICKERS = [
-    "0P0001BALK.BO",     # SBI Gold Mutual Fund
     "0P0000XVLE.BO",     # HDFC Gold Mutual Fund
     "0P0001BAL8.BO",     # Kotak Gold Mutual Fund
     "0P0001BAL4.BO",     # Nippon India Gold Mutual Fund

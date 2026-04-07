@@ -53,7 +53,10 @@ def _yf_download_with_retry(
                 time.sleep(wait)
         except Exception as e:
             err_str = str(e)
-            is_transient = any(kw in err_str for kw in ("Rate", "Too Many", "NoneType", "timeout", "500", "503"))
+            is_transient = any(kw in err_str for kw in (
+                "Rate", "Too Many", "NoneType", "timeout", "500", "503",
+                "No objects to concatenate", "dictionary changed size",
+            ))
             if is_transient and attempt < max_retries - 1:
                 wait = _INITIAL_BACKOFF * (2 ** attempt)
                 logger.warning(f"Transient error for {ticker}: {e} — retrying in {wait}s (attempt {attempt + 1}/{max_retries})")

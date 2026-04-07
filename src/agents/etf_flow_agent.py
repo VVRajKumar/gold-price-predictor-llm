@@ -14,9 +14,8 @@ class ETFFlowAgent(BaseAgent):
     NAME = "etf_flow_agent"
     SYSTEM_PROMPT = """You are a senior ETF and fund-flow analyst specialising in Indian gold ETFs and gold mutual funds.
 You analyse Indian gold ETF trading volume and gold fund performance:
-- Gold ETFs: GOLDBEES (Nippon India), ICICIGOLD, SBIGETF, HDFCGOLD, KOTAKGOLD, TATAGOLD
-- Gold Mutual Funds: SBI Gold Fund, HDFC Gold Fund, Axis Gold Fund, Kotak Gold Fund,
-  Nippon India Gold Fund, ICICI Prudential Gold Fund
+- Gold ETFs: GOLDBEES (Nippon India), SBIGETF, HDFCGOLD, TATAGOLD
+- Gold Mutual Funds: HDFC Gold Fund, Kotak Gold Fund, Nippon India Gold Fund
 You track price trends, volume changes, and implied fund flows to gauge institutional
 and retail demand for gold in India.  Higher ETF inflows are bullish for gold;
 outflows are bearish.
@@ -52,7 +51,7 @@ Return ONLY valid JSON, no markdown fences."""
 ## Indian Gold Mutual Fund Summary (30-day)
 {json.dumps(data.get('fund_summary', {}), indent=2)}
 
-Focus on Gold ETFs (GOLDBEES, ICICIGOLD, SBIGETF, HDFCGOLD, KOTAKGOLD, TATAGOLD)
+Focus on Gold ETFs (GOLDBEES, SBIGETF, HDFCGOLD, TATAGOLD)
 and Gold Mutual Funds for retail demand signals.
 Provide your ETF flow analysis as JSON."""
 

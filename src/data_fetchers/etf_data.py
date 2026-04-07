@@ -44,7 +44,10 @@ def _yf_download_safe(
                 time.sleep(wait)
         except Exception as e:
             err_str = str(e)
-            is_transient = any(kw in err_str for kw in ("Rate", "Too Many", "NoneType", "timeout", "500", "503"))
+            is_transient = any(kw in err_str for kw in (
+                "Rate", "Too Many", "NoneType", "timeout", "500", "503",
+                "No objects to concatenate", "dictionary changed size",
+            ))
             if is_transient and attempt < max_retries - 1:
                 wait = _INITIAL_BACKOFF * (2 ** attempt)
                 logger.warning(f"Transient error for {ticker}: {e} — retrying in {wait}s")
@@ -131,17 +134,25 @@ class ETFDataFetcher:
             close = df["Close"].squeeze()
             volume = df["Volume"].squeeze() if "Volume" in df else pd.Series(dtype=float)
 
-            avg_recent_vol = float(volume.tail(5).mean()) if len(volume) > 0 else 0
-            avg_older_vol = float(volume.tail(20).head(15).mean()) if len(volume) > 15 else 0
+            avg_recent_vol = float(volume.tail(5).mean()) if len(volume) > 0 else 0.0
+            avg_older_vol = float(volume.tail(20).head(15).mean()) if len(volume) > 15 else 0.0
 
-            price_change = (
-                (float(close.iloc[-1]) - float(close.iloc[0]))
-                / float(close.iloc[0])
-                * 100
-            )
+            # Guard against NaN values from missing data
+            if pd.isna(avg_recent_vol):
+                avg_recent_vol = 0.0
+            if pd.isna(avg_older_vol):
+                avg_older_vol = 0.0
+
+            close_last = float(close.iloc[-1]) if not pd.isna(close.iloc[-1]) else 0.0
+            close_first = float(close.iloc[0]) if not pd.isna(close.iloc[0]) else 0.0
+
+            if close_first == 0:
+                continue
+
+            price_change = (close_last - close_first) / close_first * 100
 
             summary[ticker] = {
-                "current_price": round(float(close.iloc[-1]), 2),
+                "current_price": round(close_last, 2),
                 "period_return_pct": round(price_change, 2),
                 "avg_volume_5d": int(avg_recent_vol),
                 "avg_volume_15d": int(avg_older_vol),
@@ -195,14 +206,16 @@ class ETFDataFetcher:
                 continue
 
             close = df["Close"].squeeze()
-            price_change = (
-                (float(close.iloc[-1]) - float(close.iloc[0]))
-                / float(close.iloc[0])
-                * 100
-            )
+            close_last = float(close.iloc[-1]) if not pd.isna(close.iloc[-1]) else 0.0
+            close_first = float(close.iloc[0]) if not pd.isna(close.iloc[0]) else 0.0
+
+            if close_first == 0:
+                continue
+
+            price_change = (close_last - close_first) / close_first * 100
 
             summary[ticker] = {
-                "current_nav": round(float(close.iloc[-1]), 2),
+                "current_nav": round(close_last, 2),
                 "period_return_pct": round(price_change, 2),
             }
 

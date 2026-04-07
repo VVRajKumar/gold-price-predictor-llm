@@ -26,9 +26,19 @@ if "src" in sys.modules:
         for _k in [k for k in list(sys.modules) if k == "src" or k.startswith("src.")]:
             del sys.modules[_k]
 
-from src.prediction_engine import PredictionEngine
-from src.data_fetchers.market_data import MarketDataFetcher
-from src.time_utils import now_ist, parse_iso_to_ist
+try:
+    from src.prediction_engine import PredictionEngine
+    from src.data_fetchers.market_data import MarketDataFetcher
+    from src.time_utils import now_ist, parse_iso_to_ist
+except KeyError:
+    # On Streamlit Cloud hot-reload the module cache can be in an inconsistent
+    # state after the cleanup above.  A second import attempt resolves it.
+    import importlib
+    if "src" in sys.modules:
+        importlib.reload(sys.modules["src"])
+    from src.prediction_engine import PredictionEngine
+    from src.data_fetchers.market_data import MarketDataFetcher
+    from src.time_utils import now_ist, parse_iso_to_ist
 
 # ── Display-time name helpers ────────────────────────────────────────
 # Chart-friendly names (short labels for SHAP bar chart / table headers)
@@ -537,7 +547,7 @@ if _shap:
             showlegend=False,
             margin=dict(l=10, r=20, t=10, b=40),
         )
-        st.plotly_chart(fig_shap, use_container_width=True)
+        st.plotly_chart(fig_shap, width="stretch")
 
         # Legend
         st.markdown(

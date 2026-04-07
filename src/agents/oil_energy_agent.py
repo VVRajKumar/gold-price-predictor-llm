@@ -53,11 +53,15 @@ Return ONLY valid JSON, no markdown fences."""
                 "current_price": round(float(oil_close.iloc[-1]), 2),
                 "30d_high": round(float(oil_high.tail(30).max()), 2),
                 "30d_low": round(float(oil_low.tail(30).min()), 2),
-                "30d_change_pct": round(
-                    (float(oil_close.iloc[-1]) - float(oil_close.iloc[-min(30, len(oil_close))]))
-                    / float(oil_close.iloc[-min(30, len(oil_close))]) * 100, 2
-                ),
             }
+            _oil_back = min(30, len(oil_close) - 1) if len(oil_close) > 1 else 0
+            if _oil_back > 0 and float(oil_close.iloc[-1 - _oil_back]) != 0:
+                oil_info["30d_change_pct"] = round(
+                    (float(oil_close.iloc[-1]) - float(oil_close.iloc[-1 - _oil_back]))
+                    / float(oil_close.iloc[-1 - _oil_back]) * 100, 2
+                )
+            else:
+                oil_info["30d_change_pct"] = 0.0
 
         gold_oil_ratio = None
         if not oil_df.empty and not gold_df.empty:

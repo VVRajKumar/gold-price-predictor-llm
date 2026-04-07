@@ -314,7 +314,7 @@ class AccuracyTracker:
         if not all_days:
             return None
 
-        errors = [d.get("abs_error", abs(d.get("error", 0))) for d in all_days]
+        errors = [abs(d.get("error", 0)) for d in all_days]
         pct_errors = [d["pct_error"] for d in all_days]
         band_hits = [d["within_band"] for d in all_days]
 

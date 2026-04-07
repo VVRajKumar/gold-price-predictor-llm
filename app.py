@@ -485,7 +485,7 @@ if _shap:
         st.markdown(f"""
         <div class="metric-card">
         <h4>🤖 Step 2: Triple Model Prediction</h4>
-        <p>Three independent ML models each analyze <b>{_shap.get('total_features', 24)} features</b>
+        <p>Three independent ML models each analyze <b>{_shap.get('total_features', 16)} features</b>
         and make their own forecast. A 4th model combines them into
         one final prediction — reducing any single model's mistakes.</p>
         </div>

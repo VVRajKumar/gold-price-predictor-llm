@@ -2,6 +2,7 @@
 Market data fetcher – pulls price/volume data from Yahoo Finance.
 """
 
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -18,6 +19,49 @@ from ..config import (
 
 # Cache price data for 15 min to avoid hammering the API
 _cache = TTLCache(maxsize=64, ttl=900)
+
+# Retry settings for transient Yahoo Finance errors (rate limits, server errors)
+_MAX_RETRIES = 3
+_INITIAL_BACKOFF = 2  # seconds
+
+
+def _yf_download_with_retry(
+    ticker: str,
+    start: str,
+    end: str,
+    interval: str = "1d",
+    max_retries: int = _MAX_RETRIES,
+) -> pd.DataFrame:
+    """Wrapper around yf.download with exponential backoff for transient errors."""
+    for attempt in range(max_retries):
+        try:
+            df = yf.download(
+                ticker,
+                start=start,
+                end=end,
+                interval=interval,
+                progress=False,
+            )
+            if df is None:
+                df = pd.DataFrame()
+            if not df.empty:
+                return df
+            # Empty result on first attempt may be transient; retry
+            if attempt < max_retries - 1:
+                wait = _INITIAL_BACKOFF * (2 ** attempt)
+                logger.info(f"Empty result for {ticker}, retrying in {wait}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait)
+        except Exception as e:
+            err_str = str(e)
+            is_transient = any(kw in err_str for kw in ("Rate", "Too Many", "NoneType", "timeout", "500", "503"))
+            if is_transient and attempt < max_retries - 1:
+                wait = _INITIAL_BACKOFF * (2 ** attempt)
+                logger.warning(f"Transient error for {ticker}: {e} — retrying in {wait}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait)
+            else:
+                logger.error(f"Error fetching {ticker}: {e}")
+                return pd.DataFrame()
+    return pd.DataFrame()
 
 
 class MarketDataFetcher:
@@ -52,12 +96,11 @@ class MarketDataFetcher:
         logger.info(f"Fetching {ticker} from {start_date} to {end_date}")
 
         try:
-            df = yf.download(
+            df = _yf_download_with_retry(
                 ticker,
                 start=start_date.strftime("%Y-%m-%d"),
                 end=end_date.strftime("%Y-%m-%d"),
                 interval=interval,
-                progress=False,
             )
             if df.empty:
                 logger.warning(f"No data returned for {ticker}")

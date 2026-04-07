@@ -73,10 +73,8 @@ GOLD_ETF_TICKERS = [
 GOLD_FUND_TICKERS = [
     "0P0001BALK.BO",     # SBI Gold Mutual Fund
     "0P0000XVLE.BO",     # HDFC Gold Mutual Fund
-    "0P0001BAH4.BO",     # Axis Gold Mutual Fund
     "0P0001BAL8.BO",     # Kotak Gold Mutual Fund
     "0P0001BAL4.BO",     # Nippon India Gold Mutual Fund
-    "0P0001BAII.BO",     # ICICI Prudential Gold Mutual Fund
 ]
 GOLD_MINER_TICKERS = ["TITAN.NS", "TBZ.NS", "RAJESHEXPO.NS"]
 

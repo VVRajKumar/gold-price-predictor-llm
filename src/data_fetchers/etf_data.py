@@ -2,6 +2,7 @@
 ETF & mining-stock data fetcher.
 """
 
+import time
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -12,6 +13,46 @@ from cachetools import TTLCache
 from ..config import GOLD_ETF_TICKERS, GOLD_MINER_TICKERS, GOLD_FUND_TICKERS, HISTORICAL_LOOKBACK_DAYS
 
 _cache = TTLCache(maxsize=64, ttl=900)
+
+# Retry settings for transient Yahoo Finance errors
+_MAX_RETRIES = 3
+_INITIAL_BACKOFF = 2  # seconds
+
+
+def _yf_download_safe(
+    ticker: str,
+    start: str,
+    end: str,
+    max_retries: int = _MAX_RETRIES,
+) -> pd.DataFrame:
+    """Wrapper around yf.download with retry logic for transient errors."""
+    for attempt in range(max_retries):
+        try:
+            df = yf.download(
+                ticker,
+                start=start,
+                end=end,
+                progress=False,
+            )
+            if df is None:
+                df = pd.DataFrame()
+            if not df.empty:
+                return df
+            if attempt < max_retries - 1:
+                wait = _INITIAL_BACKOFF * (2 ** attempt)
+                logger.info(f"Empty result for {ticker}, retrying in {wait}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait)
+        except Exception as e:
+            err_str = str(e)
+            is_transient = any(kw in err_str for kw in ("Rate", "Too Many", "NoneType", "timeout", "500", "503"))
+            if is_transient and attempt < max_retries - 1:
+                wait = _INITIAL_BACKOFF * (2 ** attempt)
+                logger.warning(f"Transient error for {ticker}: {e} — retrying in {wait}s")
+                time.sleep(wait)
+            else:
+                logger.warning(f"ETF {ticker} fetch error: {e}")
+                return pd.DataFrame()
+    return pd.DataFrame()
 
 
 class ETFDataFetcher:
@@ -32,11 +73,10 @@ class ETFDataFetcher:
 
         for ticker in GOLD_ETF_TICKERS:
             try:
-                df = yf.download(
+                df = _yf_download_safe(
                     ticker,
                     start=start.strftime("%Y-%m-%d"),
                     end=end.strftime("%Y-%m-%d"),
-                    progress=False,
                 )
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.droplevel(1)
@@ -63,11 +103,10 @@ class ETFDataFetcher:
 
         for ticker in GOLD_MINER_TICKERS:
             try:
-                df = yf.download(
+                df = _yf_download_safe(
                     ticker,
                     start=start.strftime("%Y-%m-%d"),
                     end=end.strftime("%Y-%m-%d"),
-                    progress=False,
                 )
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.droplevel(1)
@@ -130,11 +169,10 @@ class ETFDataFetcher:
 
         for ticker in GOLD_FUND_TICKERS:
             try:
-                df = yf.download(
+                df = _yf_download_safe(
                     ticker,
                     start=start.strftime("%Y-%m-%d"),
                     end=end.strftime("%Y-%m-%d"),
-                    progress=False,
                 )
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.droplevel(1)

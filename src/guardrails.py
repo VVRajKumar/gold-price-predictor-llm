@@ -34,7 +34,7 @@ MAX_HOURLY_MOVE_PCT = _MAX_HOURLY_MOVE_PCT
 # over many steps; this hard limit anchors every prediction to within
 # ±12% of the price at plan-generation time.
 _MAX_TOTAL_DRIFT_PCT = 12.0
-_MIN_BAND_PCT = 0.1     # band cannot be tighter than 0.1% of price
+_MIN_BAND_PCT = 0.1      # band cannot be tighter than 0.1% of price
 _MAX_BAND_PCT = 8.0      # band cannot be wider than 8% of price
 
 # Overconfidence thresholds

@@ -196,7 +196,8 @@ with st.sidebar:
             if del_ts.strip():
                 n = accuracy_tracker.delete_plan_entry(del_ts.strip())
                 if n:
-                    st.success(f"Removed {n} entry/entries matching '{del_ts.strip()}' from all logs and Gist.")
+                    label = "entry" if n == 1 else "entries"
+                    st.success(f"Removed {n} {label} matching '{del_ts.strip()}' from all logs and Gist.")
                     st.rerun()
                 else:
                     st.warning(f"No entries found matching '{del_ts.strip()}'.")

@@ -26,9 +26,19 @@ if "src" in sys.modules:
         for _k in [k for k in list(sys.modules) if k == "src" or k.startswith("src.")]:
             del sys.modules[_k]
 
-from src.prediction_engine import PredictionEngine
-from src.data_fetchers.market_data import MarketDataFetcher
-from src.time_utils import now_ist, parse_iso_to_ist
+try:
+    from src.prediction_engine import PredictionEngine
+    from src.data_fetchers.market_data import MarketDataFetcher
+    from src.time_utils import now_ist, parse_iso_to_ist
+except KeyError:
+    # On Streamlit Cloud hot-reload the module cache can be in an inconsistent
+    # state after the cleanup above.  A second import attempt resolves it.
+    import importlib
+    if "src" in sys.modules:
+        importlib.reload(sys.modules["src"])
+    from src.prediction_engine import PredictionEngine
+    from src.data_fetchers.market_data import MarketDataFetcher
+    from src.time_utils import now_ist, parse_iso_to_ist
 
 # ── Display-time name helpers ────────────────────────────────────────
 # Chart-friendly names (short labels for SHAP bar chart / table headers)
@@ -475,7 +485,7 @@ if _shap:
         st.markdown(f"""
         <div class="metric-card">
         <h4>🤖 Step 2: Triple Model Prediction</h4>
-        <p>Three independent ML models each analyze <b>{_shap.get('total_features', 24)} features</b>
+        <p>Three independent ML models each analyze <b>{_shap.get('total_features', 16)} features</b>
         and make their own forecast. A 4th model combines them into
         one final prediction — reducing any single model's mistakes.</p>
         </div>
@@ -537,7 +547,7 @@ if _shap:
             showlegend=False,
             margin=dict(l=10, r=20, t=10, b=40),
         )
-        st.plotly_chart(fig_shap, use_container_width=True)
+        st.plotly_chart(fig_shap, width="stretch")
 
         # Legend
         st.markdown(
@@ -841,10 +851,24 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                     marker=dict(size=12, color="#ff6b6b", symbol="x"),
             ))
 
+        # Compute a sensible y-axis range using the actual prices as the
+        # anchor, ignoring wild prediction outliers that would ruin the chart.
+        _actual_vals = acc_df["actual"].dropna()
+        if not _actual_vals.empty:
+            _y_center = _actual_vals.median()
+            _y_iqr = _actual_vals.quantile(0.75) - _actual_vals.quantile(0.25)
+            _y_spread = max(_y_iqr * 3, _y_center * 0.05)  # at least ±5% of median
+            _y_min = _y_center - _y_spread
+            _y_max = _y_center + _y_spread
+            _y_range = [max(0, _y_min * 0.98), _y_max * 1.02]
+        else:
+            _y_range = None  # fallback to plotly auto
+
         fig_acc.update_layout(
                 title="Predicted vs Actual Indian Gold Price (₹/10g)",
                 template="plotly_dark", height=450,
                 yaxis_title="Price (₹/10g)", xaxis_title="Time",
+                yaxis=dict(range=_y_range) if _y_range else {},
                 legend=dict(orientation="h", yanchor="bottom", y=1.02),
                 hovermode="x unified",
         )

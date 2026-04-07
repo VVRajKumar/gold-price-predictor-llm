@@ -21,7 +21,6 @@ the ML ensemble.  The LLM only writes prose + classifies outlook.
 from __future__ import annotations
 
 import json
-import math
 from typing import Any, Optional
 
 import re

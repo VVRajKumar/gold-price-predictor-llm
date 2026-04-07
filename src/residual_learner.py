@@ -32,7 +32,7 @@ _CORRECTION_CACHE = CACHE_DIR / "residual_corrections.json"
 # ── Minimum data thresholds ─────────────────────────────────────────
 _MIN_SAMPLES_BIAS = 3       # need ≥3 data points per horizon to start correcting
 _MIN_SAMPLES_STRONG = 15    # ramp correction strength up to this
-_MAX_CORRECTION_PCT = 2.0   # cap correction at ±2% of price (safety limit)
+_MAX_CORRECTION_PCT = 3.0   # cap correction at ±3% of price (safety limit)
 
 
 class ResidualLearner:

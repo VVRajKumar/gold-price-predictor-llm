@@ -2,6 +2,7 @@
 ETF & mining-stock data fetcher.
 """
 
+import time
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -12,6 +13,67 @@ from cachetools import TTLCache
 from ..config import GOLD_ETF_TICKERS, GOLD_MINER_TICKERS, GOLD_FUND_TICKERS, HISTORICAL_LOOKBACK_DAYS
 
 _cache = TTLCache(maxsize=64, ttl=900)
+
+# Retry settings for transient Yahoo Finance errors
+_MAX_RETRIES = 3
+_INITIAL_BACKOFF = 2  # seconds
+
+
+def _yf_download_safe(
+    ticker: str,
+    start: str,
+    end: str,
+    max_retries: int = _MAX_RETRIES,
+) -> pd.DataFrame:
+    """Wrapper around yf.download with retry logic for transient errors."""
+    for attempt in range(max_retries):
+        try:
+            df = yf.download(
+                ticker,
+                start=start,
+                end=end,
+                progress=False,
+            )
+            if df is None:
+                df = pd.DataFrame()
+            if not df.empty:
+                return df
+            if attempt < max_retries - 1:
+                wait = _INITIAL_BACKOFF * (2 ** attempt)
+                logger.info(f"Empty result for {ticker}, retrying in {wait}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait)
+        except Exception as e:
+            err_str = str(e)
+            is_transient = any(kw in err_str for kw in (
+                "Rate", "Too Many", "NoneType", "timeout", "500", "503",
+                "No objects to concatenate", "dictionary changed size",
+            ))
+            if is_transient and attempt < max_retries - 1:
+                wait = _INITIAL_BACKOFF * (2 ** attempt)
+                logger.warning(f"Transient error for {ticker}: {e} — retrying in {wait}s")
+                time.sleep(wait)
+            else:
+                logger.warning(f"ETF {ticker} fetch error: {e}")
+                return pd.DataFrame()
+    return pd.DataFrame()
+
+
+def _safe_float(val, default: float = 0.0) -> float:
+    """Convert value to float, returning default if NaN or conversion fails."""
+    try:
+        v = float(val)
+        return default if pd.isna(v) else v
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(val, default: int = 0) -> int:
+    """Convert value to int, returning default if NaN or conversion fails."""
+    try:
+        v = float(val)
+        return default if pd.isna(v) else int(v)
+    except (TypeError, ValueError):
+        return default
 
 
 class ETFDataFetcher:
@@ -32,11 +94,10 @@ class ETFDataFetcher:
 
         for ticker in GOLD_ETF_TICKERS:
             try:
-                df = yf.download(
+                df = _yf_download_safe(
                     ticker,
                     start=start.strftime("%Y-%m-%d"),
                     end=end.strftime("%Y-%m-%d"),
-                    progress=False,
                 )
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.droplevel(1)
@@ -63,11 +124,10 @@ class ETFDataFetcher:
 
         for ticker in GOLD_MINER_TICKERS:
             try:
-                df = yf.download(
+                df = _yf_download_safe(
                     ticker,
                     start=start.strftime("%Y-%m-%d"),
                     end=end.strftime("%Y-%m-%d"),
-                    progress=False,
                 )
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.droplevel(1)
@@ -92,20 +152,23 @@ class ETFDataFetcher:
             close = df["Close"].squeeze()
             volume = df["Volume"].squeeze() if "Volume" in df else pd.Series(dtype=float)
 
-            avg_recent_vol = float(volume.tail(5).mean()) if len(volume) > 0 else 0
-            avg_older_vol = float(volume.tail(20).head(15).mean()) if len(volume) > 15 else 0
+            avg_recent_vol = _safe_float(volume.tail(5).mean()) if len(volume) > 0 else 0.0
+            avg_older_vol = _safe_float(volume.tail(20).head(15).mean()) if len(volume) > 15 else 0.0
 
-            price_change = (
-                (float(close.iloc[-1]) - float(close.iloc[0]))
-                / float(close.iloc[0])
-                * 100
-            )
+            close_last = _safe_float(close.iloc[-1])
+            close_first = _safe_float(close.iloc[0])
+
+            if close_first == 0:
+                logger.warning(f"ETF {ticker}: zero initial price, skipping summary")
+                continue
+
+            price_change = (close_last - close_first) / close_first * 100
 
             summary[ticker] = {
-                "current_price": round(float(close.iloc[-1]), 2),
+                "current_price": round(close_last, 2),
                 "period_return_pct": round(price_change, 2),
-                "avg_volume_5d": int(avg_recent_vol),
-                "avg_volume_15d": int(avg_older_vol),
+                "avg_volume_5d": _safe_int(avg_recent_vol),
+                "avg_volume_15d": _safe_int(avg_older_vol),
                 "volume_trend": (
                     "increasing" if avg_recent_vol > avg_older_vol * 1.1
                     else "decreasing" if avg_recent_vol < avg_older_vol * 0.9
@@ -130,11 +193,10 @@ class ETFDataFetcher:
 
         for ticker in GOLD_FUND_TICKERS:
             try:
-                df = yf.download(
+                df = _yf_download_safe(
                     ticker,
                     start=start.strftime("%Y-%m-%d"),
                     end=end.strftime("%Y-%m-%d"),
-                    progress=False,
                 )
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.droplevel(1)
@@ -157,14 +219,17 @@ class ETFDataFetcher:
                 continue
 
             close = df["Close"].squeeze()
-            price_change = (
-                (float(close.iloc[-1]) - float(close.iloc[0]))
-                / float(close.iloc[0])
-                * 100
-            )
+            close_last = _safe_float(close.iloc[-1])
+            close_first = _safe_float(close.iloc[0])
+
+            if close_first == 0:
+                logger.warning(f"Fund {ticker}: zero initial price, skipping summary")
+                continue
+
+            price_change = (close_last - close_first) / close_first * 100
 
             summary[ticker] = {
-                "current_nav": round(float(close.iloc[-1]), 2),
+                "current_nav": round(close_last, 2),
                 "period_return_pct": round(price_change, 2),
             }
 

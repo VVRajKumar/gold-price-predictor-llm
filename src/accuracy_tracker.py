@@ -129,6 +129,30 @@ class AccuracyTracker:
     def get_stored_plans(self) -> list[dict]:
         return self._stored_plans
 
+    def delete_plan_entry(self, timestamp: str) -> int:
+        """Delete stored plan(s) and accuracy log entries matching a timestamp.
+
+        Returns the number of entries removed.
+        """
+        removed = 0
+        before_plans = len(self._stored_plans)
+        self._stored_plans = [
+            p for p in self._stored_plans if p.get("generated_at", "") != timestamp
+        ]
+        removed += before_plans - len(self._stored_plans)
+
+        before_log = len(self._log)
+        self._log = [
+            e for e in self._log if e.get("plan_generated_at", "") != timestamp
+        ]
+        removed += before_log - len(self._log)
+
+        if removed:
+            self._save_stored_plans()
+            self._save_log()
+            logger.info(f"Deleted {removed} entries matching timestamp '{timestamp}'")
+        return removed
+
     # ── Core: evaluate a prediction plan ─────────────────────────────
 
     def evaluate_plan(self, plan_dict: dict) -> Optional[dict]:
@@ -290,7 +314,7 @@ class AccuracyTracker:
         if not all_days:
             return None
 
-        errors = [d.get("abs_error", abs(d.get("error", 0))) for d in all_days]
+        errors = [abs(d.get("error", 0)) for d in all_days]
         pct_errors = [d["pct_error"] for d in all_days]
         band_hits = [d["within_band"] for d in all_days]
 

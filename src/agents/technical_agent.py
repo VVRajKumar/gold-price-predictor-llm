@@ -31,9 +31,11 @@ def _compute_macd(series: pd.Series) -> dict:
         "macd": round(float(macd_line.iloc[-1]), 4),
         "signal": round(float(signal_line.iloc[-1]), 4),
         "histogram": round(float(histogram.iloc[-1]), 4),
-        "crossover": "bullish" if float(histogram.iloc[-1]) > 0 and float(histogram.iloc[-2]) <= 0
-        else "bearish" if float(histogram.iloc[-1]) < 0 and float(histogram.iloc[-2]) >= 0
-        else "none",
+        "crossover": (
+            "bullish" if len(histogram) > 1 and float(histogram.iloc[-1]) > 0 and float(histogram.iloc[-2]) <= 0
+            else "bearish" if len(histogram) > 1 and float(histogram.iloc[-1]) < 0 and float(histogram.iloc[-2]) >= 0
+            else "none"
+        ),
     }
 
 

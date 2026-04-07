@@ -61,23 +61,28 @@ Return ONLY valid JSON, no markdown fences."""
         nifty_info = {}
         if not nifty_df.empty:
             nifty_close = nifty_df["Close"].squeeze()
-            nifty_info = {
-                "index": "Nifty 50",
-                "5d_change_pct": round(
-                    (float(nifty_close.iloc[-1]) - float(nifty_close.iloc[-min(5, len(nifty_close))]))
-                    / float(nifty_close.iloc[-min(5, len(nifty_close))]) * 100, 2
-                ),
-            }
+            _nifty_back = min(5, len(nifty_close) - 1) if len(nifty_close) > 1 else 0
+            if _nifty_back > 0 and float(nifty_close.iloc[-1 - _nifty_back]) != 0:
+                nifty_info = {
+                    "index": "Nifty 50",
+                    "5d_change_pct": round(
+                        (float(nifty_close.iloc[-1]) - float(nifty_close.iloc[-1 - _nifty_back]))
+                        / float(nifty_close.iloc[-1 - _nifty_back]) * 100, 2
+                    ),
+                }
+            else:
+                nifty_info = {"index": "Nifty 50", "5d_change_pct": 0.0}
 
         # USD/INR exchange rate
         usdinr_df = self._market.fetch_ticker("INR=X", period_days=30)
         usdinr_info = {}
         if not usdinr_df.empty:
             usdinr_close = usdinr_df["Close"].squeeze()
+            _usd_back = min(5, len(usdinr_close) - 1) if len(usdinr_close) > 1 else 0
             usdinr_info = {
                 "current_rate": round(float(usdinr_close.iloc[-1]), 2),
                 "5d_change": round(
-                    float(usdinr_close.iloc[-1]) - float(usdinr_close.iloc[-min(5, len(usdinr_close))]), 2
+                    float(usdinr_close.iloc[-1]) - float(usdinr_close.iloc[-1 - _usd_back]) if _usd_back > 0 else 0.0, 2
                 ),
             }
 

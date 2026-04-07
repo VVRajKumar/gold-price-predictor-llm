@@ -115,7 +115,7 @@ def extract_signals(agent_reports: dict[str, dict]) -> dict[str, float]:
 
     Returns
     -------
-    dict with exactly 8 float keys matching FEATURE_NAMES in ml_ensemble.py.
+    dict with exactly 8 float keys matching AGENT_SIGNAL_NAMES in ml_ensemble.py.
     """
     signals: dict[str, float] = {}
 

@@ -24,8 +24,13 @@ _MIN_INR_PRICE = 30_000.0
 _MAX_INR_PRICE = 500_000.0
 
 # Maximum hourly price change (%) considered plausible.
-# Even in extreme events, gold rarely moves >5% in a single hour.
-_MAX_HOURLY_MOVE_PCT = 5.0
+# Gold rarely moves >2% in a single hour; 5% was too lenient and allowed
+# compounding errors in the auto-regressive prediction loop.
+_MAX_HOURLY_MOVE_PCT = 2.0
+
+# Maximum total deviation (%) from current price over the full 24-hour horizon.
+# Even in extreme scenarios, Indian gold doesn't move >10% in a day.
+_MAX_TOTAL_DEVIATION_PCT = 10.0
 
 # Band width limits (as % of predicted price)
 _MIN_BAND_PCT = 0.1     # band cannot be tighter than 0.1% of price
@@ -151,6 +156,18 @@ def validate_prediction_plan(
         if pred < _MIN_INR_PRICE or pred > _MAX_INR_PRICE:
             corrections.append(f"hour {i}: price ₹{pred:,.0f} outside bounds → clamped")
             pred = _clamp(pred, _MIN_INR_PRICE, _MAX_INR_PRICE)
+
+        # ── Total deviation from current price (catch runaway predictions) ──
+        if current_price > 0:
+            total_dev_pct = abs(pred - current_price) / current_price * 100
+            if total_dev_pct > _MAX_TOTAL_DEVIATION_PCT:
+                direction = 1 if pred > current_price else -1
+                capped = current_price * (1 + direction * _MAX_TOTAL_DEVIATION_PCT / 100)
+                corrections.append(
+                    f"hour {i}: total deviation {total_dev_pct:.1f}% from current price "
+                    f"exceeds {_MAX_TOTAL_DEVIATION_PCT}% cap (₹{pred:,.0f} → ₹{capped:,.0f})"
+                )
+                pred = round(capped, 2)
 
         # ── Hourly move cap ──
         if prev_price > 0:
@@ -287,11 +304,27 @@ def validate_xgb_predictions(
                 direction = 1 if price > prev else -1
                 price = round(prev * (1 + direction * _MAX_HOURLY_MOVE_PCT / 100), 2)
 
+        # Cap total deviation from current price (prevent compounding drift)
+        if current_price_inr > 0:
+            total_dev = abs(price - current_price_inr) / current_price_inr * 100
+            if total_dev > _MAX_TOTAL_DEVIATION_PCT:
+                direction = 1 if price > current_price_inr else -1
+                price = round(
+                    current_price_inr * (1 + direction * _MAX_TOTAL_DEVIATION_PCT / 100), 2
+                )
+
         # Ensure band ordering
         if low > price:
             low = price
         if high < price:
             high = price
+
+        # Also clamp bands to total deviation envelope
+        if current_price_inr > 0:
+            dev_lo = current_price_inr * (1 - _MAX_TOTAL_DEVIATION_PCT / 100)
+            dev_hi = current_price_inr * (1 + _MAX_TOTAL_DEVIATION_PCT / 100)
+            low = max(low, dev_lo)
+            high = min(high, dev_hi)
 
         p["xgb_price"] = round(price, 2)
         p["xgb_low"] = round(low, 2)

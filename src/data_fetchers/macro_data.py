@@ -2,6 +2,7 @@
 Macroeconomic data fetcher – FRED API for interest rates, CPI, money supply, etc.
 """
 
+import time
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -11,6 +12,10 @@ from cachetools import TTLCache
 from ..config import FRED_API_KEY, FRED_SERIES
 
 _cache = TTLCache(maxsize=32, ttl=3600)  # 1-hour cache
+
+# Retry settings for transient FRED API errors
+_MAX_RETRIES = 3
+_INITIAL_BACKOFF = 2  # seconds
 
 
 class MacroDataFetcher:
@@ -25,7 +30,7 @@ class MacroDataFetcher:
 
     # ------------------------------------------------------------------ #
     def _fred_request(self, series_id: str, lookback_days: int = 365) -> pd.DataFrame:
-        """Low-level FRED API call."""
+        """Low-level FRED API call with retry logic for transient errors."""
         cache_key = f"fred_{series_id}_{lookback_days}"
         if cache_key in _cache:
             return _cache[cache_key]
@@ -46,27 +51,36 @@ class MacroDataFetcher:
             "sort_order": "desc",
         }
 
-        try:
-            resp = requests.get(url, params=params, timeout=15)
-            resp.raise_for_status()
-            data = resp.json().get("observations", [])
-            if not data:
-                return pd.DataFrame()
+        for attempt in range(_MAX_RETRIES):
+            try:
+                resp = requests.get(url, params=params, timeout=15)
+                resp.raise_for_status()
+                data = resp.json().get("observations", [])
+                if not data:
+                    return pd.DataFrame()
 
-            df = pd.DataFrame(data)
-            df["date"] = pd.to_datetime(df["date"])
-            df["value"] = pd.to_numeric(df["value"], errors="coerce")
-            df = df.dropna(subset=["value"]).set_index("date")[["value"]]
-            df = df.sort_index()
-            _cache[cache_key] = df
-            return df
-        except Exception as e:
-            msg = str(e)
-            if "400" in msg:
-                logger.warning(f"FRED 400 for {series_id}: {msg}")
-            else:
-                logger.error(f"FRED error for {series_id}: {msg}")
-            return pd.DataFrame()
+                df = pd.DataFrame(data)
+                df["date"] = pd.to_datetime(df["date"])
+                df["value"] = pd.to_numeric(df["value"], errors="coerce")
+                df = df.dropna(subset=["value"]).set_index("date")[["value"]]
+                df = df.sort_index()
+                _cache[cache_key] = df
+                return df
+            except Exception as e:
+                msg = str(e)
+                msg_lower = msg.lower()
+                is_transient = any(kw in msg_lower for kw in ("500", "502", "503", "timeout", "connectionerror"))
+                if "400" in msg:
+                    logger.warning(f"FRED 400 for {series_id}: {msg}")
+                    return pd.DataFrame()
+                elif is_transient and attempt < _MAX_RETRIES - 1:
+                    wait = _INITIAL_BACKOFF * (2 ** attempt)
+                    logger.warning(f"FRED transient error for {series_id}: {msg} — retrying in {wait}s")
+                    time.sleep(wait)
+                else:
+                    logger.error(f"FRED error for {series_id}: {msg}")
+                    return pd.DataFrame()
+        return pd.DataFrame()
 
     # ------------------------------------------------------------------ #
     def fetch_series(self, name: str, lookback_days: int = 365) -> pd.DataFrame:

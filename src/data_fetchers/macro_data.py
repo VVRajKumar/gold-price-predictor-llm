@@ -68,7 +68,8 @@ class MacroDataFetcher:
                 return df
             except Exception as e:
                 msg = str(e)
-                is_transient = any(kw in msg for kw in ("500", "502", "503", "timeout", "Timeout", "ConnectionError"))
+                msg_lower = msg.lower()
+                is_transient = any(kw in msg_lower for kw in ("500", "502", "503", "timeout", "connectionerror"))
                 if "400" in msg:
                     logger.warning(f"FRED 400 for {series_id}: {msg}")
                     return pd.DataFrame()

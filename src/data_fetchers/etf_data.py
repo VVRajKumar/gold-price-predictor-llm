@@ -58,6 +58,24 @@ def _yf_download_safe(
     return pd.DataFrame()
 
 
+def _safe_float(val, default: float = 0.0) -> float:
+    """Convert value to float, returning default if NaN or conversion fails."""
+    try:
+        v = float(val)
+        return default if pd.isna(v) else v
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(val, default: int = 0) -> int:
+    """Convert value to int, returning default if NaN or conversion fails."""
+    try:
+        v = float(val)
+        return default if pd.isna(v) else int(v)
+    except (TypeError, ValueError):
+        return default
+
+
 class ETFDataFetcher:
     """Fetch Gold ETF and miner data."""
 
@@ -134,17 +152,11 @@ class ETFDataFetcher:
             close = df["Close"].squeeze()
             volume = df["Volume"].squeeze() if "Volume" in df else pd.Series(dtype=float)
 
-            avg_recent_vol = float(volume.tail(5).mean()) if len(volume) > 0 else 0.0
-            avg_older_vol = float(volume.tail(20).head(15).mean()) if len(volume) > 15 else 0.0
+            avg_recent_vol = _safe_float(volume.tail(5).mean()) if len(volume) > 0 else 0.0
+            avg_older_vol = _safe_float(volume.tail(20).head(15).mean()) if len(volume) > 15 else 0.0
 
-            # Guard against NaN values from missing data
-            if pd.isna(avg_recent_vol):
-                avg_recent_vol = 0.0
-            if pd.isna(avg_older_vol):
-                avg_older_vol = 0.0
-
-            close_last = float(close.iloc[-1]) if not pd.isna(close.iloc[-1]) else 0.0
-            close_first = float(close.iloc[0]) if not pd.isna(close.iloc[0]) else 0.0
+            close_last = _safe_float(close.iloc[-1])
+            close_first = _safe_float(close.iloc[0])
 
             if close_first == 0:
                 continue
@@ -154,8 +166,8 @@ class ETFDataFetcher:
             summary[ticker] = {
                 "current_price": round(close_last, 2),
                 "period_return_pct": round(price_change, 2),
-                "avg_volume_5d": int(avg_recent_vol),
-                "avg_volume_15d": int(avg_older_vol),
+                "avg_volume_5d": _safe_int(avg_recent_vol),
+                "avg_volume_15d": _safe_int(avg_older_vol),
                 "volume_trend": (
                     "increasing" if avg_recent_vol > avg_older_vol * 1.1
                     else "decreasing" if avg_recent_vol < avg_older_vol * 0.9
@@ -206,8 +218,8 @@ class ETFDataFetcher:
                 continue
 
             close = df["Close"].squeeze()
-            close_last = float(close.iloc[-1]) if not pd.isna(close.iloc[-1]) else 0.0
-            close_first = float(close.iloc[0]) if not pd.isna(close.iloc[0]) else 0.0
+            close_last = _safe_float(close.iloc[-1])
+            close_first = _safe_float(close.iloc[0])
 
             if close_first == 0:
                 continue

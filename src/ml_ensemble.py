@@ -35,7 +35,7 @@ from sklearn.linear_model import Ridge
 
 from .config import CACHE_DIR, PREDICTION_HOURS
 from .data_fetchers.market_data import MarketDataFetcher
-from .guardrails import validate_xgb_predictions, validate_price_series, MAX_HOURLY_MOVE_PCT
+from .guardrails import validate_xgb_predictions, validate_price_series
 from .residual_learner import ResidualLearner
 
 # ── Feature engineering constants ────────────────────────────────────
@@ -301,12 +301,6 @@ class MLEnsemble:
             preds: list[dict] = []
             X_for_shap: list[np.ndarray] = []
 
-            # Track the previous USD price so we can apply a per-step cap
-            # before feeding predictions back into the auto-regressive history.
-            # Without this cap, one bad step contaminates every subsequent lag
-            # feature and causes exponentially growing errors.
-            prev_step_usd = float(values[-1]) if len(values) > 0 else None
-
             for h in range(PREDICTION_HOURS):
                 ts = pd.Timestamp(last_ts) + pd.Timedelta(hours=h + 1)
                 feat = _build_feature_vector(history, ts, agent_signals).reshape(1, -1)
@@ -319,21 +313,6 @@ class MLEnsemble:
                 # Meta-learner stacked prediction
                 stack = np.array([[p_xgb, p_lgb, p_ridge]])
                 p_final_usd = float(self._meta_model.predict(stack)[0])
-
-                # ── Auto-regressive guardrail (USD space) ────────────────
-                # Cap the USD prediction to ±MAX_HOURLY_MOVE_PCT% of the
-                # previous USD price *before* appending to history.  This
-                # prevents a single bad step from corrupting all subsequent
-                # lag features and causing exponential error amplification.
-                if prev_step_usd is not None and prev_step_usd > 0 and math.isfinite(p_final_usd):
-                    move_pct = (p_final_usd - prev_step_usd) / prev_step_usd * 100
-                    if abs(move_pct) > MAX_HOURLY_MOVE_PCT:
-                        direction = 1 if p_final_usd > prev_step_usd else -1
-                        p_final_usd = prev_step_usd * (1 + direction * MAX_HOURLY_MOVE_PCT / 100)
-                        logger.debug(
-                            f"AR guardrail (step {h+1}): USD move {move_pct:.1f}% "
-                            f"capped to {direction * MAX_HOURLY_MOVE_PCT:.1f}%"
-                        )
 
                 # Quantile bands (USD/oz)
                 lo_usd = float(self._xgb_lo.predict(feat)[0])
@@ -363,10 +342,8 @@ class MLEnsemble:
                 })
                 X_for_shap.append(feat.flatten())
 
-                # Feed the *capped* USD price back into history so all
-                # subsequent lag features stay in a plausible range.
+                # Auto-regressive: feed predicted USD price back into history
                 history.append(p_final_usd)
-                prev_step_usd = p_final_usd
 
             # Validate predictions
             current_inr = self._market.get_gold_inr_price()

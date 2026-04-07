@@ -26,15 +26,9 @@ _MAX_INR_PRICE = 500_000.0
 # Maximum hourly price change (%) considered plausible.
 # Even in extreme events, gold rarely moves >5% in a single hour.
 _MAX_HOURLY_MOVE_PCT = 5.0
-# Public alias so other modules can reference the same constant.
-MAX_HOURLY_MOVE_PCT = _MAX_HOURLY_MOVE_PCT
 
-# Maximum total drift from the current actual price across the whole
-# forecast horizon.  The per-step cap can compound to very large values
-# over many steps; this hard limit anchors every prediction to within
-# ±12% of the price at plan-generation time.
-_MAX_TOTAL_DRIFT_PCT = 12.0
-_MIN_BAND_PCT = 0.1      # band cannot be tighter than 0.1% of price
+# Band width limits (as % of predicted price)
+_MIN_BAND_PCT = 0.1     # band cannot be tighter than 0.1% of price
 _MAX_BAND_PCT = 8.0      # band cannot be wider than 8% of price
 
 # Overconfidence thresholds
@@ -158,7 +152,7 @@ def validate_prediction_plan(
             corrections.append(f"hour {i}: price ₹{pred:,.0f} outside bounds → clamped")
             pred = _clamp(pred, _MIN_INR_PRICE, _MAX_INR_PRICE)
 
-        # ── Hourly move cap (step-to-step) ──
+        # ── Hourly move cap ──
         if prev_price > 0:
             move_pct = abs(pred - prev_price) / prev_price * 100
             if move_pct > _MAX_HOURLY_MOVE_PCT:
@@ -169,22 +163,6 @@ def validate_prediction_plan(
                     f"(₹{pred:,.0f} → ₹{capped:,.0f})"
                 )
                 pred = round(capped, 2)
-
-        # ── Absolute drift cap (anchored to current_price) ──
-        # The per-step cap can compound over 24 steps; this hard limit
-        # prevents exponential drift from the actual current price.
-        if current_price > 0:
-            total_drift_pct = abs(pred - current_price) / current_price * 100
-            if total_drift_pct > _MAX_TOTAL_DRIFT_PCT:
-                direction = 1 if pred > current_price else -1
-                capped_total = round(
-                    current_price * (1 + direction * _MAX_TOTAL_DRIFT_PCT / 100), 2
-                )
-                corrections.append(
-                    f"hour {i}: total drift {total_drift_pct:.1f}% from current "
-                    f"₹{current_price:,.0f} → ₹{capped_total:,.0f}"
-                )
-                pred = capped_total
 
         # ── Band ordering: low ≤ pred ≤ high ──
         if low > pred:
@@ -290,16 +268,7 @@ def validate_xgb_predictions(
     preds: list[dict],
     current_price_inr: float,
 ) -> list[dict]:
-    """Sanity-check XGBoost predictions before blending with LLM forecast.
-
-    Two layers of protection:
-    1. Per-step cap: each predicted price may not move more than
-       _MAX_HOURLY_MOVE_PCT% from the previous predicted price.
-    2. Absolute-drift cap: the predicted price may not deviate more than
-       _MAX_TOTAL_DRIFT_PCT% from `current_price_inr`, regardless of how
-       many compounding steps have occurred.  This stops the sequential
-       per-step cap from allowing exponential drift over a 24-hour horizon.
-    """
+    """Sanity-check XGBoost predictions before blending with LLM forecast."""
     validated: list[dict] = []
     prev = current_price_inr
 
@@ -311,27 +280,12 @@ def validate_xgb_predictions(
         if not math.isfinite(price) or price <= 0:
             price = prev
 
-        # ── Layer 1: per-step cap (step-to-step) ──
+        # Cap hourly move
         if prev > 0:
             move_pct = abs(price - prev) / prev * 100
             if move_pct > _MAX_HOURLY_MOVE_PCT:
                 direction = 1 if price > prev else -1
                 price = round(prev * (1 + direction * _MAX_HOURLY_MOVE_PCT / 100), 2)
-
-        # ── Layer 2: absolute drift cap (anchored to current_price_inr) ──
-        if current_price_inr > 0:
-            total_drift_pct = abs(price - current_price_inr) / current_price_inr * 100
-            if total_drift_pct > _MAX_TOTAL_DRIFT_PCT:
-                direction = 1 if price > current_price_inr else -1
-                capped = round(
-                    current_price_inr * (1 + direction * _MAX_TOTAL_DRIFT_PCT / 100), 2
-                )
-                logger.debug(
-                    f"[guardrail:xgb] step {i}: total drift {total_drift_pct:.1f}% "
-                    f"from current ₹{current_price_inr:,.0f} → capped "
-                    f"₹{price:,.0f} → ₹{capped:,.0f}"
-                )
-                price = capped
 
         # Ensure band ordering
         if low > price:

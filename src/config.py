@@ -64,7 +64,6 @@ TREASURY_10Y = "^TNX"         # US 10-Year Treasury (global reference)
 
 GOLD_ETF_TICKERS = [
     "GOLDBEES.NS",       # Nippon India ETF Gold BeES
-    "SBIGETF.NS",        # SBI Gold ETF
     "HDFCGOLD.NS",       # HDFC Gold ETF
     "TATAGOLD.NS",       # Tata Gold ETF
 ]

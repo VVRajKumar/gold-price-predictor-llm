@@ -37,7 +37,7 @@ def _yf_download_safe(
             if df is None:
                 df = pd.DataFrame()
             if not df.empty:
-                # Drop rows where ALL value columns are NaN (delisted tickers
+                # Drop rows where all columns are NaN (delisted tickers
                 # can return structurally non-empty but all-NaN DataFrames).
                 df = df.dropna(how="all")
                 if not df.empty:
@@ -181,7 +181,7 @@ class ETFDataFetcher:
                     ),
                 }
             except Exception as e:
-                logger.warning(f"ETF {ticker}: skipping summary due to error: {e}")
+                logger.warning(f"ETF {ticker}: skipping summary due to {type(e).__name__}: {e}")
 
         return summary
 
@@ -241,6 +241,6 @@ class ETFDataFetcher:
                     "period_return_pct": round(price_change, 2),
                 }
             except Exception as e:
-                logger.warning(f"Fund {ticker}: skipping summary due to error: {e}")
+                logger.warning(f"Fund {ticker}: skipping summary due to {type(e).__name__}: {e}")
 
         return summary

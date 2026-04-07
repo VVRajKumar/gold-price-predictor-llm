@@ -526,9 +526,8 @@ if _shap:
         colors = []
         for _, row in shap_df.iterrows():
             fname = row["feature"]
-            # Agent entries have "(Agent)" suffix; check base name
-            base_name = fname.replace(" (Agent)", "")
-            if base_name in _agent_feats or fname in _agent_feats:
+            # Agent entries have "(Agent)" suffix
+            if fname.endswith(" (Agent)"):
                 colors.append("#4ecdc4")   # teal - agent signals
             elif fname in _price_feats:
                 colors.append("#00d4aa")   # green - price features

@@ -492,7 +492,7 @@ class MLEnsemble:
             # so the UI shows them alongside SHAP features.
             # Scale to USD terms (matching SHAP value units) using the
             # reference price from the most recent lag_1 feature.
-            if agent_signals:
+            if agent_signals and self._last_X_pred is not None and len(self._last_X_pred) > 0:
                 agent_multiplier = _compute_agent_adjustment(agent_signals)
                 ref_price = float(self._last_X_pred[0][0])  # lag_1 = latest price (USD/oz)
                 agent_dollar_impact = abs(agent_multiplier - 1.0) * ref_price

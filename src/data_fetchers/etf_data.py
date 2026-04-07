@@ -37,7 +37,11 @@ def _yf_download_safe(
             if df is None:
                 df = pd.DataFrame()
             if not df.empty:
-                return df
+                # Drop rows where ALL value columns are NaN (delisted tickers
+                # can return structurally non-empty but all-NaN DataFrames).
+                df = df.dropna(how="all")
+                if not df.empty:
+                    return df
             if attempt < max_retries - 1:
                 wait = _INITIAL_BACKOFF * (2 ** attempt)
                 logger.info(f"Empty result for {ticker}, retrying in {wait}s (attempt {attempt + 1}/{max_retries})")
@@ -146,35 +150,38 @@ class ETFDataFetcher:
         summary = {}
 
         for ticker, df in etf_data.items():
-            if df.empty or len(df) < 2:
-                continue
+            try:
+                if df.empty or len(df) < 2:
+                    continue
 
-            close = df["Close"].squeeze()
-            volume = df["Volume"].squeeze() if "Volume" in df else pd.Series(dtype=float)
+                close = df["Close"].squeeze()
+                volume = df["Volume"].squeeze() if "Volume" in df else pd.Series(dtype=float)
 
-            avg_recent_vol = _safe_float(volume.tail(5).mean()) if len(volume) > 0 else 0.0
-            avg_older_vol = _safe_float(volume.tail(20).head(15).mean()) if len(volume) > 15 else 0.0
+                avg_recent_vol = _safe_float(volume.tail(5).mean()) if len(volume) > 0 else 0.0
+                avg_older_vol = _safe_float(volume.tail(20).head(15).mean()) if len(volume) > 15 else 0.0
 
-            close_last = _safe_float(close.iloc[-1])
-            close_first = _safe_float(close.iloc[0])
+                close_last = _safe_float(close.iloc[-1])
+                close_first = _safe_float(close.iloc[0])
 
-            if close_first == 0:
-                logger.warning(f"ETF {ticker}: zero initial price, skipping summary")
-                continue
+                if close_first == 0:
+                    logger.warning(f"ETF {ticker}: zero initial price, skipping summary")
+                    continue
 
-            price_change = (close_last - close_first) / close_first * 100
+                price_change = (close_last - close_first) / close_first * 100
 
-            summary[ticker] = {
-                "current_price": round(close_last, 2),
-                "period_return_pct": round(price_change, 2),
-                "avg_volume_5d": _safe_int(avg_recent_vol),
-                "avg_volume_15d": _safe_int(avg_older_vol),
-                "volume_trend": (
-                    "increasing" if avg_recent_vol > avg_older_vol * 1.1
-                    else "decreasing" if avg_recent_vol < avg_older_vol * 0.9
-                    else "stable"
-                ),
-            }
+                summary[ticker] = {
+                    "current_price": round(close_last, 2),
+                    "period_return_pct": round(price_change, 2),
+                    "avg_volume_5d": _safe_int(avg_recent_vol),
+                    "avg_volume_15d": _safe_int(avg_older_vol),
+                    "volume_trend": (
+                        "increasing" if avg_recent_vol > avg_older_vol * 1.1
+                        else "decreasing" if avg_recent_vol < avg_older_vol * 0.9
+                        else "stable"
+                    ),
+                }
+            except Exception as e:
+                logger.warning(f"ETF {ticker}: skipping summary due to error: {e}")
 
         return summary
 
@@ -215,22 +222,25 @@ class ETFDataFetcher:
         summary = {}
 
         for ticker, df in fund_data.items():
-            if df.empty or len(df) < 2:
-                continue
+            try:
+                if df.empty or len(df) < 2:
+                    continue
 
-            close = df["Close"].squeeze()
-            close_last = _safe_float(close.iloc[-1])
-            close_first = _safe_float(close.iloc[0])
+                close = df["Close"].squeeze()
+                close_last = _safe_float(close.iloc[-1])
+                close_first = _safe_float(close.iloc[0])
 
-            if close_first == 0:
-                logger.warning(f"Fund {ticker}: zero initial price, skipping summary")
-                continue
+                if close_first == 0:
+                    logger.warning(f"Fund {ticker}: zero initial price, skipping summary")
+                    continue
 
-            price_change = (close_last - close_first) / close_first * 100
+                price_change = (close_last - close_first) / close_first * 100
 
-            summary[ticker] = {
-                "current_nav": round(close_last, 2),
-                "period_return_pct": round(price_change, 2),
-            }
+                summary[ticker] = {
+                    "current_nav": round(close_last, 2),
+                    "period_return_pct": round(price_change, 2),
+                }
+            except Exception as e:
+                logger.warning(f"Fund {ticker}: skipping summary due to error: {e}")
 
         return summary

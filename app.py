@@ -77,6 +77,23 @@ def _clean_text(text: str) -> str:
         text = text.replace(code, friendly)
     return text
 
+
+def _iqr_y_range(values):
+    """Compute a y-axis range that excludes outliers using the IQR method.
+
+    Uses 3× IQR (a standard statistical fence for "far outliers") with a
+    floor of 15% of the median so the axis always has reasonable padding
+    even when the data has very low variance.  Returns ``[lo, hi]`` or
+    ``None`` when there is not enough data.
+    """
+    vals = pd.Series(values).dropna()
+    if len(vals) < 4:
+        return None
+    q1, q3 = vals.quantile(0.25), vals.quantile(0.75)
+    iqr = q3 - q1
+    fence = max(iqr * 3, vals.median() * 0.15)
+    return [max(0, q1 - fence), q3 + fence]
+
 # ── Page config ──────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Indian Gold Price Predictor – Agentic AI",
@@ -174,6 +191,35 @@ with st.sidebar:
 
     st.divider()
     st.caption(f"v1.0 · Updated {now_ist().strftime('%H:%M')}")
+
+    # ── Admin: delete a bad prediction entry ─────────────────────────
+    st.divider()
+    with st.expander("🛠️ Admin", expanded=False):
+        st.caption(
+            "Remove a corrupted or erroneous prediction from all logs "
+            "(accuracy log + stored plans) and from the GitHub Gist."
+        )
+        del_ts = st.text_input(
+            "Timestamp prefix to delete",
+            placeholder="e.g. 2026-04-06 10:10",
+            key="admin_delete_ts",
+            help=(
+                "Enter the start of the 'Generated At' timestamp shown in "
+                "the Accuracy Trend table. Partial prefixes work – e.g. "
+                "'2026-04-06 10:10' removes any entry that starts with that string."
+            ),
+        )
+        if st.button("🗑️ Delete entry", key="admin_delete_btn", type="secondary"):
+            if del_ts.strip():
+                n = accuracy_tracker.delete_plan_entry(del_ts.strip())
+                if n:
+                    label = "entry" if n == 1 else "entries"
+                    st.success(f"Removed {n} {label} matching '{del_ts.strip()}' from all logs and Gist.")
+                    st.rerun()
+                else:
+                    st.warning(f"No entries found matching '{del_ts.strip()}'.")
+            else:
+                st.warning("Please enter a timestamp prefix.")
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -411,13 +457,26 @@ if plan.daily_predictions:
         marker=dict(size=10, symbol="circle"),
     ))
 
-    fig.update_layout(
+    # Smart y-axis clamping: use actual historical prices as anchor
+    _pred_y_range = None
+    if not gold_recent.empty:
+        _hist_close = pd.to_numeric(gold_recent["Close"], errors="coerce").dropna()
+        if not _hist_close.empty:
+            _pred_y_range = _iqr_y_range(_hist_close)
+
+    _pred_layout = dict(
         template="plotly_dark", height=500,
         yaxis_title="Price (₹/10g)",
         xaxis_title="Time",
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
         hovermode="x unified",
+        xaxis=dict(rangeslider=dict(visible=True, thickness=0.05)),
     )
+    if _pred_y_range is not None:
+        _pred_layout["yaxis"] = dict(
+            title="Price (₹/10g)", range=_pred_y_range,
+        )
+    fig.update_layout(**_pred_layout)
     st.plotly_chart(fig, width="stretch")
 
     # Daily breakdown table
@@ -801,16 +860,73 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         acc_df["date"] = pd.to_datetime(acc_df["date"])
         acc_df = acc_df.sort_values("date").drop_duplicates(subset="date", keep="last")
 
+        # ── Date / Time range filter ─────────────────────────────
+
+        _min_dt = acc_df["date"].min().to_pydatetime()
+        _max_dt = acc_df["date"].max().to_pydatetime()
+
+        with st.expander("🔍 Filter Chart by Date & Time", expanded=False):
+            _fc1, _fc2, _fc3, _fc4, _fc5 = st.columns([2, 1, 2, 1, 2])
+            with _fc1:
+                _start_date = st.date_input(
+                    "Start date", value=_min_dt.date(),
+                    min_value=_min_dt.date(), max_value=_max_dt.date(),
+                    key="acc_start_date",
+                )
+            with _fc2:
+                _start_hour = st.number_input(
+                    "Hour", min_value=0, max_value=23,
+                    value=_min_dt.hour, key="acc_start_hour",
+                )
+            with _fc3:
+                _end_date = st.date_input(
+                    "End date", value=_max_dt.date(),
+                    min_value=_min_dt.date(), max_value=_max_dt.date(),
+                    key="acc_end_date",
+                )
+            with _fc4:
+                _end_hour = st.number_input(
+                    "Hour", min_value=0, max_value=23,
+                    value=_max_dt.hour, key="acc_end_hour",
+                )
+            with _fc5:
+                _auto_clamp = st.checkbox(
+                    "Auto-clamp Y axis (hide outliers)",
+                    value=True, key="acc_auto_clamp",
+                )
+
+        # Apply date/time filter
+        _filter_start = pd.Timestamp(
+            year=_start_date.year, month=_start_date.month,
+            day=_start_date.day, hour=int(_start_hour),
+        )
+        _filter_end = pd.Timestamp(
+            year=_end_date.year, month=_end_date.month,
+            day=_end_date.day, hour=int(_end_hour), minute=59, second=59,
+        )
+        _filtered_df = acc_df[
+            (acc_df["date"] >= _filter_start) & (acc_df["date"] <= _filter_end)
+        ]
+
+        if _filtered_df.empty:
+            st.warning("No data in the selected range. Showing all data.")
+            _filtered_df = acc_df
+
+        # Compute smart y-axis bounds using IQR on actual prices
+        _y_range = None
+        if _auto_clamp:
+            _y_range = _iqr_y_range(_filtered_df["actual"])
+
         fig_acc = go.Figure()
 
         # Prediction band
         fig_acc.add_trace(go.Scatter(
-                x=acc_df["date"], y=acc_df["high_range"],
+                x=_filtered_df["date"], y=_filtered_df["high_range"],
                 mode="lines", name="Upper Band",
                 line=dict(width=0), showlegend=False,
         ))
         fig_acc.add_trace(go.Scatter(
-                x=acc_df["date"], y=acc_df["low_range"],
+                x=_filtered_df["date"], y=_filtered_df["low_range"],
                 mode="lines", name="Prediction Range",
                 fill="tonexty", fillcolor="rgba(0,212,170,0.12)",
                 line=dict(width=0),
@@ -818,7 +934,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
 
         # Predicted line
         fig_acc.add_trace(go.Scatter(
-                x=acc_df["date"], y=acc_df["predicted"],
+                x=_filtered_df["date"], y=_filtered_df["predicted"],
                 mode="lines+markers", name="Predicted",
                 line=dict(color="#00d4aa", width=2, dash="dash"),
                 marker=dict(size=7, symbol="diamond"),
@@ -826,14 +942,14 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
 
         # Actual line
         fig_acc.add_trace(go.Scatter(
-                x=acc_df["date"], y=acc_df["actual"],
+                x=_filtered_df["date"], y=_filtered_df["actual"],
                 mode="lines+markers", name="Actual",
                 line=dict(color="#ffd93d", width=2),
                 marker=dict(size=7),
         ))
 
         # Color markers for within/outside band
-        outside = acc_df[~acc_df["within_band"]]
+        outside = _filtered_df[~_filtered_df["within_band"]]
         if not outside.empty:
             fig_acc.add_trace(go.Scatter(
                     x=outside["date"], y=outside["actual"],
@@ -841,13 +957,21 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                     marker=dict(size=12, color="#ff6b6b", symbol="x"),
             ))
 
-        fig_acc.update_layout(
+        _layout_kwargs = dict(
                 title="Predicted vs Actual Indian Gold Price (₹/10g)",
                 template="plotly_dark", height=450,
                 yaxis_title="Price (₹/10g)", xaxis_title="Time",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02),
                 hovermode="x unified",
+                xaxis=dict(
+                    rangeslider=dict(visible=True, thickness=0.05),
+                ),
         )
+        if _y_range is not None:
+            _layout_kwargs["yaxis"] = dict(
+                title="Price (₹/10g)", range=_y_range,
+            )
+        fig_acc.update_layout(**_layout_kwargs)
         st.plotly_chart(fig_acc, width="stretch")
 
         # ── Hourly Accuracy Table ────────────────────────────────

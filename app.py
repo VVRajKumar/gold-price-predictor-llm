@@ -922,31 +922,6 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                 trend_df = trend_df.dropna(subset=["Generated At"]).sort_values("Generated At")
                 trend_df["Generated At Display"] = trend_df["Generated At"].dt.strftime("%Y-%m-%d %H:%M:%S")
 
-                fig_trend = go.Figure()
-                fig_trend.add_trace(go.Scatter(
-                    x=trend_df["Generated At"], y=trend_df["MAPE (%)"],
-                    mode="lines+markers", name="MAPE %",
-                    line=dict(color="#ff6b6b"),
-                ))
-                fig_trend.add_trace(go.Scatter(
-                    x=trend_df["Generated At"], y=trend_df["Band Hit (%)"],
-                    mode="lines+markers", name="Band Hit %",
-                    line=dict(color="#00d4aa"),
-                ))
-                fig_trend.add_trace(go.Scatter(
-                    x=trend_df["Generated At"], y=trend_df["Direction (%)"],
-                    mode="lines+markers", name="Direction %",
-                    line=dict(color="#ffd93d"),
-                ))
-                fig_trend.update_layout(
-                    title="Accuracy Trend Over Time",
-                    template="plotly_dark", height=350,
-                    yaxis_title="Percentage",
-                    xaxis=dict(type="date", tickformat="%b %d\n%H:%M"),
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02),
-                )
-                st.plotly_chart(fig_trend, width="stretch")
-
                 st.dataframe(
                     trend_df[["Generated At Display", "Hours Checked", "MAE (₹)", "MAPE (%)", "Band Hit (%)", "Direction (%)"]]
                     .rename(columns={"Generated At Display": "Generated At"}),

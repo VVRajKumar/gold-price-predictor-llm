@@ -64,6 +64,12 @@ class NewsDataFetcher:
         "central bank",
         "opec",
         "oil",
+        "ceasefire",
+        "diplomacy",
+        "sanctions",
+        "geopolitics",
+        "trade deal",
+        "middle east",
     ]
 
     def _score_relevance(self, title: str, description: str, keywords: list[str]) -> int:
@@ -260,10 +266,11 @@ class NewsDataFetcher:
         """Fetch geopolitics news that may affect gold."""
         # Avoid multiple remote calls per run (reduces rate-limit risk).
         combined_query = (
-            "geopolitics OR war OR conflict OR sanctions OR "
+            "geopolitics OR conflict OR sanctions OR ceasefire OR diplomacy OR "
             "central bank gold reserves OR RBI gold OR india gold import duty OR "
             "federal reserve interest rate OR rupee OR "
-            "inflation OR recession OR BRICS OR dedollarization"
+            "inflation OR recession OR BRICS OR dedollarization OR "
+            "Middle East OR Iran OR trade deal"
         )
         return self.fetch_newsapi(query=combined_query, days_back=days_back, page_size=25)
 

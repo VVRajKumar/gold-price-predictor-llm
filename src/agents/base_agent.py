@@ -80,8 +80,10 @@ class BaseAgent(ABC):
     def _ask_llm(self, user_prompt: str) -> str:
         """Send a system+user message pair to the LLM and return the text.
 
-        If the first attempt is rejected by the content filter, retry once
-        with a softened version of the user prompt to improve resilience.
+        If the first attempt is rejected by the content filter, retry up to
+        two more times with progressively softened/reduced prompts to improve
+        resilience against false-positive jailbreak detection from external
+        news headlines.
         """
         messages = [
             SystemMessage(content=self.SYSTEM_PROMPT),
@@ -91,28 +93,69 @@ class BaseAgent(ABC):
             response = self.llm.invoke(messages)
             return response.content
         except Exception as e:
-            # Azure OpenAI wraps content-filter rejections in a generic
-            # exception; detect via error payload keywords.  If the SDK
-            # changes its wording, these checks may need updating.
             err_text = str(e)
-            if "content_filter" in err_text or "content management policy" in err_text:
-                logger.warning(
-                    f"[{self.NAME}] Content filter triggered – retrying with softened prompt"
-                )
-                softened_user = self._soften_prompt(user_prompt)
-                softened_system = self._soften_prompt(self.SYSTEM_PROMPT)
-                try:
-                    retry_messages = [
-                        SystemMessage(content=softened_system),
-                        HumanMessage(content=softened_user),
-                    ]
-                    response = self.llm.invoke(retry_messages)
-                    return response.content
-                except Exception as retry_err:
+            if "content_filter" not in err_text and "content management policy" not in err_text:
+                logger.error(f"[{self.NAME}] LLM call failed: {e}")
+                return f"ERROR: {e}"
+
+            # ── Retry 1: soften terms ──
+            logger.warning(
+                f"[{self.NAME}] Content filter triggered – retrying with softened prompt"
+            )
+            softened_user = self._soften_prompt(user_prompt)
+            softened_system = self._soften_prompt(self.SYSTEM_PROMPT)
+            try:
+                retry_messages = [
+                    SystemMessage(content=softened_system),
+                    HumanMessage(content=softened_user),
+                ]
+                response = self.llm.invoke(retry_messages)
+                return response.content
+            except Exception as retry_err:
+                retry_text = str(retry_err)
+                if "content_filter" not in retry_text and "content management policy" not in retry_text:
                     logger.error(f"[{self.NAME}] Retry also failed: {retry_err}")
                     return f"ERROR: {retry_err}"
-            logger.error(f"[{self.NAME}] LLM call failed: {e}")
-            return f"ERROR: {e}"
+
+            # ── Retry 2: aggressively reduce external content ──
+            logger.warning(
+                f"[{self.NAME}] Content filter triggered again – retrying with reduced content"
+            )
+            reduced_user = self._reduce_prompt_content(softened_user)
+            try:
+                retry2_messages = [
+                    SystemMessage(content=softened_system),
+                    HumanMessage(content=reduced_user),
+                ]
+                response = self.llm.invoke(retry2_messages)
+                return response.content
+            except Exception as final_err:
+                logger.error(f"[{self.NAME}] All retries failed: {final_err}")
+                return f"ERROR: {final_err}"
+
+    @staticmethod
+    def _reduce_prompt_content(text: str) -> str:
+        """Aggressively reduce external content in a prompt for final retry.
+
+        Keeps only the first 8 list-item lines (headlines) and truncates each
+        to 100 chars, which greatly reduces the jailbreak-classifier surface.
+        """
+        lines = text.split("\n")
+        kept: list[str] = []
+        headline_count = 0
+        max_headlines = 8
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("- "):
+                headline_count += 1
+                if headline_count > max_headlines:
+                    continue
+                # Truncate long headlines
+                if len(stripped) > 100:
+                    stripped = stripped[:100].rsplit(" ", 1)[0] + " …"
+                    line = stripped
+            kept.append(line)
+        return "\n".join(kept)
 
     @staticmethod
     def _soften_prompt(text: str) -> str:
@@ -123,7 +166,7 @@ class BaseAgent(ABC):
         return result
 
     @staticmethod
-    def _sanitize_headlines(text: str) -> str:
+    def _sanitize_headlines(text: str, max_chars_per_line: int = 160) -> str:
         """Strip prompt-injection-like patterns from external text (e.g. news headlines).
 
         External text can accidentally include phrases that Azure's jailbreak
@@ -140,10 +183,29 @@ class BaseAgent(ABC):
             r"pretend\s+to\s+be",
             r"system\s*:\s*",
             r"<\s*/?\s*(?:system|user|assistant|s|prompt)\s*>",
+            r"do\s+not\s+follow",
+            r"override\s+(all\s+)?instructions?",
+            r"new\s+instructions?\s*:",
+            r"forget\s+(all\s+)?previous",
+            r"(?:assistant|AI|bot)\s*:\s*",
+            r"```[^`]*```",           # code blocks
+            r"https?://\S{80,}",      # very long URLs (can confuse classifier)
         ]
         result = text
         for pat in injection_patterns:
             result = re.sub(pat, "", result, flags=re.IGNORECASE)
+
+        # Truncate individual lines to cap per-headline length (reduces attack
+        # surface for jailbreak classifier while keeping informational content).
+        if max_chars_per_line:
+            lines = result.split("\n")
+            truncated = []
+            for line in lines:
+                if len(line) > max_chars_per_line:
+                    line = line[:max_chars_per_line].rsplit(" ", 1)[0] + " …"
+                truncated.append(line)
+            result = "\n".join(truncated)
+
         # Also apply the standard content-filter softening
         result = BaseAgent._soften_prompt(result)
         return result

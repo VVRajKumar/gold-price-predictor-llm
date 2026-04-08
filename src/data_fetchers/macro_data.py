@@ -13,6 +13,11 @@ from ..config import FRED_API_KEY, FRED_SERIES
 
 _cache = TTLCache(maxsize=32, ttl=3600)  # 1-hour cache
 
+# Last-known-good cache: survives transient API failures.
+# FRED series (e.g. CPI) update monthly at most, so stale data is far
+# better than no data.  Keyed by series_id.
+_last_known_good: dict[str, pd.DataFrame] = {}
+
 # Retry settings for transient FRED API errors
 _MAX_RETRIES = 3
 _INITIAL_BACKOFF = 2  # seconds
@@ -65,6 +70,7 @@ class MacroDataFetcher:
                 df = df.dropna(subset=["value"]).set_index("date")[["value"]]
                 df = df.sort_index()
                 _cache[cache_key] = df
+                _last_known_good[series_id] = df
                 return df
             except Exception as e:
                 msg = str(e)
@@ -79,7 +85,15 @@ class MacroDataFetcher:
                     time.sleep(wait)
                 else:
                     logger.error(f"FRED error for {series_id}: {msg}")
+                    # Fall back to last-known-good data if available
+                    if series_id in _last_known_good:
+                        logger.info(f"Using last-known-good data for {series_id}")
+                        return _last_known_good[series_id]
                     return pd.DataFrame()
+        # All retries exhausted – try last-known-good
+        if series_id in _last_known_good:
+            logger.info(f"Using last-known-good data for {series_id} after retries exhausted")
+            return _last_known_good[series_id]
         return pd.DataFrame()
 
     # ------------------------------------------------------------------ #

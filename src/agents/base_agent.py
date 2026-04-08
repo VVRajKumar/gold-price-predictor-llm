@@ -44,6 +44,20 @@ class BaseAgent(ABC):
     NAME: str = "base_agent"
     SYSTEM_PROMPT: str = "You are a financial analyst."
 
+    # Terms that commonly trigger Azure OpenAI's content filter.
+    # Each pair is (regex_pattern, replacement).
+    _CONTENT_FILTER_REPLACEMENTS: list[tuple[str, str]] = [
+        (r"\bwar\b", "armed conflict"),
+        (r"\bwars\b", "armed conflicts"),
+        (r"\bmilitary\b", "defense"),
+        (r"\bbomb(?:er|ing|s|ed)?s?\b", "strikes"),
+        (r"\bterror(?:ism|ist|ists)?\b", "security threat"),
+        (r"\bviolence\b", "unrest"),
+        (r"\battack(?:s|ed|ing)?\b", "escalation"),
+        (r"\binvasion\b", "incursion"),
+        (r"\bnuclear\b", "strategic"),
+    ]
+
     def __init__(self):
         self.llm = AzureChatOpenAI(
             azure_endpoint=AZURE_OPENAI_ENDPOINT,
@@ -69,7 +83,11 @@ class BaseAgent(ABC):
             response = self.llm.invoke(messages)
             return response.content
         except Exception as e:
-            if "content_filter" in str(e) or "content management policy" in str(e):
+            # Azure OpenAI wraps content-filter rejections in a generic
+            # exception; detect via error payload keywords.  If the SDK
+            # changes its wording, these checks may need updating.
+            err_text = str(e)
+            if "content_filter" in err_text or "content management policy" in err_text:
                 logger.warning(
                     f"[{self.NAME}] Content filter triggered – retrying with softened prompt"
                 )
@@ -87,19 +105,8 @@ class BaseAgent(ABC):
     @staticmethod
     def _soften_prompt(text: str) -> str:
         """Replace terms that commonly trigger Azure content filters."""
-        replacements = [
-            (r"\bwar\b", "armed conflict"),
-            (r"\bwars\b", "armed conflicts"),
-            (r"\bmilitary\b", "defense"),
-            (r"\bbomb(?:ing|s|ed)?\b", "strikes"),
-            (r"\bterror(?:ism|ist|ists)?\b", "security threat"),
-            (r"\bviolence\b", "unrest"),
-            (r"\battack(?:s|ed|ing)?\b", "escalation"),
-            (r"\binvasion\b", "incursion"),
-            (r"\bnuclear\b", "strategic"),
-        ]
         result = text
-        for pattern, replacement in replacements:
+        for pattern, replacement in BaseAgent._CONTENT_FILTER_REPLACEMENTS:
             result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
         return result
 

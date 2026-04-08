@@ -71,11 +71,13 @@ Provide your analysis as JSON."""
 
         # If the LLM returned an error, use a clean fallback instead of
         # propagating the raw error text to the UI.
-        is_error = isinstance(raw, str) and raw.startswith("ERROR:")
+        is_error = not isinstance(raw, str) or raw.startswith("ERROR:")
 
         try:
-            result = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
+            result = json.loads(raw) if isinstance(raw, str) else None
+            if not isinstance(result, dict):
+                raise ValueError("Expected a JSON object")
+        except (json.JSONDecodeError, ValueError, TypeError):
             result = {
                 "summary": (
                     "Geopolitical analysis temporarily unavailable; "

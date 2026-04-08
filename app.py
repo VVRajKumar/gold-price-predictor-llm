@@ -680,7 +680,11 @@ if plan.agent_reports:
             mc2.metric("Impact Score", f"{report.get('impact_score', 0):.0%}")
             mc3.metric("Bias", f"{report.get('prediction_bias', 0):+.2f}")
 
-            st.markdown(report.get("summary", "No summary available."))
+            _agent_summary = report.get("summary", "No summary available.")
+            # Don't show raw error traces to users
+            if isinstance(_agent_summary, str) and _agent_summary.startswith("ERROR:"):
+                _agent_summary = "Analysis temporarily unavailable; defaulting to neutral outlook."
+            st.markdown(_agent_summary)
 
             factors = report.get("key_factors", [])
             if factors:

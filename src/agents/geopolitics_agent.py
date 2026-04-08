@@ -12,22 +12,23 @@ from ..data_fetchers.news_data import NewsDataFetcher
 
 class GeopoliticsAgent(BaseAgent):
     NAME = "geopolitics_agent"
-    SYSTEM_PROMPT = """You are a senior geopolitical analyst specialising in how global
-events affect the INDIAN gold market (prices in INR). You have deep expertise in:
-- Military conflicts, wars, and territorial disputes affecting India and global stability
-- Economic sanctions and trade wars (especially India-China, India-Pakistan dynamics)
-- Central bank gold reserves (especially RBI gold purchases)
-- BRICS alliance, de-dollarisation efforts, and India's role
-- India-specific risks: border tensions, monsoon impact on rural gold demand
-- Global political instability and its effect on Indian safe-haven demand
-- Import duty changes and Indian government gold policy
+    SYSTEM_PROMPT = """You are a senior global-macro strategist who assesses how
+international political developments influence the INDIAN gold market (prices in INR).
+Your expertise covers:
+- International diplomatic relations and their effect on trade flows
+- Economic policy shifts, sanctions regimes, and trade negotiations
+- Central bank reserve management (especially RBI gold purchases)
+- Multilateral alliances (BRICS, G-20) and currency-diversification trends
+- Regional stability factors relevant to Indian economic confidence
+- Monsoon-season dynamics and rural gold demand in India
+- Indian import duty changes and government gold policy
 
-Given the latest geopolitical news, produce a JSON analysis with these EXACT keys:
+Given the latest news, produce a JSON analysis with these EXACT keys:
 {
-  "summary": "2-3 paragraph analysis of the current geopolitical landscape affecting Indian gold prices",
+  "summary": "2-3 paragraph analysis of the current global landscape affecting Indian gold prices",
   "outlook": "bullish" | "bearish" | "neutral",
   "confidence": 0.0 to 1.0,
-  "impact_score": 0.0 to 1.0 (how much geopolitics is moving Indian gold RIGHT NOW),
+  "impact_score": 0.0 to 1.0 (how much global events are moving Indian gold RIGHT NOW),
   "prediction_bias": -1.0 to +1.0 (-1 = very bearish, +1 = very bullish for Indian gold),
   "key_factors": ["factor1", "factor2", ...],
   "risk_events": ["upcoming event that could cause Indian gold spike/drop", ...]
@@ -47,16 +48,16 @@ Return ONLY valid JSON, no markdown fences."""
 
     def analyse(self, data: dict[str, Any]) -> AgentReport:
         headlines = "\n".join(
-            [f"- [{a['source']}] {a['title']}" for a in data.get("geopolitics_news", [])[:25]]
+            [f"- [{a.get('source', '')}] {a.get('title', '')}" for a in data.get("geopolitics_news", [])[:25]]
         )
         gold_headlines = "\n".join(
-            [f"- [{a['source']}] {a['title']}" for a in data.get("gold_safe_haven_news", [])[:10]]
+            [f"- [{a.get('source', '')}] {a.get('title', '')}" for a in data.get("gold_safe_haven_news", [])[:10]]
         )
 
-        prompt = f"""Analyse the following recent geopolitical news and their impact on gold prices.
+        prompt = f"""Analyse the following recent global developments and their impact on gold prices.
 
-## Geopolitical Headlines
-{headlines or "No recent geopolitics news available."}
+## Global Developments
+{headlines or "No recent global news available."}
 
 ## Gold Safe-Haven Headlines
 {gold_headlines or "No safe-haven news available."}

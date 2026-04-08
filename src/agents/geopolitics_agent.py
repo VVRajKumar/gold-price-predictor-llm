@@ -12,28 +12,27 @@ from ..data_fetchers.news_data import NewsDataFetcher
 
 class GeopoliticsAgent(BaseAgent):
     NAME = "geopolitics_agent"
-    SYSTEM_PROMPT = """You are a senior global-macro strategist who assesses how
-international political developments influence the INDIAN gold market (prices in INR).
-Your expertise covers:
-- International diplomatic relations and their effect on trade flows
-- Economic policy shifts, sanctions regimes, and trade negotiations
-- Central bank reserve management (especially RBI gold purchases)
-- Multilateral alliances (BRICS, G-20) and currency-diversification trends
-- Regional stability factors relevant to Indian economic confidence
-- Monsoon-season dynamics and rural gold demand in India
-- Indian import duty changes and government gold policy
+    SYSTEM_PROMPT = """You are a global-macro strategist analysing how international
+political and economic developments affect the Indian gold market (prices in INR).
 
-Given the latest news, produce a JSON analysis with these EXACT keys:
-{
-  "summary": "2-3 paragraph analysis of the current global landscape affecting Indian gold prices",
-  "outlook": "bullish" | "bearish" | "neutral",
-  "confidence": 0.0 to 1.0,
-  "impact_score": 0.0 to 1.0 (how much global events are moving Indian gold RIGHT NOW),
-  "prediction_bias": -1.0 to +1.0 (-1 = very bearish, +1 = very bullish for Indian gold),
-  "key_factors": ["factor1", "factor2", ...],
-  "risk_events": ["upcoming event that could cause Indian gold spike/drop", ...]
-}
-Return ONLY valid JSON, no markdown fences."""
+Areas of focus:
+- Diplomatic relations, trade negotiations, and economic-policy shifts
+- Central-bank reserve management (especially RBI gold purchases)
+- Multilateral groups (BRICS, G-20) and currency-diversification trends
+- Regional stability and Indian economic confidence
+- Monsoon-season dynamics and rural gold demand in India
+- Indian import-duty changes and government gold policy
+
+Respond with a JSON object containing these keys:
+  "summary" (string): 2-3 paragraph analysis of the current global landscape affecting Indian gold prices.
+  "outlook" (string): one of "bullish", "bearish", or "neutral".
+  "confidence" (number): 0.0 to 1.0.
+  "impact_score" (number): 0.0 to 1.0 – how much global events are influencing Indian gold right now.
+  "prediction_bias" (number): -1.0 to +1.0 – negative means bearish, positive means bullish for Indian gold.
+  "key_factors" (array of strings): the main drivers.
+  "risk_events" (array of strings): upcoming events that could cause a gold price move.
+
+Respond with valid JSON only."""
 
     def __init__(self):
         super().__init__()
@@ -54,22 +53,36 @@ Return ONLY valid JSON, no markdown fences."""
             [f"- [{a.get('source', '')}] {a.get('title', '')}" for a in data.get("gold_safe_haven_news", [])[:10]]
         )
 
+        # Sanitize external headlines to reduce content-filter triggers
+        headlines = self._sanitize_headlines(headlines)
+        gold_headlines = self._sanitize_headlines(gold_headlines)
+
         prompt = f"""Analyse the following recent global developments and their impact on gold prices.
 
-## Global Developments
+Global developments:
 {headlines or "No recent global news available."}
 
-## Gold Safe-Haven Headlines
+Gold safe-haven headlines:
 {gold_headlines or "No safe-haven news available."}
 
 Provide your analysis as JSON."""
 
         raw = self._ask_llm(prompt)
+
+        # If the LLM returned an error, use a clean fallback instead of
+        # propagating the raw error text to the UI.
+        is_error = not isinstance(raw, str) or raw.startswith("ERROR:")
+
         try:
-            result = json.loads(raw)
-        except json.JSONDecodeError:
+            result = json.loads(raw) if isinstance(raw, str) else None
+            if not isinstance(result, dict):
+                raise ValueError("Expected a JSON object")
+        except (json.JSONDecodeError, ValueError, TypeError):
             result = {
-                "summary": raw,
+                "summary": (
+                    "Geopolitical analysis temporarily unavailable; "
+                    "defaulting to neutral outlook."
+                ) if is_error else raw,
                 "outlook": "neutral",
                 "confidence": 0.3,
                 "impact_score": 0.3,

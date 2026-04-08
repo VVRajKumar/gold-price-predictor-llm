@@ -20,6 +20,10 @@ from ..config import (
 # Cache price data for 15 min to avoid hammering the API
 _cache = TTLCache(maxsize=64, ttl=900)
 
+# Last-known-good cache: survives transient yfinance failures.
+# For critical tickers like INR=X, yesterday's rate is far better than nothing.
+_last_known_good: dict[str, pd.DataFrame] = {}
+
 # Retry settings for transient Yahoo Finance errors (rate limits, server errors)
 _MAX_RETRIES = 3
 _INITIAL_BACKOFF = 2  # seconds
@@ -107,6 +111,10 @@ class MarketDataFetcher:
             )
             if df.empty:
                 logger.warning(f"No data returned for {ticker}")
+                # Fall back to last-known-good data if available
+                if ticker in _last_known_good:
+                    logger.info(f"Using last-known-good data for {ticker}")
+                    return _last_known_good[ticker].copy()
                 return pd.DataFrame()
 
             # Flatten multi-level columns if present
@@ -127,9 +135,14 @@ class MarketDataFetcher:
                 df = df.sort_index()
 
             _cache[cache_key] = df
+            _last_known_good[ticker] = df
             return df.copy()
         except Exception as e:
             logger.error(f"Error fetching {ticker}: {e}")
+            # Fall back to last-known-good data if available
+            if ticker in _last_known_good:
+                logger.info(f"Using last-known-good data for {ticker}")
+                return _last_known_good[ticker].copy()
             return pd.DataFrame()
 
     # ------------------------------------------------------------------ #

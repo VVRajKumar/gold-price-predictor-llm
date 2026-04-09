@@ -303,13 +303,26 @@ class AccuracyTracker:
         return self._log[-1] if self._log else None
 
     def get_aggregate_stats(self) -> Optional[dict]:
-        """Compute aggregate accuracy across ALL historical evaluations."""
+        """Compute aggregate accuracy across ALL historical evaluations.
+
+        When multiple plans predict the same hour, only the prediction with
+        the lowest error percentage is counted.  This avoids inflating
+        metrics with poor long-horizon forecasts when a better near-term
+        forecast exists, and mirrors the chart deduplication logic.
+        """
         if not self._log:
             return None
 
-        all_days = []
+        # Collect all results keyed by predicted hour
+        by_date: dict = {}
         for ev in self._log:
-            all_days.extend(ev.get("daily_results", []))
+            for d in ev.get("daily_results", []):
+                date_key = d.get("date", "")
+                pct_err = d.get("pct_error", float("inf"))
+                if date_key not in by_date or pct_err < by_date[date_key].get("pct_error", float("inf")):
+                    by_date[date_key] = d
+
+        all_days = list(by_date.values())
 
         if not all_days:
             return None

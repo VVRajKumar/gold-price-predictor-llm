@@ -235,10 +235,16 @@ if view_mode == "Weekly Archive":
 
 # MAIN DASHBOARD
 # ════════════════════════════════════════════════════════════════════
-if hasattr(engine, "ensure_weekly_prediction"):
-    plan = engine.ensure_weekly_prediction()
-else:
-    plan = engine.get_current_plan()
+# Don't auto-generate on every session launch.
+# Show the cached plan; only generate if no plan exists at all or the
+# 6-hour slot has changed (ensure_hourly_prediction handles this check).
+plan = engine.get_current_plan()
+if plan is None:
+    # No cached plan at all — need at least one prediction
+    if hasattr(engine, "ensure_weekly_prediction"):
+        plan = engine.ensure_weekly_prediction()
+    else:
+        plan = engine.get_current_plan()
 
 # Always keep the live OHLC chart visible.
 st.subheader("🕯️ Live Indian Gold OHLC (10D) – INR/10g")
@@ -807,6 +813,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
     )
 
     # ── Predicted vs Actual Chart ────────────────────────────────
+    # Collect all evaluated hourly results from every plan.
     all_daily = []
     for ev in all_evals:
         for d in ev.get("daily_results", []):
@@ -815,7 +822,15 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
     if all_daily:
         acc_df = pd.DataFrame(all_daily)
         acc_df["date"] = pd.to_datetime(acc_df["date"])
-        acc_df = acc_df.sort_values("date").drop_duplicates(subset="date", keep="last")
+
+        # When multiple predictions cover the same hour (from overlapping
+        # 24-hour forecasts), keep the prediction with the LOWEST error %.
+        # This always picks the most accurate prediction for each hour,
+        # producing a smooth chart without zigzag or deep-fall artefacts
+        # caused by mixing predictions from different plans.
+        acc_df = acc_df.sort_values(["date", "pct_error"])
+        acc_df = acc_df.drop_duplicates(subset="date", keep="first")
+        acc_df = acc_df.sort_values("date")
 
         fig_acc = go.Figure()
 

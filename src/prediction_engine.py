@@ -23,7 +23,43 @@ from .orchestrator import Orchestrator, PredictionPlan
 from .data_fetchers.market_data import MarketDataFetcher
 from .accuracy_tracker import AccuracyTracker
 from . import cloud_storage
-from .time_utils import iso_now_ist
+from .time_utils import iso_now_ist, now_ist
+
+
+# ── 6-hour prediction slot helpers ───────────────────────────────────
+# Predictions are aligned to fixed 6-hour slots: 00:00, 06:00, 12:00, 18:00 IST.
+# This prevents multiple overlapping predictions from cluttering the accuracy graph.
+
+_SLOT_HOURS = [0, 6, 12, 18]
+
+
+def _current_slot_ist() -> datetime:
+    """Return the start of the current 6-hour slot in IST."""
+    now = now_ist()
+    # At hour 0, the current slot is 00:00 (today).
+    candidates = [h for h in _SLOT_HOURS if h <= now.hour]
+    slot_hour = candidates[-1] if candidates else 0
+    return now.replace(hour=slot_hour, minute=0, second=0, microsecond=0)
+
+
+def _next_slot_ist() -> datetime:
+    """Return the start of the next 6-hour slot in IST."""
+    now = now_ist()
+    future_hours = [h for h in _SLOT_HOURS if h > now.hour]
+    if future_hours:
+        next_hour = future_hours[0]
+        return now.replace(hour=next_hour, minute=0, second=0, microsecond=0)
+    # Next slot is 00:00 tomorrow
+    tomorrow = now + timedelta(days=1)
+    return tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _slot_id(dt: datetime) -> str:
+    """Convert a datetime to a slot identifier string like '2026-04-10T06:00'."""
+    candidates = [h for h in _SLOT_HOURS if h <= dt.hour]
+    slot_hour = candidates[-1] if candidates else 0
+    slot_dt = dt.replace(hour=slot_hour, minute=0, second=0, microsecond=0)
+    return slot_dt.strftime("%Y-%m-%dT%H:%M")
 
 
 class PredictionEngine:
@@ -203,19 +239,32 @@ class PredictionEngine:
             return plan
 
     def ensure_hourly_prediction(self) -> Optional[PredictionPlan]:
-        """Return an active plan, refreshing automatically when it gets stale by hour."""
+        """Return an active plan, regenerating only when the 6-hour slot changes.
+
+        Predictions are aligned to fixed IST slots (00:00, 06:00, 12:00, 18:00).
+        A new prediction is only generated when:
+          - No plan exists at all
+          - The current plan belongs to a different 6-hour slot
+        This prevents multiple redundant predictions on every session launch.
+        """
         with self._lock:
-            stale = self._current_plan is None
-            if self._current_plan is not None and not stale:
+            needs_generation = self._current_plan is None
+            if self._current_plan is not None:
                 try:
                     gen_dt = datetime.fromisoformat(self._current_plan.generated_at)
-                    now_dt = datetime.fromisoformat(iso_now_ist())
-                    stale = (now_dt - gen_dt).total_seconds() >= PLAN_REFRESH_HOURS * 3600
+                    plan_slot = _slot_id(gen_dt)
+                    current_slot = _slot_id(now_ist())
+                    needs_generation = plan_slot != current_slot
+                    if needs_generation:
+                        logger.info(
+                            f"Plan slot {plan_slot} differs from current slot {current_slot} "
+                            f"— will regenerate"
+                        )
                 except Exception:
-                    stale = True
+                    needs_generation = True
 
-            if stale:
-                logger.info("No active hourly plan found (or stale) — generating new prediction")
+            if needs_generation:
+                logger.info("Generating prediction for current 6-hour slot")
                 prev_plan = self._current_plan  # keep as fallback
                 try:
                     plan = self._orchestrator.generate_prediction()
@@ -227,9 +276,6 @@ class PredictionEngine:
                         raise ValueError(
                             f"Generated plan has invalid current_price: {plan.current_price}"
                         )
-
-                    # ML ensemble now handles all price prediction internally.
-                    # No separate XGBoost baseline or blending needed.
 
                     self._current_plan = plan
                     self._save_plan(plan)
@@ -274,7 +320,11 @@ class PredictionEngine:
     # ── Auto-refresh loop ───────────────────────────────────────────
 
     def start_auto_refresh(self):
-        """Start a background thread that regenerates predictions on a schedule."""
+        """Start a background thread that regenerates predictions on 6-hour slot boundaries.
+
+        Predictions are aligned to 00:00, 06:00, 12:00, 18:00 IST.
+        The thread sleeps until the next slot boundary, then generates.
+        """
         if self._running:
             return
         self._running = True
@@ -282,16 +332,25 @@ class PredictionEngine:
         def _loop():
             while self._running:
                 try:
+                    # Sleep until the next 6-hour slot boundary
+                    next_slot = _next_slot_ist()
+                    now = now_ist()
+                    wait_seconds = max(60, (next_slot - now).total_seconds() + 30)
+                    logger.info(
+                        f"Auto-refresh: next prediction at {next_slot.strftime('%H:%M %b %d')} IST "
+                        f"(sleeping {wait_seconds / 60:.0f} min)"
+                    )
+                    time.sleep(wait_seconds)
+                    if not self._running:
+                        break
                     self.generate()
                 except Exception as e:
                     logger.error(f"Auto-refresh failed: {e}")
-                time.sleep(REFRESH_INTERVAL_MINUTES * 60)
+                    time.sleep(300)  # Back off 5 minutes on error
 
         t = threading.Thread(target=_loop, daemon=True, name="prediction-refresh")
         t.start()
-        logger.info(
-            f"Auto-refresh started – regenerating every {REFRESH_INTERVAL_MINUTES} min"
-        )
+        logger.info("Auto-refresh started — aligned to 6-hour IST slots (00:00, 06:00, 12:00, 18:00)")
 
     def stop_auto_refresh(self):
         self._running = False

@@ -391,16 +391,31 @@ class MLEnsemble:
                 effective_multiplier = 1.0 + (agent_multiplier - 1.0) * horizon_decay
                 p_final_usd *= effective_multiplier
 
+                # ── Mean-reversion pressure ──
+                # Prevent autoregressive drift by blending the prediction with
+                # the reference price.  The blend increases for later horizons
+                # so near-term predictions stay responsive while far-horizon
+                # ones don't compound into unrealistic trends.
+                reversion_strength = min(0.5, 0.02 * h)  # hour 1→2%, hour 12→24%, hour 24→48% (capped 50%)
+                p_final_usd = p_final_usd * (1.0 - reversion_strength) + ref_usd_price * reversion_strength
+
                 # ── Per-step USD sanity check ──
-                # Prevent runaway drift: cap each prediction within ±10% of the
-                # reference price and ±2% of the previous step.
+                # Prevent runaway drift: cap total deviation and per-step moves.
+                # Step caps tighten for later horizons where compounding is riskier.
                 if ref_usd_price > 0:
-                    max_total_dev = ref_usd_price * 0.10
+                    max_total_dev = ref_usd_price * 0.05  # ±5% total (was 10%)
                     p_final_usd = max(ref_usd_price - max_total_dev,
                                       min(p_final_usd, ref_usd_price + max_total_dev))
                 prev_usd = history[-1] if history else ref_usd_price
                 if prev_usd > 0:
-                    max_step = prev_usd * 0.02
+                    # Tighter step cap for later horizons: 1.0% for h1-6, 0.5% for h7-12, 0.3% for h13+
+                    if h < 6:
+                        step_pct = 0.01
+                    elif h < 12:
+                        step_pct = 0.005
+                    else:
+                        step_pct = 0.003
+                    max_step = prev_usd * step_pct
                     p_final_usd = max(prev_usd - max_step,
                                       min(p_final_usd, prev_usd + max_step))
 
@@ -408,10 +423,26 @@ class MLEnsemble:
                 lo_usd = float(self._xgb_lo.predict(feat)[0])
                 hi_usd = float(self._xgb_hi.predict(feat)[0])
 
-                # Clamp quantile bands to same total deviation envelope
+                # ── Progressive band widening ──
+                # Uncertainty grows with forecast distance.  Scale bands wider
+                # for later horizons using a sqrt growth factor so the
+                # 80% prediction interval becomes realistically wider.
+                band_center = (lo_usd + hi_usd) / 2.0
+                band_half = (hi_usd - lo_usd) / 2.0
+                # Minimum band half-width: 0.3% of reference at hour 1 growing to ~1.5% at hour 24
+                min_band_half = ref_usd_price * 0.003 * math.sqrt(h + 1)
+                band_half = max(band_half, min_band_half)
+                # Widen by sqrt(horizon) factor
+                widen_factor = math.sqrt(h + 1)
+                band_half *= widen_factor
+                # Re-center bands around the predicted price (not the quantile center)
+                lo_usd = p_final_usd - band_half
+                hi_usd = p_final_usd + band_half
+
+                # Clamp quantile bands to total deviation envelope
                 if ref_usd_price > 0:
-                    lo_usd = max(ref_usd_price * 0.90, lo_usd)
-                    hi_usd = min(ref_usd_price * 1.10, hi_usd)
+                    lo_usd = max(ref_usd_price * 0.95, lo_usd)
+                    hi_usd = min(ref_usd_price * 1.05, hi_usd)
 
                 # Convert to INR/10g
                 p_final_inr = p_final_usd * usdinr * oz_to_10g

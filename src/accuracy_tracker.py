@@ -373,7 +373,7 @@ class AccuracyTracker:
             curr_actual = sorted_days[i].get("actual", 0)
             if prev_actual <= 0:
                 continue
-            # Only compare consecutive hours (skip if gap > 2 hours)
+            # Only compare consecutive hours (skip if gap exceeds 2 hours)
             try:
                 t_prev = datetime.strptime(sorted_days[i - 1]["date"], "%Y-%m-%d %H:%M:%S")
                 t_curr = datetime.strptime(sorted_days[i]["date"], "%Y-%m-%d %H:%M:%S")
@@ -387,6 +387,7 @@ class AccuracyTracker:
             if pred_dir == actual_dir:
                 dir_correct += 1
 
+        # Default to 50% (random chance) when no consecutive pairs are available
         directional_accuracy = round(
             dir_correct / dir_total * 100, 1
         ) if dir_total > 0 else 50.0

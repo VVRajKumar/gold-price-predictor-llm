@@ -427,7 +427,7 @@ class Orchestrator:
             mape=self._get_recent_mape(),
             # band_hit_rate is stored as percentage (e.g. 31.0) in the log
             # but adjust_confidence_from_track_record expects 0-1 fraction
-            band_hit_rate=_recent_band / 100 if _recent_band is not None else None,
+            band_hit_rate=(_recent_band / 100) if _recent_band is not None else None,
         )
 
         # Store SHAP + component info in agent_reports for UI display

@@ -340,7 +340,9 @@ class AccuracyTracker:
                 if d_ts < cutoff:
                     continue
 
-                # Prefer within-band predictions, then lowest pct_error
+                # Prefer within-band predictions, then lowest pct_error.
+                # Tuple comparison: (False, err) < (True, err) so in-band
+                # predictions sort before out-of-band ones.
                 new_score = (not d.get("within_band", False), d.get("pct_error", float("inf")))
                 if date_key in by_date:
                     old = by_date[date_key]
@@ -375,7 +377,7 @@ class AccuracyTracker:
             try:
                 t_prev = datetime.strptime(sorted_days[i - 1]["date"], "%Y-%m-%d %H:%M:%S")
                 t_curr = datetime.strptime(sorted_days[i]["date"], "%Y-%m-%d %H:%M:%S")
-                if (t_curr - t_prev).total_seconds() > 7200:
+                if (t_curr - t_prev).total_seconds() > 2 * 3600:
                     continue
             except (ValueError, TypeError, KeyError):
                 continue

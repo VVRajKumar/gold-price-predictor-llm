@@ -238,12 +238,29 @@ class AccuracyTracker:
         pct_errors = [d["pct_error"] for d in evaluated_days]
         band_hits = [d["within_band"] for d in evaluated_days]
 
-        # Directional accuracy: did we predict the right direction from current_price?
+        # Directional accuracy: hour-over-hour from the evaluated series.
+        # Sort by time, then compare consecutive hours to check if the
+        # predicted direction matches the actual direction of movement.
+        # This is consistent with the aggregate scorecard computation.
+        sorted_results = sorted(evaluated_days, key=lambda d: d.get("date", ""))
         directional_correct = 0
         directional_total = 0
-        for d in evaluated_days:
-            pred_dir = "up" if d["predicted"] >= current_price else "down"
-            actual_dir = "up" if d["actual"] >= current_price else "down"
+        for idx in range(1, len(sorted_results)):
+            prev_actual = sorted_results[idx - 1].get("actual", 0)
+            curr_predicted = sorted_results[idx].get("predicted", 0)
+            curr_actual = sorted_results[idx].get("actual", 0)
+            if prev_actual <= 0:
+                continue
+            # Only compare consecutive hours (skip if gap > 2 hours)
+            try:
+                t_prev = datetime.strptime(sorted_results[idx - 1]["date"], "%Y-%m-%d %H:%M:%S")
+                t_curr = datetime.strptime(sorted_results[idx]["date"], "%Y-%m-%d %H:%M:%S")
+                if (t_curr - t_prev).total_seconds() > 2 * 3600:
+                    continue
+            except (ValueError, TypeError, KeyError):
+                continue
+            pred_dir = 1 if curr_predicted >= prev_actual else -1
+            actual_dir = 1 if curr_actual >= prev_actual else -1
             directional_total += 1
             if pred_dir == actual_dir:
                 directional_correct += 1

@@ -411,8 +411,8 @@ class Orchestrator:
                 daily.append(DayPrediction(
                     date=ts.strftime("%Y-%m-%d %H:00"),
                     predicted_price=round(current_price, 2),
-                    low_range=round(current_price * 0.995, 2),
-                    high_range=round(current_price * 1.005, 2),
+                    low_range=round(current_price * 0.99, 2),
+                    high_range=round(current_price * 1.01, 2),
                     confidence=0.3,
                     key_driver="Fallback baseline (ML unavailable)",
                 ))

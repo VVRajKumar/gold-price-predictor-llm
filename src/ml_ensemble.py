@@ -398,7 +398,8 @@ class MLEnsemble:
                 # the reference price.  The blend increases for later horizons
                 # so near-term predictions stay responsive while far-horizon
                 # ones don't compound into unrealistic trends.
-                reversion_strength = min(0.5, 0.02 * h)  # hour 1→2%, hour 12→24%, hour 24→48% (capped 50%)
+                # Capped at 30% to preserve directional signal from agents/ML.
+                reversion_strength = min(0.30, 0.02 * h)  # hour 1→2%, hour 12→24%, hour 15→30% (capped)
                 p_final_usd = p_final_usd * (1.0 - reversion_strength) + ref_usd_price * reversion_strength
 
                 # ── Per-step USD sanity check ──
@@ -441,10 +442,13 @@ class MLEnsemble:
                 lo_usd = p_final_usd - band_half
                 hi_usd = p_final_usd + band_half
 
-                # Clamp quantile bands to total deviation envelope
+                # Clamp quantile bands to a horizon-aware deviation envelope.
+                # Early hours (h=0): ±2% is plenty; later hours (h=23): ±7%
+                # so bands can grow naturally with uncertainty.
                 if ref_usd_price > 0:
-                    lo_usd = max(ref_usd_price * 0.95, lo_usd)
-                    hi_usd = min(ref_usd_price * 1.05, hi_usd)
+                    max_dev_pct = min(0.07, 0.02 + 0.0025 * h)  # 2% → 7.75% over 24h (capped 7%)
+                    lo_usd = max(ref_usd_price * (1 - max_dev_pct), lo_usd)
+                    hi_usd = min(ref_usd_price * (1 + max_dev_pct), hi_usd)
 
                 # Convert to INR/10g
                 p_final_inr = p_final_usd * usdinr * oz_to_10g

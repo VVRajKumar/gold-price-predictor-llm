@@ -355,7 +355,7 @@ if _quick_agg and _quick_agg["total_predictions_evaluated"] > 0:
         <span>{_mape_icon} <b>MAPE</b> {_mape:.1f}%</span>
         <span>{_hit_icon} <b>Band Hit</b> {_hit:.0f}%</span>
         <span>{_dir_icon} <b>Direction</b> {_dir:.0f}%</span>
-        <span>📊 <b>{_n}</b> unique hrs / <b>{_nd}</b> days</span>
+        <span>📊 <b>{_n}</b> unique hours / <b>{_nd}</b> days</span>
         </div>""",
         unsafe_allow_html=True,
     )

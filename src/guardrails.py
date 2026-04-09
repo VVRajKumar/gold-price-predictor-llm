@@ -322,10 +322,12 @@ def validate_xgb_predictions(
         if high < price:
             high = price
 
-        # Also clamp bands to total deviation envelope
+        # Also clamp bands to horizon-aware deviation envelope
+        # (matching the ML ensemble's progressive approach)
         if current_price_inr > 0:
-            dev_lo = current_price_inr * (1 - _MAX_TOTAL_DEVIATION_PCT / 100)
-            dev_hi = current_price_inr * (1 + _MAX_TOTAL_DEVIATION_PCT / 100)
+            max_dev_pct = min(0.07, 0.02 + 0.0025 * i)  # grows with horizon
+            dev_lo = current_price_inr * (1 - max_dev_pct)
+            dev_hi = current_price_inr * (1 + max_dev_pct)
             low = max(low, dev_lo)
             high = min(high, dev_hi)
 

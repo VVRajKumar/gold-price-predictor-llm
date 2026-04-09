@@ -242,9 +242,12 @@ class AccuracyTracker:
         # Sort by time, then compare consecutive hours to check if the
         # predicted direction matches the actual direction of movement.
         # This is consistent with the aggregate scorecard computation.
+        # Neutral zone: if actual moved < 0.05% either way, count it as
+        # correct regardless of prediction (the market was essentially flat).
         sorted_results = sorted(evaluated_days, key=lambda d: d.get("date", ""))
         directional_correct = 0
         directional_total = 0
+        _DIR_NEUTRAL_PCT = 0.05  # 0.05% threshold for "flat" market
         for idx in range(1, len(sorted_results)):
             prev_actual = sorted_results[idx - 1].get("actual", 0)
             curr_predicted = sorted_results[idx].get("predicted", 0)
@@ -259,11 +262,16 @@ class AccuracyTracker:
                     continue
             except (ValueError, TypeError, KeyError):
                 continue
-            pred_dir = 1 if curr_predicted >= prev_actual else -1
-            actual_dir = 1 if curr_actual >= prev_actual else -1
+            actual_move_pct = abs(curr_actual - prev_actual) / prev_actual * 100
             directional_total += 1
-            if pred_dir == actual_dir:
+            if actual_move_pct < _DIR_NEUTRAL_PCT:
+                # Market was flat — count as correct regardless of prediction
                 directional_correct += 1
+            else:
+                pred_dir = 1 if curr_predicted >= prev_actual else -1
+                actual_dir = 1 if curr_actual >= prev_actual else -1
+                if pred_dir == actual_dir:
+                    directional_correct += 1
 
         result = {
             "plan_generated_at": generated_at,

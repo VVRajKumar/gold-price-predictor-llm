@@ -84,7 +84,9 @@ _AGENT_WEIGHTS: dict[str, float] = {
 }
 
 # Maximum % adjustment agents can apply to the base ML prediction.
-_MAX_AGENT_ADJUSTMENT_PCT = 2.5
+# Reduced from 2.5% to 1.5%: larger values cause systematic directional
+# bias that compounds through the autoregressive loop.
+_MAX_AGENT_ADJUSTMENT_PCT = 1.5
 
 # ── Human-friendly display names for dashboard / SHAP charts ─────────
 FEATURE_DISPLAY_NAMES: dict[str, str] = {
@@ -398,26 +400,30 @@ class MLEnsemble:
                 # the reference price.  The blend increases for later horizons
                 # so near-term predictions stay responsive while far-horizon
                 # ones don't compound into unrealistic trends.
-                # Capped at 30% to preserve directional signal from agents/ML.
-                reversion_strength = min(0.30, 0.02 * h)  # hour 1→2%, hour 12→24%, hour 15→30% (capped)
+                # Uses 0.04*h to ramp faster; capped at 50% so the last few
+                # hours still partially reflect model direction.
+                reversion_strength = min(0.50, 0.04 * h)  # hour 1→4%, hour 6→24%, hour 12→48%, hour 13+→50%
                 p_final_usd = p_final_usd * (1.0 - reversion_strength) + ref_usd_price * reversion_strength
 
                 # ── Per-step USD sanity check ──
                 # Prevent runaway drift: cap total deviation and per-step moves.
-                # Step caps tighten for later horizons where compounding is riskier.
+                # Total cap ±3%: gold rarely moves >2-3% in a full day.
                 if ref_usd_price > 0:
-                    max_total_dev = ref_usd_price * 0.05  # ±5% total (was 10%)
+                    max_total_dev = ref_usd_price * 0.03  # ±3% total
                     p_final_usd = max(ref_usd_price - max_total_dev,
                                       min(p_final_usd, ref_usd_price + max_total_dev))
                 prev_usd = history[-1] if history else ref_usd_price
                 if prev_usd > 0:
-                    # Tighter step cap for later horizons: 1.0% for h1-6, 0.7% for h7-12, 0.5% for h13+
+                    # Tight step caps to prevent compounding:
+                    # 0.5% h1-6, 0.35% h7-12, 0.25% h13+
+                    # 24h max from steps alone: 6×0.5 + 6×0.35 + 12×0.25 = 8.1%
+                    # but total cap (3%) catches runaway much earlier.
                     if h < 6:
-                        step_pct = 0.01
-                    elif h < 12:
-                        step_pct = 0.007
-                    else:
                         step_pct = 0.005
+                    elif h < 12:
+                        step_pct = 0.0035
+                    else:
+                        step_pct = 0.0025
                     max_step = prev_usd * step_pct
                     p_final_usd = max(prev_usd - max_step,
                                       min(p_final_usd, prev_usd + max_step))
@@ -442,13 +448,16 @@ class MLEnsemble:
                 lo_usd = p_final_usd - band_half
                 hi_usd = p_final_usd + band_half
 
-                # Clamp quantile bands to a horizon-aware deviation envelope.
-                # Early hours (h=0): ±2% is plenty; later hours (h=23): ±7%
-                # so bands can grow naturally with uncertainty.
+                # Clamp quantile bands to a horizon-aware deviation envelope
+                # centred on the *predicted* price (not the reference price).
+                # This keeps bands symmetric around the prediction and avoids
+                # the one-sided collapse seen when the prediction is near the
+                # total deviation cap.
                 if ref_usd_price > 0:
-                    max_dev_pct = min(0.07, 0.02 + 0.0025 * h)  # 2% at h=0 → 7% at h=20 (capped)
-                    lo_usd = max(ref_usd_price * (1 - max_dev_pct), lo_usd)
-                    hi_usd = min(ref_usd_price * (1 + max_dev_pct), hi_usd)
+                    max_dev_pct = min(0.05, 0.015 + 0.002 * h)  # 1.5% at h=0 → 5% at h=17 (capped)
+                    max_dev_abs = ref_usd_price * max_dev_pct
+                    lo_usd = max(p_final_usd - max_dev_abs, lo_usd)
+                    hi_usd = min(p_final_usd + max_dev_abs, hi_usd)
 
                 # Convert to INR/10g
                 p_final_inr = p_final_usd * usdinr * oz_to_10g

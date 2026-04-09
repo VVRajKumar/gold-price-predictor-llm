@@ -24,14 +24,13 @@ _MIN_INR_PRICE = 30_000.0
 _MAX_INR_PRICE = 500_000.0
 
 # Maximum hourly price change (%) considered plausible.
-# Gold rarely moves >1% in a single hour; tighter cap prevents compounding
+# Gold rarely moves >0.5% in a single hour; tighter cap prevents compounding
 # errors in the auto-regressive prediction loop.
-_MAX_HOURLY_MOVE_PCT = 1.0
+_MAX_HOURLY_MOVE_PCT = 0.5
 
 # Maximum total deviation (%) from current price over the full 24-hour horizon.
-# Tightened from 10% to 5% — even in extreme scenarios, Indian gold
-# doesn't move >5% in a day under normal conditions.
-_MAX_TOTAL_DEVIATION_PCT = 5.0
+# Indian gold rarely moves >3% in a day under normal conditions.
+_MAX_TOTAL_DEVIATION_PCT = 3.0
 
 # Band width limits (as % of predicted price)
 _MIN_BAND_PCT = 0.5     # band cannot be tighter than 0.5% of price (was 0.3%)
@@ -323,13 +322,12 @@ def validate_xgb_predictions(
             high = price
 
         # Also clamp bands to horizon-aware deviation envelope
-        # (matching the ML ensemble's progressive approach)
+        # centred on the *predicted* price so bands stay symmetric.
         if current_price_inr > 0:
-            max_dev_pct = min(0.07, 0.02 + 0.0025 * i)  # 2% at h=0 → 7% at h=20 (capped)
-            dev_lo = current_price_inr * (1 - max_dev_pct)
-            dev_hi = current_price_inr * (1 + max_dev_pct)
-            low = max(low, dev_lo)
-            high = min(high, dev_hi)
+            max_dev_pct = min(0.05, 0.015 + 0.002 * i)  # grows with horizon, capped at 5%
+            max_dev_abs = current_price_inr * max_dev_pct
+            low = max(low, price - max_dev_abs)
+            high = min(high, price + max_dev_abs)
 
         p["xgb_price"] = round(price, 2)
         p["xgb_low"] = round(low, 2)

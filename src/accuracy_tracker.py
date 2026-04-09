@@ -302,24 +302,52 @@ class AccuracyTracker:
     def get_latest_evaluation(self) -> Optional[dict]:
         return self._log[-1] if self._log else None
 
-    def get_aggregate_stats(self) -> Optional[dict]:
-        """Compute aggregate accuracy across ALL historical evaluations.
+    def get_aggregate_stats(self, recent_hours: int = 72) -> Optional[dict]:
+        """Compute aggregate accuracy over recent predictions.
 
-        When multiple plans predict the same hour, only the prediction with
-        the lowest error percentage is counted.  This avoids inflating
-        metrics with poor long-horizon forecasts when a better near-term
-        forecast exists, and mirrors the chart deduplication logic.
+        Parameters
+        ----------
+        recent_hours : int
+            Only include evaluated hours whose predicted timestamp falls
+            within the last *recent_hours* hours.  Defaults to 72 (3 days)
+            so that metrics reflect recent model performance instead of
+            being diluted by hundreds of old, potentially poor predictions.
+
+        Deduplication: when multiple plans predict the same hour, the
+        prediction that is **within the band** is preferred; among same-
+        band-status predictions the one with the lowest error % wins.
+
+        Directional accuracy is computed hour-over-hour from the
+        deduplicated series (consistent with MAPE / MAE / Band Hit).
         """
         if not self._log:
             return None
+
+        now_ts = now_ist().replace(minute=0, second=0, microsecond=0).replace(tzinfo=None)
+        cutoff = now_ts - timedelta(hours=recent_hours)
 
         # Collect all results keyed by predicted hour
         by_date: dict = {}
         for ev in self._log:
             for d in ev.get("daily_results", []):
                 date_key = d.get("date", "")
-                pct_err = d.get("pct_error", float("inf"))
-                if date_key not in by_date or pct_err < by_date[date_key].get("pct_error", float("inf")):
+
+                # Filter to recent window
+                try:
+                    d_ts = datetime.strptime(date_key, "%Y-%m-%d %H:%M:%S")
+                except (ValueError, TypeError):
+                    continue
+                if d_ts < cutoff:
+                    continue
+
+                # Prefer within-band predictions, then lowest pct_error
+                new_score = (not d.get("within_band", False), d.get("pct_error", float("inf")))
+                if date_key in by_date:
+                    old = by_date[date_key]
+                    old_score = (not old.get("within_band", False), old.get("pct_error", float("inf")))
+                    if new_score < old_score:
+                        by_date[date_key] = d
+                else:
                     by_date[date_key] = d
 
         all_days = list(by_date.values())
@@ -331,6 +359,36 @@ class AccuracyTracker:
         pct_errors = [d["pct_error"] for d in all_days]
         band_hits = [d["within_band"] for d in all_days]
 
+        # Directional accuracy: hour-over-hour from the deduplicated series.
+        # Sort by time, then for each consecutive pair check if the predicted
+        # direction matches the actual direction of price movement.
+        sorted_days = sorted(all_days, key=lambda d: d.get("date", ""))
+        dir_correct = 0
+        dir_total = 0
+        for i in range(1, len(sorted_days)):
+            prev_actual = sorted_days[i - 1].get("actual", 0)
+            curr_predicted = sorted_days[i].get("predicted", 0)
+            curr_actual = sorted_days[i].get("actual", 0)
+            if prev_actual <= 0:
+                continue
+            # Only compare consecutive hours (skip if gap > 2 hours)
+            try:
+                t_prev = datetime.strptime(sorted_days[i - 1]["date"], "%Y-%m-%d %H:%M:%S")
+                t_curr = datetime.strptime(sorted_days[i]["date"], "%Y-%m-%d %H:%M:%S")
+                if (t_curr - t_prev).total_seconds() > 7200:
+                    continue
+            except (ValueError, TypeError, KeyError):
+                continue
+            pred_dir = 1 if curr_predicted >= prev_actual else -1
+            actual_dir = 1 if curr_actual >= prev_actual else -1
+            dir_total += 1
+            if pred_dir == actual_dir:
+                dir_correct += 1
+
+        directional_accuracy = round(
+            dir_correct / dir_total * 100, 1
+        ) if dir_total > 0 else 50.0
+
         return {
             "total_predictions_evaluated": len(all_days),
             "total_plans_evaluated": len(self._log),
@@ -339,9 +397,7 @@ class AccuracyTracker:
             "overall_band_hit_rate": round(sum(band_hits) / len(band_hits) * 100, 1),
             "best_mae": round(min(r["mae"] for r in self._log), 2),
             "worst_mae": round(max(r["mae"] for r in self._log), 2),
-            "avg_directional_accuracy": round(
-                np.mean([r["directional_accuracy"] for r in self._log]), 1
-            ),
+            "avg_directional_accuracy": directional_accuracy,
         }
 
     # ── Refresh: re-evaluate ALL stored plans against latest data ────

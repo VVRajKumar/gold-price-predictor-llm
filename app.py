@@ -786,7 +786,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
 
 if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
     # ── Aggregate Metrics Row ────────────────────────────────────
-    st.markdown("#### Overall Accuracy (All Past Predictions)")
+    st.markdown("#### Overall Accuracy (Last 72 Hours)")
     m1, m2, m3, m4, m5 = st.columns(5)
     with m1:
         mape = agg_stats["overall_mape"]
@@ -824,12 +824,14 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         acc_df["date"] = pd.to_datetime(acc_df["date"])
 
         # When multiple predictions cover the same hour (from overlapping
-        # 24-hour forecasts), keep the prediction with the LOWEST error %.
-        # This always picks the most accurate prediction for each hour,
-        # producing a smooth chart without zigzag or deep-fall artefacts
-        # caused by mixing predictions from different plans.
-        acc_df = acc_df.sort_values(["date", "pct_error"])
+        # 24-hour forecasts), prefer within-band predictions first, then
+        # pick the lowest error %.  This ensures band-hit metrics and the
+        # chart stay consistent, and avoids penalising band_hit_rate by
+        # selecting a tight-band miss over a wider-band hit.
+        acc_df["_outside"] = ~acc_df["within_band"]
+        acc_df = acc_df.sort_values(["date", "_outside", "pct_error"])
         acc_df = acc_df.drop_duplicates(subset="date", keep="first")
+        acc_df = acc_df.drop(columns=["_outside"])
         acc_df = acc_df.sort_values("date")
 
         fig_acc = go.Figure()

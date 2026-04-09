@@ -24,18 +24,23 @@ _MIN_INR_PRICE = 30_000.0
 _MAX_INR_PRICE = 500_000.0
 
 # Maximum hourly price change (%) considered plausible.
-# Gold rarely moves >1% in a single hour; tighter cap prevents compounding
+# Gold rarely moves >0.5% in a single hour; tighter cap prevents compounding
 # errors in the auto-regressive prediction loop.
-_MAX_HOURLY_MOVE_PCT = 1.0
+_MAX_HOURLY_MOVE_PCT = 0.5
 
 # Maximum total deviation (%) from current price over the full 24-hour horizon.
-# Tightened from 10% to 5% — even in extreme scenarios, Indian gold
-# doesn't move >5% in a day under normal conditions.
-_MAX_TOTAL_DEVIATION_PCT = 5.0
+# Indian gold rarely moves >3% in a day under normal conditions.
+_MAX_TOTAL_DEVIATION_PCT = 3.0
 
 # Band width limits (as % of predicted price)
-_MIN_BAND_PCT = 0.3     # band cannot be tighter than 0.3% of price (was 0.1%)
+_MIN_BAND_PCT = 0.5     # band cannot be tighter than 0.5% of price (was 0.3%)
 _MAX_BAND_PCT = 8.0      # band cannot be wider than 8% of price
+
+# Horizon-aware band deviation envelope (shared formula used by ML ensemble & guardrails).
+# Returns the max allowed deviation (as a fraction) from predicted price for bands.
+def _band_envelope_pct(horizon_idx: int) -> float:
+    """Max band deviation at a given horizon step (fraction, e.g. 0.015 = 1.5%)."""
+    return min(0.05, 0.015 + 0.002 * horizon_idx)
 
 # Overconfidence thresholds
 _OVERCONFIDENCE_THRESHOLD = 0.92   # individual agents
@@ -218,14 +223,14 @@ def validate_prediction_plan(
             dp_conf = dp_conf - _CONFIDENCE_PENALTY
 
         # ── Band widening over horizon ──
-        # Uncertainty grows with forecast distance: widen bands for later hours.
-        # Increased from 0.04 to 0.08 per step for more realistic uncertainty.
-        # hour 0→1.0x, hour 6→1.48x, hour 12→1.96x, hour 24→2.92x
-        horizon_widen = 1.0 + 0.08 * i
+        # ML ensemble already applies progressive sqrt(h) widening.
+        # Guardrails only enforce minimum/maximum band limits (no additional
+        # multiplicative widening to prevent double-stacking).
+        # The min/max enforcement above is sufficient.
 
         dp["predicted_price"] = round(pred, 2)
-        dp["low_range"] = round(pred - (pred - low) * horizon_widen, 2)
-        dp["high_range"] = round(pred + (high - pred) * horizon_widen, 2)
+        dp["low_range"] = round(low, 2)
+        dp["high_range"] = round(high, 2)
         dp["confidence"] = round(dp_conf, 3)
         validated_preds.append(dp)
 
@@ -322,12 +327,13 @@ def validate_xgb_predictions(
         if high < price:
             high = price
 
-        # Also clamp bands to total deviation envelope
+        # Also clamp bands to horizon-aware deviation envelope
+        # centred on the *predicted* price so bands stay symmetric.
         if current_price_inr > 0:
-            dev_lo = current_price_inr * (1 - _MAX_TOTAL_DEVIATION_PCT / 100)
-            dev_hi = current_price_inr * (1 + _MAX_TOTAL_DEVIATION_PCT / 100)
-            low = max(low, dev_lo)
-            high = min(high, dev_hi)
+            max_dev_pct = _band_envelope_pct(i)
+            max_dev_abs = current_price_inr * max_dev_pct
+            low = max(low, price - max_dev_abs)
+            high = min(high, price + max_dev_abs)
 
         p["xgb_price"] = round(price, 2)
         p["xgb_low"] = round(low, 2)

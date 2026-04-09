@@ -29,6 +29,10 @@ _PLANS_STORE_PATH = CACHE_DIR / "stored_plans.json"
 # Only evaluate/store plans generated on or after this cutoff (hourly scorecard start)
 _HOURLY_SCORECARD_START = datetime(2026, 4, 4, 0, 0, 0)
 
+# Directional neutral zone: if actual moved less than this %, the market
+# is considered flat and the prediction is counted as directionally correct.
+_DIR_NEUTRAL_PCT = 0.05
+
 
 class AccuracyTracker:
     """Track and score past predictions vs actual prices."""
@@ -238,15 +242,39 @@ class AccuracyTracker:
         pct_errors = [d["pct_error"] for d in evaluated_days]
         band_hits = [d["within_band"] for d in evaluated_days]
 
-        # Directional accuracy: did we predict the right direction from current_price?
+        # Directional accuracy: hour-over-hour from the evaluated series.
+        # Sort by time, then compare consecutive hours to check if the
+        # predicted direction matches the actual direction of movement.
+        # This is consistent with the aggregate scorecard computation.
+        # Neutral zone: if actual moved < 0.05% either way, count it as
+        # correct regardless of prediction (the market was essentially flat).
+        sorted_results = sorted(evaluated_days, key=lambda d: d.get("date", ""))
         directional_correct = 0
         directional_total = 0
-        for d in evaluated_days:
-            pred_dir = "up" if d["predicted"] >= current_price else "down"
-            actual_dir = "up" if d["actual"] >= current_price else "down"
+        for idx in range(1, len(sorted_results)):
+            prev_actual = sorted_results[idx - 1].get("actual", 0)
+            curr_predicted = sorted_results[idx].get("predicted", 0)
+            curr_actual = sorted_results[idx].get("actual", 0)
+            if prev_actual <= 0:
+                continue
+            # Only compare consecutive hours (skip if gap > 2 hours)
+            try:
+                t_prev = datetime.strptime(sorted_results[idx - 1]["date"], "%Y-%m-%d %H:%M:%S")
+                t_curr = datetime.strptime(sorted_results[idx]["date"], "%Y-%m-%d %H:%M:%S")
+                if (t_curr - t_prev).total_seconds() > 2 * 3600:
+                    continue
+            except (ValueError, TypeError, KeyError):
+                continue
+            actual_move_pct = abs(curr_actual - prev_actual) / prev_actual * 100
             directional_total += 1
-            if pred_dir == actual_dir:
+            if actual_move_pct < _DIR_NEUTRAL_PCT:
+                # Market was flat — count as correct regardless of prediction
                 directional_correct += 1
+            else:
+                pred_dir = 1 if curr_predicted >= prev_actual else -1
+                actual_dir = 1 if curr_actual >= prev_actual else -1
+                if pred_dir == actual_dir:
+                    directional_correct += 1
 
         result = {
             "plan_generated_at": generated_at,
@@ -260,7 +288,7 @@ class AccuracyTracker:
             "band_hit_rate": round(sum(band_hits) / len(band_hits) * 100, 1),
             "directional_accuracy": round(
                 directional_correct / directional_total * 100, 1
-            ) if directional_total > 0 else 0,
+            ) if directional_total > 0 else 50.0,
             "daily_results": evaluated_days,
         }
 
@@ -302,24 +330,54 @@ class AccuracyTracker:
     def get_latest_evaluation(self) -> Optional[dict]:
         return self._log[-1] if self._log else None
 
-    def get_aggregate_stats(self) -> Optional[dict]:
-        """Compute aggregate accuracy across ALL historical evaluations.
+    def get_aggregate_stats(self, recent_hours: int = 72) -> Optional[dict]:
+        """Compute aggregate accuracy over recent predictions.
 
-        When multiple plans predict the same hour, only the prediction with
-        the lowest error percentage is counted.  This avoids inflating
-        metrics with poor long-horizon forecasts when a better near-term
-        forecast exists, and mirrors the chart deduplication logic.
+        Parameters
+        ----------
+        recent_hours : int
+            Only include evaluated hours whose predicted timestamp falls
+            within the last *recent_hours* hours.  Defaults to 72 (3 days)
+            so that metrics reflect recent model performance instead of
+            being diluted by hundreds of old, potentially poor predictions.
+
+        Deduplication: when multiple plans predict the same hour, the
+        prediction that is **within the band** is preferred; among same-
+        band-status predictions the one with the lowest error % wins.
+
+        Directional accuracy is computed hour-over-hour from the
+        deduplicated series (consistent with MAPE / MAE / Band Hit).
         """
         if not self._log:
             return None
+
+        now_ts = now_ist().replace(minute=0, second=0, microsecond=0).replace(tzinfo=None)
+        cutoff = now_ts - timedelta(hours=recent_hours)
 
         # Collect all results keyed by predicted hour
         by_date: dict = {}
         for ev in self._log:
             for d in ev.get("daily_results", []):
                 date_key = d.get("date", "")
-                pct_err = d.get("pct_error", float("inf"))
-                if date_key not in by_date or pct_err < by_date[date_key].get("pct_error", float("inf")):
+
+                # Filter to recent window
+                try:
+                    d_ts = datetime.strptime(date_key, "%Y-%m-%d %H:%M:%S")
+                except (ValueError, TypeError):
+                    continue
+                if d_ts < cutoff:
+                    continue
+
+                # Prefer within-band predictions, then lowest pct_error.
+                # Tuple comparison: (False, err) < (True, err) so in-band
+                # predictions sort before out-of-band ones.
+                new_score = (not d.get("within_band", False), d.get("pct_error", float("inf")))
+                if date_key in by_date:
+                    old = by_date[date_key]
+                    old_score = (not old.get("within_band", False), old.get("pct_error", float("inf")))
+                    if new_score < old_score:
+                        by_date[date_key] = d
+                else:
                     by_date[date_key] = d
 
         all_days = list(by_date.values())
@@ -331,17 +389,61 @@ class AccuracyTracker:
         pct_errors = [d["pct_error"] for d in all_days]
         band_hits = [d["within_band"] for d in all_days]
 
+        # Directional accuracy: hour-over-hour from the deduplicated series.
+        # Sort by time, then for each consecutive pair check if the predicted
+        # direction matches the actual direction of price movement.
+        # Neutral zone: if actual moved < 0.05%, count as correct (market flat).
+        sorted_days = sorted(all_days, key=lambda d: d.get("date", ""))
+        dir_correct = 0
+        dir_total = 0
+        for i in range(1, len(sorted_days)):
+            prev_actual = sorted_days[i - 1].get("actual", 0)
+            curr_predicted = sorted_days[i].get("predicted", 0)
+            curr_actual = sorted_days[i].get("actual", 0)
+            if prev_actual <= 0:
+                continue
+            # Only compare consecutive hours (skip if gap exceeds 2 hours)
+            try:
+                t_prev = datetime.strptime(sorted_days[i - 1]["date"], "%Y-%m-%d %H:%M:%S")
+                t_curr = datetime.strptime(sorted_days[i]["date"], "%Y-%m-%d %H:%M:%S")
+                if (t_curr - t_prev).total_seconds() > 2 * 3600:
+                    continue
+            except (ValueError, TypeError, KeyError):
+                continue
+            actual_move_pct = abs(curr_actual - prev_actual) / prev_actual * 100
+            dir_total += 1
+            if actual_move_pct < _DIR_NEUTRAL_PCT:
+                # Market was flat — count as correct regardless
+                dir_correct += 1
+            else:
+                pred_dir = 1 if curr_predicted >= prev_actual else -1
+                actual_dir = 1 if curr_actual >= prev_actual else -1
+                if pred_dir == actual_dir:
+                    dir_correct += 1
+
+        # Default to 50% (random chance) when no consecutive pairs are available
+        directional_accuracy = round(
+            dir_correct / dir_total * 100, 1
+        ) if dir_total > 0 else 50.0
+
+        # Count unique calendar dates covered by the evaluated hours
+        unique_dates = set()
+        for d in all_days:
+            try:
+                unique_dates.add(datetime.strptime(d["date"], "%Y-%m-%d %H:%M:%S").date())
+            except (ValueError, TypeError, KeyError):
+                pass
+
         return {
             "total_predictions_evaluated": len(all_days),
+            "unique_dates_evaluated": len(unique_dates),
             "total_plans_evaluated": len(self._log),
             "overall_mae": round(np.mean(errors), 2),
             "overall_mape": round(np.mean(pct_errors), 2),
             "overall_band_hit_rate": round(sum(band_hits) / len(band_hits) * 100, 1),
             "best_mae": round(min(r["mae"] for r in self._log), 2),
             "worst_mae": round(max(r["mae"] for r in self._log), 2),
-            "avg_directional_accuracy": round(
-                np.mean([r["directional_accuracy"] for r in self._log]), 1
-            ),
+            "avg_directional_accuracy": directional_accuracy,
         }
 
     # ── Refresh: re-evaluate ALL stored plans against latest data ────

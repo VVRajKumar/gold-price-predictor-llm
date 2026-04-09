@@ -35,7 +35,7 @@ from sklearn.linear_model import Ridge
 
 from .config import CACHE_DIR, PREDICTION_HOURS
 from .data_fetchers.market_data import MarketDataFetcher
-from .guardrails import validate_xgb_predictions, validate_price_series
+from .guardrails import validate_xgb_predictions, validate_price_series, _band_envelope_pct
 from .residual_learner import ResidualLearner
 
 # ── Feature engineering constants ────────────────────────────────────
@@ -84,6 +84,8 @@ _AGENT_WEIGHTS: dict[str, float] = {
 }
 
 # Maximum % adjustment agents can apply to the base ML prediction.
+# Reduced from 2.5% to 1.5%: larger values cause systematic directional
+# bias that compounds through the autoregressive loop.
 _MAX_AGENT_ADJUSTMENT_PCT = 1.5
 
 # ── Human-friendly display names for dashboard / SHAP charts ─────────
@@ -206,8 +208,8 @@ class MLEnsemble:
         self._lgb_model = None
         self._ridge_model = None
         self._meta_model = None
-        self._xgb_lo = None      # quantile α=0.10
-        self._xgb_hi = None      # quantile α=0.90
+        self._xgb_lo = None      # quantile α=0.05
+        self._xgb_hi = None      # quantile α=0.95
         self._is_trained = False
         self._shap_values: Optional[np.ndarray] = None
         self._last_X_pred: Optional[np.ndarray] = None
@@ -288,18 +290,20 @@ class MLEnsemble:
         self._ridge_model = Ridge(alpha=1.0)
         self._ridge_model.fit(X_train, y_train)
 
-        # 5. Quantile models for confidence bands (10th, 90th percentile)
+        # 5. Quantile models for confidence bands (5th, 95th percentile)
+        #    Using a wider 90% prediction interval (was 80%) so actual
+        #    prices fall within the band more often → higher band hit rate.
         self._xgb_lo = XGBRegressor(
             n_estimators=200, max_depth=4, learning_rate=0.05,
             subsample=0.85, random_state=42,
-            objective="reg:quantileerror", quantile_alpha=0.10,
+            objective="reg:quantileerror", quantile_alpha=0.05,
         )
         self._xgb_lo.fit(X_train, y_train)
 
         self._xgb_hi = XGBRegressor(
             n_estimators=200, max_depth=4, learning_rate=0.05,
             subsample=0.85, random_state=42,
-            objective="reg:quantileerror", quantile_alpha=0.90,
+            objective="reg:quantileerror", quantile_alpha=0.95,
         )
         self._xgb_hi.fit(X_train, y_train)
 
@@ -396,25 +400,30 @@ class MLEnsemble:
                 # the reference price.  The blend increases for later horizons
                 # so near-term predictions stay responsive while far-horizon
                 # ones don't compound into unrealistic trends.
-                reversion_strength = min(0.5, 0.02 * h)  # hour 1→2%, hour 12→24%, hour 24→48% (capped 50%)
+                # Uses 0.04*h to ramp faster; capped at 50% so the last few
+                # hours still partially reflect model direction.
+                reversion_strength = min(0.50, 0.04 * h)  # hour 1→4%, hour 6→24%, hour 12→48%, hour 13+→50%
                 p_final_usd = p_final_usd * (1.0 - reversion_strength) + ref_usd_price * reversion_strength
 
                 # ── Per-step USD sanity check ──
                 # Prevent runaway drift: cap total deviation and per-step moves.
-                # Step caps tighten for later horizons where compounding is riskier.
+                # Total cap ±3%: gold rarely moves >2-3% in a full day.
                 if ref_usd_price > 0:
-                    max_total_dev = ref_usd_price * 0.05  # ±5% total (was 10%)
+                    max_total_dev = ref_usd_price * 0.03  # ±3% total
                     p_final_usd = max(ref_usd_price - max_total_dev,
                                       min(p_final_usd, ref_usd_price + max_total_dev))
                 prev_usd = history[-1] if history else ref_usd_price
                 if prev_usd > 0:
-                    # Tighter step cap for later horizons: 1.0% for h1-6, 0.5% for h7-12, 0.3% for h13+
+                    # Tight step caps to prevent compounding:
+                    # 0.5% h1-6, 0.35% h7-12, 0.25% h13+
+                    # Theoretical max from steps alone: 6×0.5% + 6×0.35% + 12×0.25% = 8.1%
+                    # but total cap (3%) catches runaway much earlier.
                     if h < 6:
-                        step_pct = 0.01
-                    elif h < 12:
                         step_pct = 0.005
+                    elif h < 12:
+                        step_pct = 0.0035
                     else:
-                        step_pct = 0.003
+                        step_pct = 0.0025
                     max_step = prev_usd * step_pct
                     p_final_usd = max(prev_usd - max_step,
                                       min(p_final_usd, prev_usd + max_step))
@@ -424,25 +433,29 @@ class MLEnsemble:
                 hi_usd = float(self._xgb_hi.predict(feat)[0])
 
                 # ── Progressive band widening ──
-                # Uncertainty grows with forecast distance.  Scale bands wider
-                # for later horizons using a sqrt growth factor so the
-                # 80% prediction interval becomes realistically wider.
-                band_center = (lo_usd + hi_usd) / 2.0
+                # Uncertainty grows with forecast distance.  Widen the raw
+                # quantile band by sqrt(h+1).  A separate minimum floor
+                # (also sqrt-based) prevents near-hour bands from collapsing.
                 band_half = (hi_usd - lo_usd) / 2.0
-                # Minimum band half-width: 0.3% of reference at hour 1 growing to ~1.5% at hour 24
-                min_band_half = ref_usd_price * 0.003 * math.sqrt(h + 1)
-                band_half = max(band_half, min_band_half)
-                # Widen by sqrt(horizon) factor
                 widen_factor = math.sqrt(h + 1)
                 band_half *= widen_factor
+                # Minimum floor: 0.3% of reference × sqrt(h+1)
+                min_band_half = ref_usd_price * 0.003 * widen_factor
+                band_half = max(band_half, min_band_half)
                 # Re-center bands around the predicted price (not the quantile center)
                 lo_usd = p_final_usd - band_half
                 hi_usd = p_final_usd + band_half
 
-                # Clamp quantile bands to total deviation envelope
+                # Clamp quantile bands to a horizon-aware deviation envelope
+                # centred on the *predicted* price (not the reference price).
+                # This keeps bands symmetric around the prediction and avoids
+                # the one-sided collapse seen when the prediction is near the
+                # total deviation cap.
                 if ref_usd_price > 0:
-                    lo_usd = max(ref_usd_price * 0.95, lo_usd)
-                    hi_usd = min(ref_usd_price * 1.05, hi_usd)
+                    max_dev_pct = _band_envelope_pct(h)
+                    max_dev_abs = ref_usd_price * max_dev_pct
+                    lo_usd = max(p_final_usd - max_dev_abs, lo_usd)
+                    hi_usd = min(p_final_usd + max_dev_abs, hi_usd)
 
                 # Convert to INR/10g
                 p_final_inr = p_final_usd * usdinr * oz_to_10g

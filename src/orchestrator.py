@@ -274,8 +274,7 @@ class Orchestrator:
             if not isinstance(entries, list) or not entries:
                 return None
             recent = entries[-5:]
-            mapes = [e.get("aggregate", {}).get("mape") for e in recent if e.get("aggregate")]
-            mapes = [m for m in mapes if m is not None]
+            mapes = [e.get("mape") for e in recent if e.get("mape") is not None]
             return sum(mapes) / len(mapes) if mapes else None
         except Exception:
             return None
@@ -290,8 +289,7 @@ class Orchestrator:
             if not isinstance(entries, list) or not entries:
                 return None
             recent = entries[-5:]
-            rates = [e.get("aggregate", {}).get("band_hit_rate") for e in recent if e.get("aggregate")]
-            rates = [r for r in rates if r is not None]
+            rates = [e.get("band_hit_rate") for e in recent if e.get("band_hit_rate") is not None]
             return sum(rates) / len(rates) if rates else None
         except Exception:
             return None
@@ -410,12 +408,14 @@ class Orchestrator:
                     key_driver=driver,
                 ))
             else:
+                # Fallback when ML unavailable: use wider bands with horizon scaling
+                band_pct = 0.01 + 0.001 * i  # 1% at h0 → 3.4% at h24
                 daily.append(DayPrediction(
                     date=ts.strftime("%Y-%m-%d %H:00"),
                     predicted_price=round(current_price, 2),
-                    low_range=round(current_price * 0.995, 2),
-                    high_range=round(current_price * 1.005, 2),
-                    confidence=0.3,
+                    low_range=round(current_price * (1 - band_pct), 2),
+                    high_range=round(current_price * (1 + band_pct), 2),
+                    confidence=max(0.2, 0.35 - 0.005 * i),
                     key_driver="Fallback baseline (ML unavailable)",
                 ))
 
@@ -423,10 +423,13 @@ class Orchestrator:
         ml_confidence = compute_ml_confidence(ml_predictions, current_price)
 
         # Track-record adjustment
+        _recent_band = self._get_recent_band_hit_rate()
         ml_confidence = adjust_confidence_from_track_record(
             ml_confidence,
             mape=self._get_recent_mape(),
-            band_hit_rate=self._get_recent_band_hit_rate(),
+            # band_hit_rate is stored as percentage (e.g. 31.0) in the log
+            # but adjust_confidence_from_track_record expects 0-1 fraction
+            band_hit_rate=(_recent_band / 100) if _recent_band is not None else None,
         )
 
         # Store SHAP + component info in agent_reports for UI display

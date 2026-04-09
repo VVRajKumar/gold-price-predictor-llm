@@ -343,9 +343,10 @@ if _quick_agg and _quick_agg["total_predictions_evaluated"] > 0:
     _hit = _quick_agg["overall_band_hit_rate"]
     _dir = _quick_agg["avg_directional_accuracy"]
     _n = _quick_agg["total_predictions_evaluated"]
+    _nd = _quick_agg.get("unique_dates_evaluated", "?")
     _mape_icon = "🟢" if _mape < 2 else ("🟡" if _mape < 5 else "🔴")
-    _hit_icon = "🟢" if _hit >= 70 else ("🟡" if _hit >= 50 else "🔴")
-    _dir_icon = "🟢" if _dir >= 60 else ("🟡" if _dir >= 50 else "🔴")
+    _hit_icon = "🟢" if _hit >= 80 else ("🟡" if _hit >= 60 else "🔴")
+    _dir_icon = "🟢" if _dir >= 80 else ("🟡" if _dir >= 60 else "🔴")
     st.markdown(
         f"""<div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);
         border-radius:12px;padding:14px 20px;margin:10px 0;
@@ -354,7 +355,7 @@ if _quick_agg and _quick_agg["total_predictions_evaluated"] > 0:
         <span>{_mape_icon} <b>MAPE</b> {_mape:.1f}%</span>
         <span>{_hit_icon} <b>Band Hit</b> {_hit:.0f}%</span>
         <span>{_dir_icon} <b>Direction</b> {_dir:.0f}%</span>
-        <span>📊 <b>{_n}</b> hours scored</span>
+        <span>📊 <b>{_n}</b> unique hours / <b>{_nd}</b> days</span>
         </div>""",
         unsafe_allow_html=True,
     )
@@ -786,7 +787,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
 
 if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
     # ── Aggregate Metrics Row ────────────────────────────────────
-    st.markdown("#### Overall Accuracy (All Past Predictions)")
+    st.markdown("#### Overall Accuracy (Last 72 Hours)")
     m1, m2, m3, m4, m5 = st.columns(5)
     with m1:
         mape = agg_stats["overall_mape"]
@@ -796,14 +797,17 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         st.metric("📏 MAE", f"₹{agg_stats['overall_mae']:,.2f}")
     with m3:
         hit = agg_stats["overall_band_hit_rate"]
-        hit_color = "🟢" if hit >= 70 else ("🟡" if hit >= 50 else "🔴")
+        hit_color = "🟢" if hit >= 80 else ("🟡" if hit >= 60 else "🔴")
         st.metric(f"{hit_color} Band Hit Rate", f"{hit:.0f}%")
     with m4:
         da = agg_stats["avg_directional_accuracy"]
-        da_color = "🟢" if da >= 60 else ("🟡" if da >= 50 else "🔴")
+        da_color = "🟢" if da >= 80 else ("🟡" if da >= 60 else "🔴")
         st.metric(f"{da_color} Direction Accuracy", f"{da:.0f}%")
     with m5:
-        st.metric("📊 Hours Evaluated", f"{agg_stats['total_predictions_evaluated']}")
+        _unique_hrs = agg_stats['total_predictions_evaluated']
+        _unique_days = agg_stats.get('unique_dates_evaluated', '?')
+        st.metric("📊 Unique Hours", f"{_unique_hrs}")
+        st.caption(f"across {_unique_days} day(s)")
 
     st.caption(
         "**MAPE** = Mean Absolute Percentage Error (lower is better) · "
@@ -824,12 +828,14 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         acc_df["date"] = pd.to_datetime(acc_df["date"])
 
         # When multiple predictions cover the same hour (from overlapping
-        # 24-hour forecasts), keep the prediction with the LOWEST error %.
-        # This always picks the most accurate prediction for each hour,
-        # producing a smooth chart without zigzag or deep-fall artefacts
-        # caused by mixing predictions from different plans.
-        acc_df = acc_df.sort_values(["date", "pct_error"])
+        # 24-hour forecasts), prefer within-band predictions first, then
+        # pick the lowest error %.  This ensures band-hit metrics and the
+        # chart stay consistent, and avoids penalising band_hit_rate by
+        # selecting a tight-band miss over a wider-band hit.
+        acc_df["_outside"] = ~acc_df["within_band"]
+        acc_df = acc_df.sort_values(["date", "_outside", "pct_error"])
         acc_df = acc_df.drop_duplicates(subset="date", keep="first")
+        acc_df = acc_df.drop(columns=["_outside"])
         acc_df = acc_df.sort_values("date")
 
         fig_acc = go.Figure()

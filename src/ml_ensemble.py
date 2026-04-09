@@ -446,7 +446,7 @@ class MLEnsemble:
                 # Early hours (h=0): ±2% is plenty; later hours (h=23): ±7%
                 # so bands can grow naturally with uncertainty.
                 if ref_usd_price > 0:
-                    max_dev_pct = min(0.07, 0.02 + 0.0025 * h)  # 2% → 7.75% over 24h (capped 7%)
+                    max_dev_pct = min(0.07, 0.02 + 0.0025 * h)  # 2% at h=0 → 7% at h=20 (capped)
                     lo_usd = max(ref_usd_price * (1 - max_dev_pct), lo_usd)
                     hi_usd = min(ref_usd_price * (1 + max_dev_pct), hi_usd)
 

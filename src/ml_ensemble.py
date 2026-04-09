@@ -208,8 +208,8 @@ class MLEnsemble:
         self._lgb_model = None
         self._ridge_model = None
         self._meta_model = None
-        self._xgb_lo = None      # quantile α=0.10
-        self._xgb_hi = None      # quantile α=0.90
+        self._xgb_lo = None      # quantile α=0.05
+        self._xgb_hi = None      # quantile α=0.95
         self._is_trained = False
         self._shap_values: Optional[np.ndarray] = None
         self._last_X_pred: Optional[np.ndarray] = None
@@ -433,17 +433,15 @@ class MLEnsemble:
                 hi_usd = float(self._xgb_hi.predict(feat)[0])
 
                 # ── Progressive band widening ──
-                # Uncertainty grows with forecast distance.  Scale bands wider
-                # for later horizons using a sqrt growth factor so the
-                # 80% prediction interval becomes realistically wider.
-                band_center = (lo_usd + hi_usd) / 2.0
+                # Uncertainty grows with forecast distance.  Widen the raw
+                # quantile band by sqrt(h+1).  A separate minimum floor
+                # (also sqrt-based) prevents near-hour bands from collapsing.
                 band_half = (hi_usd - lo_usd) / 2.0
-                # Minimum band half-width: 0.5% of reference at hour 1 growing to ~2.4% at hour 24
-                min_band_half = ref_usd_price * 0.005 * math.sqrt(h + 1)
-                band_half = max(band_half, min_band_half)
-                # Widen by sqrt(horizon) factor
                 widen_factor = math.sqrt(h + 1)
                 band_half *= widen_factor
+                # Minimum floor: 0.3% of reference × sqrt(h+1)
+                min_band_half = ref_usd_price * 0.003 * widen_factor
+                band_half = max(band_half, min_band_half)
                 # Re-center bands around the predicted price (not the quantile center)
                 lo_usd = p_final_usd - band_half
                 hi_usd = p_final_usd + band_half

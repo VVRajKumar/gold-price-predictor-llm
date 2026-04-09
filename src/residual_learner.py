@@ -32,7 +32,7 @@ _CORRECTION_CACHE = CACHE_DIR / "residual_corrections.json"
 # ── Minimum data thresholds ─────────────────────────────────────────
 _MIN_SAMPLES_BIAS = 3       # need ≥3 data points per horizon to start correcting
 _MIN_SAMPLES_STRONG = 15    # ramp correction strength up to this
-_MAX_CORRECTION_PCT = 3.0   # cap correction at ±3% of price (safety limit)
+_MAX_CORRECTION_PCT = 1.5   # cap correction at ±1.5% of price (was 3% — too aggressive)
 
 
 class ResidualLearner:
@@ -195,11 +195,14 @@ class ResidualLearner:
             # ── Stage 2: Band widening for high miss-rate horizons ──
             miss_rate = self._band_miss.get(horizon, 0.0)
             if miss_rate > 0.2 and n_samples >= _MIN_SAMPLES_BIAS:
-                # If >20% of predictions missed the band, widen it (was 30%)
-                # More aggressive widening: up to 100% wider at 100% miss rate
+                # If >20% of predictions missed the band, widen it
                 band_half = (high - low) / 2.0
                 widen_factor = 1.0 + 1.25 * (miss_rate - 0.2)  # up to 100% wider
                 new_half = band_half * widen_factor
+                # Don't widen beyond 4% of price (stays within guardrail 8% max band)
+                if price > 0:
+                    max_half = price * 0.04
+                    new_half = min(new_half, max_half)
                 mid = (high + low) / 2.0
                 low = mid - new_half
                 high = mid + new_half

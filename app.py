@@ -345,8 +345,8 @@ if _quick_agg and _quick_agg["total_predictions_evaluated"] > 0:
     _n = _quick_agg["total_predictions_evaluated"]
     _nd = _quick_agg.get("unique_dates_evaluated", "?")
     _mape_icon = "🟢" if _mape < 2 else ("🟡" if _mape < 5 else "🔴")
-    _hit_icon = "🟢" if _hit >= 70 else ("🟡" if _hit >= 50 else "🔴")
-    _dir_icon = "🟢" if _dir >= 60 else ("🟡" if _dir >= 50 else "🔴")
+    _hit_icon = "🟢" if _hit >= 80 else ("🟡" if _hit >= 60 else "🔴")
+    _dir_icon = "🟢" if _dir >= 80 else ("🟡" if _dir >= 60 else "🔴")
     st.markdown(
         f"""<div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);
         border-radius:12px;padding:14px 20px;margin:10px 0;
@@ -797,11 +797,11 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         st.metric("📏 MAE", f"₹{agg_stats['overall_mae']:,.2f}")
     with m3:
         hit = agg_stats["overall_band_hit_rate"]
-        hit_color = "🟢" if hit >= 70 else ("🟡" if hit >= 50 else "🔴")
+        hit_color = "🟢" if hit >= 80 else ("🟡" if hit >= 60 else "🔴")
         st.metric(f"{hit_color} Band Hit Rate", f"{hit:.0f}%")
     with m4:
         da = agg_stats["avg_directional_accuracy"]
-        da_color = "🟢" if da >= 60 else ("🟡" if da >= 50 else "🔴")
+        da_color = "🟢" if da >= 80 else ("🟡" if da >= 60 else "🔴")
         st.metric(f"{da_color} Direction Accuracy", f"{da:.0f}%")
     with m5:
         _unique_hrs = agg_stats['total_predictions_evaluated']

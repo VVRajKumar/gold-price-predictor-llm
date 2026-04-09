@@ -408,12 +408,14 @@ class Orchestrator:
                     key_driver=driver,
                 ))
             else:
+                # Fallback when ML unavailable: use wider bands with horizon scaling
+                band_pct = 0.01 + 0.001 * i  # 1% at h0 → 3.4% at h24
                 daily.append(DayPrediction(
                     date=ts.strftime("%Y-%m-%d %H:00"),
                     predicted_price=round(current_price, 2),
-                    low_range=round(current_price * 0.99, 2),
-                    high_range=round(current_price * 1.01, 2),
-                    confidence=0.3,
+                    low_range=round(current_price * (1 - band_pct), 2),
+                    high_range=round(current_price * (1 + band_pct), 2),
+                    confidence=max(0.2, 0.35 - 0.005 * i),
                     key_driver="Fallback baseline (ML unavailable)",
                 ))
 

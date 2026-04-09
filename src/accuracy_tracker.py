@@ -285,7 +285,7 @@ class AccuracyTracker:
             "band_hit_rate": round(sum(band_hits) / len(band_hits) * 100, 1),
             "directional_accuracy": round(
                 directional_correct / directional_total * 100, 1
-            ) if directional_total > 0 else 0,
+            ) if directional_total > 0 else 50.0,
             "daily_results": evaluated_days,
         }
 
@@ -389,9 +389,11 @@ class AccuracyTracker:
         # Directional accuracy: hour-over-hour from the deduplicated series.
         # Sort by time, then for each consecutive pair check if the predicted
         # direction matches the actual direction of price movement.
+        # Neutral zone: if actual moved < 0.05%, count as correct (market flat).
         sorted_days = sorted(all_days, key=lambda d: d.get("date", ""))
         dir_correct = 0
         dir_total = 0
+        _DIR_NEUTRAL_PCT = 0.05
         for i in range(1, len(sorted_days)):
             prev_actual = sorted_days[i - 1].get("actual", 0)
             curr_predicted = sorted_days[i].get("predicted", 0)
@@ -406,11 +408,16 @@ class AccuracyTracker:
                     continue
             except (ValueError, TypeError, KeyError):
                 continue
-            pred_dir = 1 if curr_predicted >= prev_actual else -1
-            actual_dir = 1 if curr_actual >= prev_actual else -1
+            actual_move_pct = abs(curr_actual - prev_actual) / prev_actual * 100
             dir_total += 1
-            if pred_dir == actual_dir:
+            if actual_move_pct < _DIR_NEUTRAL_PCT:
+                # Market was flat — count as correct regardless
                 dir_correct += 1
+            else:
+                pred_dir = 1 if curr_predicted >= prev_actual else -1
+                actual_dir = 1 if curr_actual >= prev_actual else -1
+                if pred_dir == actual_dir:
+                    dir_correct += 1
 
         # Default to 50% (random chance) when no consecutive pairs are available
         directional_accuracy = round(

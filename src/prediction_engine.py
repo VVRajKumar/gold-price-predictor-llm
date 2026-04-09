@@ -36,7 +36,9 @@ _SLOT_HOURS = [0, 6, 12, 18]
 def _current_slot_ist() -> datetime:
     """Return the start of the current 6-hour slot in IST."""
     now = now_ist()
-    slot_hour = max(h for h in _SLOT_HOURS if h <= now.hour)
+    # At hour 0, the current slot is 00:00 (today).
+    candidates = [h for h in _SLOT_HOURS if h <= now.hour]
+    slot_hour = candidates[-1] if candidates else 0
     return now.replace(hour=slot_hour, minute=0, second=0, microsecond=0)
 
 
@@ -54,7 +56,8 @@ def _next_slot_ist() -> datetime:
 
 def _slot_id(dt: datetime) -> str:
     """Convert a datetime to a slot identifier string like '2026-04-10T06:00'."""
-    slot_hour = max(h for h in _SLOT_HOURS if h <= dt.hour)
+    candidates = [h for h in _SLOT_HOURS if h <= dt.hour]
+    slot_hour = candidates[-1] if candidates else 0
     slot_dt = dt.replace(hour=slot_hour, minute=0, second=0, microsecond=0)
     return slot_dt.strftime("%Y-%m-%dT%H:%M")
 

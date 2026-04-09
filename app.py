@@ -235,10 +235,16 @@ if view_mode == "Weekly Archive":
 
 # MAIN DASHBOARD
 # ════════════════════════════════════════════════════════════════════
-if hasattr(engine, "ensure_weekly_prediction"):
-    plan = engine.ensure_weekly_prediction()
-else:
-    plan = engine.get_current_plan()
+# Don't auto-generate on every session launch.
+# Show the cached plan; only generate if no plan exists at all or the
+# 6-hour slot has changed (ensure_hourly_prediction handles this check).
+plan = engine.get_current_plan()
+if plan is None:
+    # No cached plan at all — need at least one prediction
+    if hasattr(engine, "ensure_weekly_prediction"):
+        plan = engine.ensure_weekly_prediction()
+    else:
+        plan = engine.get_current_plan()
 
 # Always keep the live OHLC chart visible.
 st.subheader("🕯️ Live Indian Gold OHLC (10D) – INR/10g")
@@ -807,15 +813,29 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
     )
 
     # ── Predicted vs Actual Chart ────────────────────────────────
+    # Collect all evaluated hourly results, tagging each with its plan's
+    # generation timestamp so we can resolve overlaps correctly.
     all_daily = []
     for ev in all_evals:
+        plan_gen = ev.get("plan_generated_at", "")
         for d in ev.get("daily_results", []):
-            all_daily.append(d)
+            entry = dict(d)
+            entry["_plan_generated_at"] = plan_gen
+            all_daily.append(entry)
 
     if all_daily:
         acc_df = pd.DataFrame(all_daily)
         acc_df["date"] = pd.to_datetime(acc_df["date"])
-        acc_df = acc_df.sort_values("date").drop_duplicates(subset="date", keep="last")
+        acc_df["_plan_generated_at"] = pd.to_datetime(acc_df["_plan_generated_at"], errors="coerce")
+
+        # When multiple predictions cover the same hour (from overlapping
+        # 24-hour forecasts), keep only the one from the MOST RECENTLY
+        # generated plan.  This eliminates the zigzag pattern caused by
+        # mixing predictions from different plans at adjacent hours.
+        acc_df = acc_df.sort_values(["date", "_plan_generated_at"])
+        acc_df = acc_df.drop_duplicates(subset="date", keep="last")
+        acc_df = acc_df.drop(columns=["_plan_generated_at"])
+        acc_df = acc_df.sort_values("date")
 
         fig_acc = go.Figure()
 

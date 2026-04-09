@@ -303,13 +303,34 @@ class AccuracyTracker:
         return self._log[-1] if self._log else None
 
     def get_aggregate_stats(self) -> Optional[dict]:
-        """Compute aggregate accuracy across ALL historical evaluations."""
+        """Compute aggregate accuracy across ALL historical evaluations.
+
+        When multiple plans predict the same hour, only the prediction from
+        the most recently generated plan is counted.  This avoids inflating
+        error metrics from stale overlapping forecasts.
+        """
         if not self._log:
             return None
 
-        all_days = []
+        # Collect all results tagged with plan generation time
+        tagged: list[tuple[str, dict]] = []
         for ev in self._log:
-            all_days.extend(ev.get("daily_results", []))
+            gen_at = ev.get("plan_generated_at", "")
+            for d in ev.get("daily_results", []):
+                tagged.append((gen_at, d))
+
+        if not tagged:
+            return None
+
+        # Deduplicate: for each predicted hour, keep the result from the
+        # most recently generated plan (resolves overlapping forecasts).
+        by_date: dict[str, tuple[str, dict]] = {}
+        for gen_at, d in tagged:
+            date_key = d.get("date", "")
+            if date_key not in by_date or gen_at > by_date[date_key][0]:
+                by_date[date_key] = (gen_at, d)
+
+        all_days = [v[1] for v in by_date.values()]
 
         if not all_days:
             return None

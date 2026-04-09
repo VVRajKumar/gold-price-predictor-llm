@@ -24,16 +24,17 @@ _MIN_INR_PRICE = 30_000.0
 _MAX_INR_PRICE = 500_000.0
 
 # Maximum hourly price change (%) considered plausible.
-# Gold rarely moves >2% in a single hour; 5% was too lenient and allowed
-# compounding errors in the auto-regressive prediction loop.
-_MAX_HOURLY_MOVE_PCT = 2.0
+# Gold rarely moves >1% in a single hour; tighter cap prevents compounding
+# errors in the auto-regressive prediction loop.
+_MAX_HOURLY_MOVE_PCT = 1.0
 
 # Maximum total deviation (%) from current price over the full 24-hour horizon.
-# Even in extreme scenarios, Indian gold doesn't move >10% in a day.
-_MAX_TOTAL_DEVIATION_PCT = 10.0
+# Tightened from 10% to 5% — even in extreme scenarios, Indian gold
+# doesn't move >5% in a day under normal conditions.
+_MAX_TOTAL_DEVIATION_PCT = 5.0
 
 # Band width limits (as % of predicted price)
-_MIN_BAND_PCT = 0.1     # band cannot be tighter than 0.1% of price
+_MIN_BAND_PCT = 0.3     # band cannot be tighter than 0.3% of price (was 0.1%)
 _MAX_BAND_PCT = 8.0      # band cannot be wider than 8% of price
 
 # Overconfidence thresholds
@@ -217,8 +218,10 @@ def validate_prediction_plan(
             dp_conf = dp_conf - _CONFIDENCE_PENALTY
 
         # ── Band widening over horizon ──
-        # Uncertainty grows with forecast distance: widen bands for later hours
-        horizon_widen = 1.0 + 0.04 * i  # hour 0→1.0x, hour 12→1.48x, hour 24→1.96x
+        # Uncertainty grows with forecast distance: widen bands for later hours.
+        # Increased from 0.04 to 0.08 per step for more realistic uncertainty.
+        # hour 0→1.0x, hour 6→1.48x, hour 12→1.96x, hour 24→2.92x
+        horizon_widen = 1.0 + 0.08 * i
 
         dp["predicted_price"] = round(pred, 2)
         dp["low_range"] = round(pred - (pred - low) * horizon_widen, 2)

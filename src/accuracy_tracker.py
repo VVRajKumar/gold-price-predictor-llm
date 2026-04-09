@@ -391,8 +391,17 @@ class AccuracyTracker:
             dir_correct / dir_total * 100, 1
         ) if dir_total > 0 else 50.0
 
+        # Count unique calendar dates covered by the evaluated hours
+        unique_dates = set()
+        for d in all_days:
+            try:
+                unique_dates.add(datetime.strptime(d["date"], "%Y-%m-%d %H:%M:%S").date())
+            except (ValueError, TypeError, KeyError):
+                pass
+
         return {
             "total_predictions_evaluated": len(all_days),
+            "unique_dates_evaluated": len(unique_dates),
             "total_plans_evaluated": len(self._log),
             "overall_mae": round(np.mean(errors), 2),
             "overall_mape": round(np.mean(pct_errors), 2),

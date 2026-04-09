@@ -343,6 +343,7 @@ if _quick_agg and _quick_agg["total_predictions_evaluated"] > 0:
     _hit = _quick_agg["overall_band_hit_rate"]
     _dir = _quick_agg["avg_directional_accuracy"]
     _n = _quick_agg["total_predictions_evaluated"]
+    _nd = _quick_agg.get("unique_dates_evaluated", "?")
     _mape_icon = "🟢" if _mape < 2 else ("🟡" if _mape < 5 else "🔴")
     _hit_icon = "🟢" if _hit >= 70 else ("🟡" if _hit >= 50 else "🔴")
     _dir_icon = "🟢" if _dir >= 60 else ("🟡" if _dir >= 50 else "🔴")
@@ -354,7 +355,7 @@ if _quick_agg and _quick_agg["total_predictions_evaluated"] > 0:
         <span>{_mape_icon} <b>MAPE</b> {_mape:.1f}%</span>
         <span>{_hit_icon} <b>Band Hit</b> {_hit:.0f}%</span>
         <span>{_dir_icon} <b>Direction</b> {_dir:.0f}%</span>
-        <span>📊 <b>{_n}</b> hours scored</span>
+        <span>📊 <b>{_n}</b> unique hrs / <b>{_nd}</b> days</span>
         </div>""",
         unsafe_allow_html=True,
     )
@@ -803,7 +804,10 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         da_color = "🟢" if da >= 60 else ("🟡" if da >= 50 else "🔴")
         st.metric(f"{da_color} Direction Accuracy", f"{da:.0f}%")
     with m5:
-        st.metric("📊 Hours Evaluated", f"{agg_stats['total_predictions_evaluated']}")
+        _unique_hrs = agg_stats['total_predictions_evaluated']
+        _unique_days = agg_stats.get('unique_dates_evaluated', '?')
+        st.metric("📊 Unique Hours", f"{_unique_hrs}")
+        st.caption(f"across {_unique_days} day(s)")
 
     st.caption(
         "**MAPE** = Mean Absolute Percentage Error (lower is better) · "

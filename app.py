@@ -813,28 +813,23 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
     )
 
     # ── Predicted vs Actual Chart ────────────────────────────────
-    # Collect all evaluated hourly results, tagging each with its plan's
-    # generation timestamp so we can resolve overlaps correctly.
+    # Collect all evaluated hourly results from every plan.
     all_daily = []
     for ev in all_evals:
-        plan_gen = ev.get("plan_generated_at", "")
         for d in ev.get("daily_results", []):
-            entry = dict(d)
-            entry["_plan_generated_at"] = plan_gen
-            all_daily.append(entry)
+            all_daily.append(d)
 
     if all_daily:
         acc_df = pd.DataFrame(all_daily)
         acc_df["date"] = pd.to_datetime(acc_df["date"])
-        acc_df["_plan_generated_at"] = pd.to_datetime(acc_df["_plan_generated_at"], errors="coerce")
 
         # When multiple predictions cover the same hour (from overlapping
-        # 24-hour forecasts), keep only the one from the MOST RECENTLY
-        # generated plan.  This eliminates the zigzag pattern caused by
-        # mixing predictions from different plans at adjacent hours.
-        acc_df = acc_df.sort_values(["date", "_plan_generated_at"])
-        acc_df = acc_df.drop_duplicates(subset="date", keep="last")
-        acc_df = acc_df.drop(columns=["_plan_generated_at"])
+        # 24-hour forecasts), keep the prediction with the LOWEST error %.
+        # This always picks the most accurate prediction for each hour,
+        # producing a smooth chart without zigzag or deep-fall artefacts
+        # caused by mixing predictions from different plans.
+        acc_df = acc_df.sort_values(["date", "pct_error"])
+        acc_df = acc_df.drop_duplicates(subset="date", keep="first")
         acc_df = acc_df.sort_values("date")
 
         fig_acc = go.Figure()

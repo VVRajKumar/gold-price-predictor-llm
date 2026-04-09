@@ -35,7 +35,7 @@ from sklearn.linear_model import Ridge
 
 from .config import CACHE_DIR, PREDICTION_HOURS
 from .data_fetchers.market_data import MarketDataFetcher
-from .guardrails import validate_xgb_predictions, validate_price_series
+from .guardrails import validate_xgb_predictions, validate_price_series, _band_envelope_pct
 from .residual_learner import ResidualLearner
 
 # ── Feature engineering constants ────────────────────────────────────
@@ -416,7 +416,7 @@ class MLEnsemble:
                 if prev_usd > 0:
                     # Tight step caps to prevent compounding:
                     # 0.5% h1-6, 0.35% h7-12, 0.25% h13+
-                    # 24h max from steps alone: 6×0.5 + 6×0.35 + 12×0.25 = 8.1%
+                    # Theoretical max from steps alone: 6×0.5% + 6×0.35% + 12×0.25% = 8.1%
                     # but total cap (3%) catches runaway much earlier.
                     if h < 6:
                         step_pct = 0.005
@@ -452,7 +452,7 @@ class MLEnsemble:
                 # the one-sided collapse seen when the prediction is near the
                 # total deviation cap.
                 if ref_usd_price > 0:
-                    max_dev_pct = min(0.05, 0.015 + 0.002 * h)  # 1.5% at h=0 → 5% at h=17 (capped)
+                    max_dev_pct = _band_envelope_pct(h)
                     max_dev_abs = ref_usd_price * max_dev_pct
                     lo_usd = max(p_final_usd - max_dev_abs, lo_usd)
                     hi_usd = min(p_final_usd + max_dev_abs, hi_usd)

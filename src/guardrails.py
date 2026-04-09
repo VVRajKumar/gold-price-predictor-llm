@@ -36,6 +36,12 @@ _MAX_TOTAL_DEVIATION_PCT = 3.0
 _MIN_BAND_PCT = 0.5     # band cannot be tighter than 0.5% of price (was 0.3%)
 _MAX_BAND_PCT = 8.0      # band cannot be wider than 8% of price
 
+# Horizon-aware band deviation envelope (shared formula used by ML ensemble & guardrails).
+# Returns the max allowed deviation (as a fraction) from predicted price for bands.
+def _band_envelope_pct(horizon_idx: int) -> float:
+    """Max band deviation at a given horizon step (fraction, e.g. 0.015 = 1.5%)."""
+    return min(0.05, 0.015 + 0.002 * horizon_idx)
+
 # Overconfidence thresholds
 _OVERCONFIDENCE_THRESHOLD = 0.92   # individual agents
 _META_OVERCONFIDENCE_THRESHOLD = 0.88   # overall plan
@@ -324,7 +330,7 @@ def validate_xgb_predictions(
         # Also clamp bands to horizon-aware deviation envelope
         # centred on the *predicted* price so bands stay symmetric.
         if current_price_inr > 0:
-            max_dev_pct = min(0.05, 0.015 + 0.002 * i)  # grows with horizon, capped at 5%
+            max_dev_pct = _band_envelope_pct(i)
             max_dev_abs = current_price_inr * max_dev_pct
             low = max(low, price - max_dev_abs)
             high = min(high, price + max_dev_abs)

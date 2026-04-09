@@ -29,6 +29,10 @@ _PLANS_STORE_PATH = CACHE_DIR / "stored_plans.json"
 # Only evaluate/store plans generated on or after this cutoff (hourly scorecard start)
 _HOURLY_SCORECARD_START = datetime(2026, 4, 4, 0, 0, 0)
 
+# Directional neutral zone: if actual moved less than this %, the market
+# is considered flat and the prediction is counted as directionally correct.
+_DIR_NEUTRAL_PCT = 0.05
+
 
 class AccuracyTracker:
     """Track and score past predictions vs actual prices."""
@@ -247,7 +251,6 @@ class AccuracyTracker:
         sorted_results = sorted(evaluated_days, key=lambda d: d.get("date", ""))
         directional_correct = 0
         directional_total = 0
-        _DIR_NEUTRAL_PCT = 0.05  # 0.05% threshold for "flat" market
         for idx in range(1, len(sorted_results)):
             prev_actual = sorted_results[idx - 1].get("actual", 0)
             curr_predicted = sorted_results[idx].get("predicted", 0)
@@ -393,7 +396,6 @@ class AccuracyTracker:
         sorted_days = sorted(all_days, key=lambda d: d.get("date", ""))
         dir_correct = 0
         dir_total = 0
-        _DIR_NEUTRAL_PCT = 0.05
         for i in range(1, len(sorted_days)):
             prev_actual = sorted_days[i - 1].get("actual", 0)
             curr_predicted = sorted_days[i].get("predicted", 0)

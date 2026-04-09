@@ -34,7 +34,7 @@ _MAX_HOURLY_MOVE_PCT = 1.0
 _MAX_TOTAL_DEVIATION_PCT = 5.0
 
 # Band width limits (as % of predicted price)
-_MIN_BAND_PCT = 0.3     # band cannot be tighter than 0.3% of price (was 0.1%)
+_MIN_BAND_PCT = 0.5     # band cannot be tighter than 0.5% of price (was 0.3%)
 _MAX_BAND_PCT = 8.0      # band cannot be wider than 8% of price
 
 # Overconfidence thresholds
@@ -218,14 +218,14 @@ def validate_prediction_plan(
             dp_conf = dp_conf - _CONFIDENCE_PENALTY
 
         # ── Band widening over horizon ──
-        # Uncertainty grows with forecast distance: widen bands for later hours.
-        # Increased from 0.04 to 0.08 per step for more realistic uncertainty.
-        # hour 0→1.0x, hour 6→1.48x, hour 12→1.96x, hour 24→2.92x
-        horizon_widen = 1.0 + 0.08 * i
+        # ML ensemble already applies progressive sqrt(h) widening.
+        # Guardrails only enforce minimum/maximum band limits (no additional
+        # multiplicative widening to prevent double-stacking).
+        # The min/max enforcement above is sufficient.
 
         dp["predicted_price"] = round(pred, 2)
-        dp["low_range"] = round(pred - (pred - low) * horizon_widen, 2)
-        dp["high_range"] = round(pred + (high - pred) * horizon_widen, 2)
+        dp["low_range"] = round(low, 2)
+        dp["high_range"] = round(high, 2)
         dp["confidence"] = round(dp_conf, 3)
         validated_preds.append(dp)
 

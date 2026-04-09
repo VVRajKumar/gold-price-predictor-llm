@@ -84,7 +84,7 @@ _AGENT_WEIGHTS: dict[str, float] = {
 }
 
 # Maximum % adjustment agents can apply to the base ML prediction.
-_MAX_AGENT_ADJUSTMENT_PCT = 1.5
+_MAX_AGENT_ADJUSTMENT_PCT = 2.5
 
 # ── Human-friendly display names for dashboard / SHAP charts ─────────
 FEATURE_DISPLAY_NAMES: dict[str, str] = {
@@ -288,18 +288,20 @@ class MLEnsemble:
         self._ridge_model = Ridge(alpha=1.0)
         self._ridge_model.fit(X_train, y_train)
 
-        # 5. Quantile models for confidence bands (10th, 90th percentile)
+        # 5. Quantile models for confidence bands (5th, 95th percentile)
+        #    Using a wider 90% prediction interval (was 80%) so actual
+        #    prices fall within the band more often → higher band hit rate.
         self._xgb_lo = XGBRegressor(
             n_estimators=200, max_depth=4, learning_rate=0.05,
             subsample=0.85, random_state=42,
-            objective="reg:quantileerror", quantile_alpha=0.10,
+            objective="reg:quantileerror", quantile_alpha=0.05,
         )
         self._xgb_lo.fit(X_train, y_train)
 
         self._xgb_hi = XGBRegressor(
             n_estimators=200, max_depth=4, learning_rate=0.05,
             subsample=0.85, random_state=42,
-            objective="reg:quantileerror", quantile_alpha=0.90,
+            objective="reg:quantileerror", quantile_alpha=0.95,
         )
         self._xgb_hi.fit(X_train, y_train)
 
@@ -408,13 +410,13 @@ class MLEnsemble:
                                       min(p_final_usd, ref_usd_price + max_total_dev))
                 prev_usd = history[-1] if history else ref_usd_price
                 if prev_usd > 0:
-                    # Tighter step cap for later horizons: 1.0% for h1-6, 0.5% for h7-12, 0.3% for h13+
+                    # Tighter step cap for later horizons: 1.0% for h1-6, 0.7% for h7-12, 0.5% for h13+
                     if h < 6:
                         step_pct = 0.01
                     elif h < 12:
-                        step_pct = 0.005
+                        step_pct = 0.007
                     else:
-                        step_pct = 0.003
+                        step_pct = 0.005
                     max_step = prev_usd * step_pct
                     p_final_usd = max(prev_usd - max_step,
                                       min(p_final_usd, prev_usd + max_step))
@@ -429,8 +431,8 @@ class MLEnsemble:
                 # 80% prediction interval becomes realistically wider.
                 band_center = (lo_usd + hi_usd) / 2.0
                 band_half = (hi_usd - lo_usd) / 2.0
-                # Minimum band half-width: 0.3% of reference at hour 1 growing to ~1.5% at hour 24
-                min_band_half = ref_usd_price * 0.003 * math.sqrt(h + 1)
+                # Minimum band half-width: 0.5% of reference at hour 1 growing to ~2.4% at hour 24
+                min_band_half = ref_usd_price * 0.005 * math.sqrt(h + 1)
                 band_half = max(band_half, min_band_half)
                 # Widen by sqrt(horizon) factor
                 widen_factor = math.sqrt(h + 1)

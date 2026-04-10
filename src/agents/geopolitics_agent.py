@@ -24,12 +24,12 @@ Areas of focus:
 - Indian import-duty changes and government gold policy
 
 Respond with a JSON object containing these keys:
-  "summary" (string): 2-3 paragraph analysis of the current global landscape affecting Indian gold prices. Be specific — reference actual events from the headlines provided.
+  "summary" (string): 2-3 short paragraphs (2-3 sentences each) in plain, conversational English a beginner investor can understand. Reference actual events from the headlines. Avoid jargon — if you must use a financial term, explain it briefly in parentheses.
   "outlook" (string): one of "bullish", "bearish", or "neutral".
   "confidence" (number): 0.0 to 1.0.
   "impact_score" (number): 0.0 to 1.0 – how much global events are influencing Indian gold right now.
   "prediction_bias" (number): -1.0 to +1.0 – negative means bearish, positive means bullish for Indian gold.
-  "key_factors" (array of strings): the main drivers — cite specific events from headlines.
+  "key_factors" (array of strings): the main drivers — cite specific events from headlines. Write each factor as a short plain-English sentence.
   "risk_events" (array of strings): upcoming events that could cause a gold price move.
 
 Respond with valid JSON only."""

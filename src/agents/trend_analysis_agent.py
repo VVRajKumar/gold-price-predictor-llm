@@ -21,7 +21,7 @@ Consider USD/INR exchange rate movements as an additional trend factor.
 
 Given recent gold price data, produce a JSON analysis with these EXACT keys:
 {
-  "summary": "2-3 paragraph trend analysis for Indian gold",
+  "summary": "2-3 short paragraphs in plain English a beginner can understand. Explain what the price trend means and why it matters. Avoid jargon — if you use a financial term, briefly explain it in parentheses.",
   "outlook": "bullish" | "bearish" | "neutral",
   "confidence": 0.0 to 1.0,
   "impact_score": 0.0 to 1.0,

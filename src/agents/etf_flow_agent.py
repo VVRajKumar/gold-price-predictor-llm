@@ -22,7 +22,7 @@ outflows are bearish.
 
 Given recent Indian gold ETF data, produce a JSON analysis with these EXACT keys:
 {
-  "summary": "2-3 paragraph ETF flow analysis for Indian gold ETFs",
+  "summary": "2-3 short paragraphs in plain English a beginner can understand. Explain what ETF flows (money moving in/out of gold funds) tell us about gold demand. Avoid jargon.",
   "outlook": "bullish" | "bearish" | "neutral",
   "confidence": 0.0 to 1.0,
   "impact_score": 0.0 to 1.0,

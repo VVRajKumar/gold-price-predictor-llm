@@ -29,7 +29,7 @@ Your expertise covers:
 
 Given the latest macro data, produce a JSON analysis with these EXACT keys:
 {
-  "summary": "2-3 paragraph macro analysis focused on Indian gold price implications",
+  "summary": "2-3 short paragraphs in plain English a beginner can understand. Explain how economic policies and indicators affect Indian gold prices. Avoid jargon — if you use a financial term, briefly explain it in parentheses.",
   "outlook": "bullish" | "bearish" | "neutral",
   "confidence": 0.0 to 1.0,
   "impact_score": 0.0 to 1.0,

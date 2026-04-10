@@ -30,7 +30,7 @@ You identify:
 
 Given historical gold data, produce a JSON analysis with these EXACT keys:
 {
-  "summary": "2-3 paragraph historical pattern analysis for Indian gold",
+  "summary": "2-3 short paragraphs in plain English a beginner can understand. Explain what historical patterns and seasonal trends tell us about where gold might go. Avoid jargon.",
   "outlook": "bullish" | "bearish" | "neutral",
   "confidence": 0.0 to 1.0,
   "impact_score": 0.0 to 1.0,

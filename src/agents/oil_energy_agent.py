@@ -24,7 +24,7 @@ relationship between oil prices and INDIAN gold prices. You understand:
 
 Given oil & energy data, produce a JSON analysis with these EXACT keys:
 {
-  "summary": "2-3 paragraph analysis of energy markets' impact on Indian gold",
+  "summary": "2-3 short paragraphs in plain English a beginner can understand. Explain how oil and energy prices affect Indian gold. Avoid jargon.",
   "outlook": "bullish" | "bearish" | "neutral",
   "confidence": 0.0 to 1.0,
   "impact_score": 0.0 to 1.0,

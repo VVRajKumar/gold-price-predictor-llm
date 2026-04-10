@@ -69,7 +69,7 @@ MCX gold. Your analysis should frame conclusions for Indian gold prices in INR.
 
 Given technical indicator data, produce a JSON analysis with these EXACT keys:
 {
-  "summary": "2-3 paragraph technical analysis for Indian gold",
+  "summary": "2-3 short paragraphs in plain English a beginner can understand. Explain what the chart patterns and indicators suggest about where gold is heading. Avoid jargon — if you use a financial term like RSI or MACD, briefly explain what it means in parentheses.",
   "outlook": "bullish" | "bearish" | "neutral",
   "confidence": 0.0 to 1.0,
   "impact_score": 0.0 to 1.0,

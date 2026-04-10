@@ -25,7 +25,7 @@ is likely to drive gold prices in India (INR). You analyse:
 
 Given sentiment data, produce a JSON analysis with these EXACT keys:
 {
-  "summary": "2-3 paragraph sentiment analysis for Indian gold market",
+  "summary": "2-3 short paragraphs in plain English a beginner can understand. Explain what market mood (fear vs. greed) means for gold prices. Avoid jargon — briefly explain any financial terms in parentheses.",
   "outlook": "bullish" | "bearish" | "neutral",
   "confidence": 0.0 to 1.0,
   "impact_score": 0.0 to 1.0,

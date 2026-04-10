@@ -102,7 +102,7 @@ def _extract_summary_text(text: str) -> str:
 
         # Last resort: strip the JSON wrapper to extract readable content.
         # Handles cases where the closing quote is missing (truncated JSON).
-        match = re.search(r'"summary"\s*:\s*"((?:\\.|[^"\\])+)', cleaned, flags=re.DOTALL)
+        match = re.search(r'"summary"\s*:\s*"((?:\\.|[^"\\])*)', cleaned, flags=re.DOTALL)
         if match:
             raw_value = match.group(1)
             return raw_value.replace('\\"', '"').replace("\\n", "\n").strip()

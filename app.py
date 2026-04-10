@@ -5,6 +5,7 @@ Run with:  streamlit run app.py
 
 import sys
 import json
+import html as _html_mod
 import re
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -371,7 +372,8 @@ with st.expander("📋 Executive Summary", expanded=True):
         st.code(_summary, language="json")
     elif _summary:
         # Render with styled card for readability
-        _summary_html = _summary.replace("\n\n", "</p><p style='margin:12px 0;line-height:1.7;'>")
+        _esc = _html_mod.escape(_summary)
+        _summary_html = _esc.replace("\n\n", "</p><p style='margin:12px 0;line-height:1.7;'>")
         _summary_html = _summary_html.replace("\n", "<br>")
         st.markdown(f"""
         <div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);
@@ -770,7 +772,8 @@ if plan.agent_reports:
                                 report["key_factors"] = [f.replace('\\"', '"') for f in _factors_raw]
             # Render summary in styled container
             _cleaned_summary = _clean_text(_agent_summary)
-            _summary_p = _cleaned_summary.replace("\n\n", "</p><p style='margin:8px 0;line-height:1.6;'>")
+            _esc_summary = _html_mod.escape(_cleaned_summary)
+            _summary_p = _esc_summary.replace("\n\n", "</p><p style='margin:8px 0;line-height:1.6;'>")
             _summary_p = _summary_p.replace("\n", "<br>")
             st.markdown(
                 f'<div style="background:#111827;border-radius:8px;padding:14px 18px;'
@@ -784,7 +787,7 @@ if plan.agent_reports:
                 _pills = "".join(
                     f'<span style="display:inline-block;background:#1e3a5f;color:#7dd3fc;'
                     f'border-radius:16px;padding:4px 12px;margin:3px 4px;font-size:13px;">'
-                    f'{str(f)}</span>'
+                    f'{_html_mod.escape(str(f))}</span>'
                     for f in factors
                 )
                 st.markdown(
@@ -800,7 +803,7 @@ st.subheader("⚖️ Bull vs Bear Case")
 st.caption("Two possible scenarios for gold prices — what could push them up or pull them down.")
 b1, b2 = st.columns(2)
 with b1:
-    _bull = _clean_text(plan.bull_case) if plan.bull_case else "Not available"
+    _bull = _html_mod.escape(_clean_text(plan.bull_case) if plan.bull_case else "Not available")
     st.markdown(f"""
     <div style="background:#0a2e1a; border-radius:12px; padding:22px; border-left:4px solid #00d4aa;">
     <h4 style="color:#00d4aa;margin-top:0;">🐂 Bull Case <span style="font-size:12px;font-weight:normal;color:#6ee7b7;">(prices could go UP if…)</span></h4>
@@ -809,7 +812,7 @@ with b1:
     """, unsafe_allow_html=True)
 
 with b2:
-    _bear = _clean_text(plan.bear_case) if plan.bear_case else "Not available"
+    _bear = _html_mod.escape(_clean_text(plan.bear_case) if plan.bear_case else "Not available")
     st.markdown(f"""
     <div style="background:#2e0a0a; border-radius:12px; padding:22px; border-left:4px solid #ff6b6b;">
     <h4 style="color:#ff6b6b;margin-top:0;">🐻 Bear Case <span style="font-size:12px;font-weight:normal;color:#fca5a5;">(prices could go DOWN if…)</span></h4>
@@ -823,7 +826,7 @@ if plan.risk_factors:
     st.caption("Things that could cause unexpected price swings — keep an eye on these.")
     _risks_html = ""
     for i, risk in enumerate(plan.risk_factors, 1):
-        _risk_text = _clean_text(str(risk))
+        _risk_text = _html_mod.escape(_clean_text(str(risk)))
         _risks_html += (
             f'<div style="display:flex;align-items:flex-start;margin:8px 0;">'
             f'<span style="background:#fbbf24;color:#111;border-radius:50%;'

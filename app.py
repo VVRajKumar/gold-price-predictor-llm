@@ -5,6 +5,7 @@ Run with:  streamlit run app.py
 
 import sys
 import json
+import re
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
@@ -711,7 +712,6 @@ if plan.agent_reports:
                         _agent_summary = _parsed["summary"]
                 except (json.JSONDecodeError, ValueError):
                     # Regex fallback: pull the "summary" value from malformed JSON
-                    import re
                     _m = re.search(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)"', _agent_summary, re.DOTALL)
                     if _m:
                         _agent_summary = _m.group(1).replace('\\"', '"').replace("\\n", "\n")

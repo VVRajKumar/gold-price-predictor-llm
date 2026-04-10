@@ -415,7 +415,7 @@ class MLEnsemble:
                 prev_usd = history[-1] if history else ref_usd_price
                 if prev_usd > 0:
                     # Step caps to prevent compounding:
-                    # 0.8% h1-6, 0.5% h7-12, 0.35% h13+
+                    # h=0..5 (hours 1-6): 0.8%, h=6..11 (hours 7-12): 0.5%, h=12+ (hours 13+): 0.35%
                     if h < 6:
                         step_pct = 0.008
                     elif h < 12:

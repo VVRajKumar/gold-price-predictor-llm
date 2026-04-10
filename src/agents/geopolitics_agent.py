@@ -84,34 +84,11 @@ Respond with valid JSON only."""
         )
 
         raw = self._ask_llm(prompt)
-
-        # If the LLM returned an error, use a clean fallback instead of
-        # propagating the raw error text to the UI.
-        is_error = not isinstance(raw, str) or raw.startswith("ERROR:")
-
-        if is_error:
-            result = {
-                "summary": (
-                    "Geopolitical analysis temporarily unavailable; "
-                    "defaulting to neutral outlook."
-                ),
-                "outlook": "neutral",
-                "confidence": 0.3,
-                "impact_score": 0.3,
-                "prediction_bias": 0.0,
-                "key_factors": [],
-                "risk_events": [],
-            }
-        else:
-            result = self._parse_llm_json(raw, defaults={
-                "summary": raw,
-                "outlook": "neutral",
-                "confidence": 0.3,
-                "impact_score": 0.3,
-                "prediction_bias": 0.0,
-                "key_factors": [],
-                "risk_events": [],
-            })
+        result = self._parse_llm_json(raw, defaults={
+            "summary": raw, "outlook": "neutral", "confidence": 0.3,
+            "impact_score": 0.3, "prediction_bias": 0.0, "key_factors": [],
+            "risk_events": [],
+        })
 
         return AgentReport(
             agent_name=self.NAME,

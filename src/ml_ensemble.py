@@ -437,8 +437,8 @@ class MLEnsemble:
                 band_half = (hi_usd - lo_usd) / 2.0
                 widen_factor = math.sqrt(h + 1)
                 band_half *= widen_factor
-                # Minimum floor: 0.3% of reference × sqrt(h+1)
-                min_band_half = ref_usd_price * 0.003 * widen_factor
+                # Minimum floor: 0.2% of reference × sqrt(h+1)
+                min_band_half = ref_usd_price * 0.002 * widen_factor
                 band_half = max(band_half, min_band_half)
                 # Re-center bands around the predicted price (not the quantile center)
                 lo_usd = p_final_usd - band_half

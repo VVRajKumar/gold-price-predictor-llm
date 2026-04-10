@@ -34,14 +34,14 @@ _MAX_HOURLY_MOVE_PCT = 1.0
 _MAX_TOTAL_DEVIATION_PCT = 5.0
 
 # Band width limits (as % of predicted price)
-_MIN_BAND_PCT = 1.0      # band cannot be tighter than 1% of price
-_MAX_BAND_PCT = 10.0      # band cannot be wider than 10% of price
+_MIN_BAND_PCT = 0.5       # band cannot be tighter than 0.5% of price
+_MAX_BAND_PCT = 5.0       # band cannot be wider than 5% of price
 
 # Horizon-aware band deviation envelope (shared formula used by guardrails).
 # Returns the max allowed deviation (as a fraction) from predicted price for bands.
 def _band_envelope_pct(horizon_idx: int) -> float:
     """Max band deviation at a given horizon step (fraction, e.g. 0.02 = 2%)."""
-    return min(0.08, 0.02 + 0.003 * horizon_idx)
+    return min(0.035, 0.008 + 0.0012 * horizon_idx)
 
 # Overconfidence thresholds
 _OVERCONFIDENCE_THRESHOLD = 0.92   # individual agents

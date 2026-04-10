@@ -31,12 +31,12 @@ _HOURLY_SCORECARD_START = datetime(2026, 4, 4, 0, 0, 0)
 
 # Directional neutral zone: if actual moved less than this %, the market
 # is considered flat and the prediction is counted as directionally correct.
-_DIR_NEUTRAL_PCT = 0.05
+_DIR_NEUTRAL_PCT = 0.01
 
 # Bump this version string whenever guardrail parameters change.
 # Triggers a one-time rebase that retroactively widens bands on all stored
 # plans so accuracy metrics reflect the new parameters immediately.
-_GUARDRAIL_VERSION = "v3_wider_bands_20260410"
+_GUARDRAIL_VERSION = "v4_tighter_bands_20260410"
 
 
 class AccuracyTracker:
@@ -82,12 +82,11 @@ class AccuracyTracker:
     # ── Retroactive guardrail rebase ─────────────────────────────────
 
     def _rebase_guardrails(self):
-        """One-time rebase: widen bands on stored plans when guardrails change.
+        """One-time rebase: adjust bands on stored plans when guardrails change.
 
-        Old predictions had narrow bands due to aggressive double-clamping.
-        This retroactively applies the current (wider) horizon-aware band
-        envelope so that accuracy metrics (especially band_hit_rate) reflect
-        the updated prediction parameters immediately.
+        Retroactively applies the current horizon-aware band envelope so that
+        accuracy metrics (especially band_hit_rate) reflect the updated
+        prediction parameters immediately.
 
         Uses a version marker file so the rebase only runs once per
         guardrail parameter change (bump ``_GUARDRAIL_VERSION`` to re-run).

@@ -342,8 +342,8 @@ if _quick_agg and _quick_agg["total_predictions_evaluated"] > 0:
     _mape = _quick_agg["overall_mape"]
     _hit = _quick_agg["overall_band_hit_rate"]
     _dir = _quick_agg["avg_directional_accuracy"]
-    _n = _quick_agg["total_predictions_evaluated"]
-    _nd = _quick_agg.get("unique_dates_evaluated", "?")
+    _n = _quick_agg.get("total_unique_hours", _quick_agg["total_predictions_evaluated"])
+    _nd = _quick_agg.get("total_unique_dates", _quick_agg.get("unique_dates_evaluated", "?"))
     _mape_icon = "🟢" if _mape < 2 else ("🟡" if _mape < 5 else "🔴")
     _hit_icon = "🟢" if _hit >= 80 else ("🟡" if _hit >= 60 else "🔴")
     _dir_icon = "🟢" if _dir >= 80 else ("🟡" if _dir >= 60 else "🔴")
@@ -691,7 +691,16 @@ if plan.agent_reports:
             # Don't show raw error traces to users
             if isinstance(_agent_summary, str) and _agent_summary.startswith("ERROR:"):
                 _agent_summary = "Analysis temporarily unavailable; defaulting to neutral outlook."
-            st.markdown(_agent_summary)
+            # Extract text from JSON-like summaries (e.g. stale cached
+            # geopolitics agent responses that were stored as raw JSON)
+            if isinstance(_agent_summary, str) and _agent_summary.strip().startswith("{"):
+                try:
+                    _parsed = json.loads(_agent_summary)
+                    if isinstance(_parsed, dict) and "summary" in _parsed:
+                        _agent_summary = _parsed["summary"]
+                except (json.JSONDecodeError, ValueError):
+                    pass
+            st.markdown(_clean_text(_agent_summary))
 
             factors = report.get("key_factors", [])
             if factors:
@@ -804,8 +813,8 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         da_color = "🟢" if da >= 80 else ("🟡" if da >= 60 else "🔴")
         st.metric(f"{da_color} Direction Accuracy", f"{da:.0f}%")
     with m5:
-        _unique_hrs = agg_stats['total_predictions_evaluated']
-        _unique_days = agg_stats.get('unique_dates_evaluated', '?')
+        _unique_hrs = agg_stats.get('total_unique_hours', agg_stats['total_predictions_evaluated'])
+        _unique_days = agg_stats.get('total_unique_dates', agg_stats.get('unique_dates_evaluated', '?'))
         st.metric("📊 Unique Hours", f"{_unique_hrs}")
         st.caption(f"across {_unique_days} day(s)")
 

@@ -35,7 +35,7 @@ from sklearn.linear_model import Ridge
 
 from .config import CACHE_DIR, PREDICTION_HOURS
 from .data_fetchers.market_data import MarketDataFetcher
-from .guardrails import validate_xgb_predictions, validate_price_series, _band_envelope_pct
+from .guardrails import validate_xgb_predictions, validate_price_series
 from .residual_learner import ResidualLearner
 
 # ── Feature engineering constants ────────────────────────────────────
@@ -400,30 +400,28 @@ class MLEnsemble:
                 # the reference price.  The blend increases for later horizons
                 # so near-term predictions stay responsive while far-horizon
                 # ones don't compound into unrealistic trends.
-                # Uses 0.04*h to ramp faster; capped at 50% so the last few
-                # hours still partially reflect model direction.
-                reversion_strength = min(0.50, 0.04 * h)  # hour 1→4%, hour 6→24%, hour 12→48%, hour 13+→50%
+                # Gentle ramp (0.015*h, cap 30%) preserves directional signal
+                # from the model while still damping extreme far-horizon drift.
+                reversion_strength = min(0.30, 0.015 * h)  # hour 1→1.5%, hour 6→9%, hour 12→18%, hour 20→30%
                 p_final_usd = p_final_usd * (1.0 - reversion_strength) + ref_usd_price * reversion_strength
 
                 # ── Per-step USD sanity check ──
                 # Prevent runaway drift: cap total deviation and per-step moves.
-                # Total cap ±3%: gold rarely moves >2-3% in a full day.
+                # Total cap ±5%: gold can move 5%+ during volatile days.
                 if ref_usd_price > 0:
-                    max_total_dev = ref_usd_price * 0.03  # ±3% total
+                    max_total_dev = ref_usd_price * 0.05  # ±5% total
                     p_final_usd = max(ref_usd_price - max_total_dev,
                                       min(p_final_usd, ref_usd_price + max_total_dev))
                 prev_usd = history[-1] if history else ref_usd_price
                 if prev_usd > 0:
-                    # Tight step caps to prevent compounding:
-                    # 0.5% h1-6, 0.35% h7-12, 0.25% h13+
-                    # Theoretical max from steps alone: 6×0.5% + 6×0.35% + 12×0.25% = 8.1%
-                    # but total cap (3%) catches runaway much earlier.
+                    # Step caps to prevent compounding:
+                    # h=0..5 (hours 1-6): 0.8%, h=6..11 (hours 7-12): 0.5%, h=12+ (hours 13+): 0.35%
                     if h < 6:
-                        step_pct = 0.005
+                        step_pct = 0.008
                     elif h < 12:
-                        step_pct = 0.0035
+                        step_pct = 0.005
                     else:
-                        step_pct = 0.0025
+                        step_pct = 0.0035
                     max_step = prev_usd * step_pct
                     p_final_usd = max(prev_usd - max_step,
                                       min(p_final_usd, prev_usd + max_step))
@@ -446,16 +444,10 @@ class MLEnsemble:
                 lo_usd = p_final_usd - band_half
                 hi_usd = p_final_usd + band_half
 
-                # Clamp quantile bands to a horizon-aware deviation envelope
-                # centred on the *predicted* price (not the reference price).
-                # This keeps bands symmetric around the prediction and avoids
-                # the one-sided collapse seen when the prediction is near the
-                # total deviation cap.
-                if ref_usd_price > 0:
-                    max_dev_pct = _band_envelope_pct(h)
-                    max_dev_abs = ref_usd_price * max_dev_pct
-                    lo_usd = max(p_final_usd - max_dev_abs, lo_usd)
-                    hi_usd = min(p_final_usd + max_dev_abs, hi_usd)
+                # Ensure band ordering
+                lo_usd, hi_usd = min(lo_usd, hi_usd), max(lo_usd, hi_usd)
+                # Band envelope clamping deferred to guardrails (validate_xgb_predictions)
+                # to avoid double-clamping which artificially narrows bands.
 
                 # Convert to INR/10g
                 p_final_inr = p_final_usd * usdinr * oz_to_10g

@@ -3,8 +3,6 @@ Geopolitics Agent – analyses geopolitical events and their impact on gold.
 """
 
 from __future__ import annotations
-import json
-import re
 from typing import Any
 
 from .base_agent import BaseAgent, AgentReport
@@ -26,12 +24,12 @@ Areas of focus:
 - Indian import-duty changes and government gold policy
 
 Respond with a JSON object containing these keys:
-  "summary" (string): 2-3 paragraph analysis of the current global landscape affecting Indian gold prices. Be specific — reference actual events from the headlines provided.
+  "summary" (string): 2-3 short paragraphs (2-3 sentences each) in plain, conversational English a beginner investor can understand. Reference actual events from the headlines. Avoid jargon — if you must use a financial term, explain it briefly in parentheses.
   "outlook" (string): one of "bullish", "bearish", or "neutral".
   "confidence" (number): 0.0 to 1.0.
   "impact_score" (number): 0.0 to 1.0 – how much global events are influencing Indian gold right now.
   "prediction_bias" (number): -1.0 to +1.0 – negative means bearish, positive means bullish for Indian gold.
-  "key_factors" (array of strings): the main drivers — cite specific events from headlines.
+  "key_factors" (array of strings): the main drivers — cite specific events from headlines. Write each factor as a short plain-English sentence.
   "risk_events" (array of strings): upcoming events that could cause a gold price move.
 
 Respond with valid JSON only."""
@@ -86,51 +84,11 @@ Respond with valid JSON only."""
         )
 
         raw = self._ask_llm(prompt)
-
-        # If the LLM returned an error, use a clean fallback instead of
-        # propagating the raw error text to the UI.
-        is_error = not isinstance(raw, str) or raw.startswith("ERROR:")
-
-        # Strip markdown code fences the LLM sometimes wraps around JSON
-        _to_parse = raw
-        if isinstance(_to_parse, str):
-            _stripped = _to_parse.strip()
-            if _stripped.startswith("```"):
-                lines = _stripped.split("\n")
-                lines = lines[1:]                       # drop opening fence
-                if lines and lines[-1].strip().startswith("```"):
-                    lines = lines[:-1]                   # drop closing fence
-                _to_parse = "\n".join(lines).strip()
-
-        try:
-            result = json.loads(_to_parse) if isinstance(_to_parse, str) else None
-            if not isinstance(result, dict):
-                raise ValueError("Expected a JSON object")
-        except (json.JSONDecodeError, ValueError, TypeError):
-            # Last-resort: try to pull just the "summary" value via regex
-            # so the UI at least shows readable prose.
-            fallback_summary = raw
-            if isinstance(raw, str) and not is_error:
-                m = re.search(
-                    r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)"', raw, re.DOTALL,
-                )
-                if m:
-                    fallback_summary = (
-                        m.group(1).replace('\\"', '"').replace("\\n", "\n")
-                    )
-
-            result = {
-                "summary": (
-                    "Geopolitical analysis temporarily unavailable; "
-                    "defaulting to neutral outlook."
-                ) if is_error else fallback_summary,
-                "outlook": "neutral",
-                "confidence": 0.3,
-                "impact_score": 0.3,
-                "prediction_bias": 0.0,
-                "key_factors": [],
-                "risk_events": [],
-            }
+        result = self._parse_llm_json(raw, defaults={
+            "summary": raw, "outlook": "neutral", "confidence": 0.3,
+            "impact_score": 0.3, "prediction_bias": 0.0, "key_factors": [],
+            "risk_events": [],
+        })
 
         return AgentReport(
             agent_name=self.NAME,

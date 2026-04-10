@@ -21,7 +21,7 @@ Consider USD/INR exchange rate movements as an additional trend factor.
 
 Given recent gold price data, produce a JSON analysis with these EXACT keys:
 {
-  "summary": "2-3 paragraph trend analysis for Indian gold",
+  "summary": "2-3 short paragraphs in plain English a beginner can understand. Explain what the price trend means and why it matters. Avoid jargon — if you use a financial term, briefly explain it in parentheses.",
   "outlook": "bullish" | "bearish" | "neutral",
   "confidence": 0.0 to 1.0,
   "impact_score": 0.0 to 1.0,
@@ -78,13 +78,10 @@ for the INDIAN gold market (INR per 10 grams).
 Provide your trend analysis as JSON."""
 
         raw = self._ask_llm(prompt)
-        try:
-            result = json.loads(raw)
-        except json.JSONDecodeError:
-            result = {
-                "summary": raw, "outlook": "neutral", "confidence": 0.4,
-                "impact_score": 0.5, "prediction_bias": 0.0, "key_factors": [],
-            }
+        result = self._parse_llm_json(raw, defaults={
+            "summary": raw, "outlook": "neutral", "confidence": 0.4,
+            "impact_score": 0.5, "prediction_bias": 0.0, "key_factors": [],
+        })
 
         return AgentReport(
             agent_name=self.NAME,

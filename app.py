@@ -705,21 +705,40 @@ if plan.agent_reports:
                     _agent_summary = "\n".join(_lines).strip()
             # Extract text from JSON-like summaries (e.g. stale cached
             # geopolitics agent responses that were stored as raw JSON)
+            _raw_json_text = None  # keep raw JSON for key_factors recovery
             if isinstance(_agent_summary, str) and _agent_summary.strip().startswith("{"):
+                _raw_json_text = _agent_summary
                 try:
                     _parsed = json.loads(_agent_summary)
-                    if isinstance(_parsed, dict) and "summary" in _parsed:
-                        _agent_summary = _parsed["summary"]
+                    if isinstance(_parsed, dict):
+                        if "summary" in _parsed:
+                            _agent_summary = _parsed["summary"]
+                        # Recover key_factors from parsed JSON when agent
+                        # fallback stored the raw response as the summary.
+                        if not report.get("key_factors") and "key_factors" in _parsed:
+                            report["key_factors"] = _parsed["key_factors"]
                 except (json.JSONDecodeError, ValueError):
                     # Regex fallback: pull the "summary" value from malformed JSON
                     _m = re.search(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)"', _agent_summary, re.DOTALL)
                     if _m:
                         _agent_summary = _m.group(1).replace('\\"', '"').replace("\\n", "\n")
+                    else:
+                        # Handle truncated JSON where closing quote is missing
+                        _m = re.search(r'"summary"\s*:\s*"((?:[^"\\]|\\.)+)', _agent_summary, re.DOTALL)
+                        if _m:
+                            _agent_summary = _m.group(1).replace('\\"', '"').replace("\\n", "\n")
+                    # Regex recovery for key_factors from malformed JSON
+                    if not report.get("key_factors") and _raw_json_text:
+                        _kf = re.search(r'"key_factors"\s*:\s*\[(.*?)\]', _raw_json_text, re.DOTALL)
+                        if _kf:
+                            _factors_raw = re.findall(r'"((?:[^"\\]|\\.)*)"', _kf.group(1))
+                            if _factors_raw:
+                                report["key_factors"] = [f.replace('\\"', '"') for f in _factors_raw]
             st.markdown(_clean_text(_agent_summary))
 
             factors = report.get("key_factors", [])
             if factors:
-                st.markdown("**Key Factors:** " + " · ".join(factors))
+                st.markdown("**Key Factors:** " + " · ".join(str(f) for f in factors))
 
 st.divider()
 

@@ -3,8 +3,6 @@ Geopolitics Agent – analyses geopolitical events and their impact on gold.
 """
 
 from __future__ import annotations
-import json
-import re
 from typing import Any
 
 from .base_agent import BaseAgent, AgentReport
@@ -91,39 +89,12 @@ Respond with valid JSON only."""
         # propagating the raw error text to the UI.
         is_error = not isinstance(raw, str) or raw.startswith("ERROR:")
 
-        # Strip markdown code fences the LLM sometimes wraps around JSON
-        _to_parse = raw
-        if isinstance(_to_parse, str):
-            _stripped = _to_parse.strip()
-            if _stripped.startswith("```"):
-                lines = _stripped.split("\n")
-                lines = lines[1:]                       # drop opening fence
-                if lines and lines[-1].strip().startswith("```"):
-                    lines = lines[:-1]                   # drop closing fence
-                _to_parse = "\n".join(lines).strip()
-
-        try:
-            result = json.loads(_to_parse) if isinstance(_to_parse, str) else None
-            if not isinstance(result, dict):
-                raise ValueError("Expected a JSON object")
-        except (json.JSONDecodeError, ValueError, TypeError):
-            # Last-resort: try to pull just the "summary" value via regex
-            # so the UI at least shows readable prose.
-            fallback_summary = raw
-            if isinstance(raw, str) and not is_error:
-                m = re.search(
-                    r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)"', raw, re.DOTALL,
-                )
-                if m:
-                    fallback_summary = (
-                        m.group(1).replace('\\"', '"').replace("\\n", "\n")
-                    )
-
+        if is_error:
             result = {
                 "summary": (
                     "Geopolitical analysis temporarily unavailable; "
                     "defaulting to neutral outlook."
-                ) if is_error else fallback_summary,
+                ),
                 "outlook": "neutral",
                 "confidence": 0.3,
                 "impact_score": 0.3,
@@ -131,6 +102,16 @@ Respond with valid JSON only."""
                 "key_factors": [],
                 "risk_events": [],
             }
+        else:
+            result = self._parse_llm_json(raw, defaults={
+                "summary": raw,
+                "outlook": "neutral",
+                "confidence": 0.3,
+                "impact_score": 0.3,
+                "prediction_bias": 0.0,
+                "key_factors": [],
+                "risk_events": [],
+            })
 
         return AgentReport(
             agent_name=self.NAME,

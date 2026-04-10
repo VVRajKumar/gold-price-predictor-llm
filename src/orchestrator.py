@@ -74,6 +74,14 @@ def _extract_summary_text(text: str) -> str:
     if not cleaned:
         return ""
 
+    # Strip markdown code fences the LLM sometimes wraps around JSON
+    if cleaned.startswith("```"):
+        lines = cleaned.split("\n")
+        lines = lines[1:]  # drop opening fence
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]  # drop closing fence
+        cleaned = "\n".join(lines).strip()
+
     if cleaned.startswith("{"):
         try:
             obj = json.loads(cleaned)
@@ -81,14 +89,23 @@ def _extract_summary_text(text: str) -> str:
             if isinstance(summary, str) and summary.strip():
                 return summary.strip()
         except Exception:
-            # Best-effort extraction when the JSON is truncated/invalid.
-            match = re.search(r'"summary"\s*:\s*"((?:\\.|[^"\\])*)"', cleaned, flags=re.DOTALL)
-            if match:
-                raw_value = match.group(1)
-                try:
-                    return bytes(raw_value, "utf-8").decode("unicode_escape").strip()
-                except Exception:
-                    return raw_value.replace('\\"', '"').strip()
+            pass
+
+        # Best-effort regex extraction (handles truncated/malformed JSON)
+        match = re.search(r'"summary"\s*:\s*"((?:\\.|[^"\\])*)"', cleaned, flags=re.DOTALL)
+        if match:
+            raw_value = match.group(1)
+            try:
+                return bytes(raw_value, "utf-8").decode("unicode_escape").strip()
+            except Exception:
+                return raw_value.replace('\\"', '"').strip()
+
+        # Last resort: strip the JSON wrapper to extract readable content.
+        # Handles cases where the closing quote is missing (truncated JSON).
+        match = re.search(r'"summary"\s*:\s*"((?:\\.|[^"\\])+)', cleaned, flags=re.DOTALL)
+        if match:
+            raw_value = match.group(1)
+            return raw_value.replace('\\"', '"').replace("\\n", "\n").strip()
 
     return cleaned
 

@@ -56,13 +56,10 @@ and Gold Mutual Funds for retail demand signals.
 Provide your ETF flow analysis as JSON."""
 
         raw = self._ask_llm(prompt)
-        try:
-            result = json.loads(raw)
-        except json.JSONDecodeError:
-            result = {
-                "summary": raw, "outlook": "neutral", "confidence": 0.4,
-                "impact_score": 0.4, "prediction_bias": 0.0, "key_factors": [],
-            }
+        result = self._parse_llm_json(raw, defaults={
+            "summary": raw, "outlook": "neutral", "confidence": 0.4,
+            "impact_score": 0.4, "prediction_bias": 0.0, "key_factors": [],
+        })
 
         return AgentReport(
             agent_name=self.NAME,

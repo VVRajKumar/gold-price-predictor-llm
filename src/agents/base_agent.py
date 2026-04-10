@@ -4,6 +4,7 @@ Every specialist agent inherits from this.
 """
 
 from __future__ import annotations
+import json
 import re
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -208,6 +209,77 @@ class BaseAgent(ABC):
 
         # Also apply the standard content-filter softening
         result = BaseAgent._soften_prompt(result)
+        return result
+
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _parse_llm_json(raw: str, defaults: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Robustly parse a JSON response from the LLM.
+
+        Handles common LLM quirks: markdown code fences, truncated JSON, and
+        malformed output.  Returns a dict with as many fields extracted as
+        possible, falling back to *defaults* for anything missing.
+        """
+        if defaults is None:
+            defaults = {}
+        if not isinstance(raw, str) or not raw.strip():
+            return dict(defaults)
+
+        text = raw.strip()
+
+        # Strip markdown code fences (```json ... ```)
+        if text.startswith("```"):
+            lines = text.split("\n")
+            lines = lines[1:]  # drop opening fence
+            if lines and lines[-1].strip().startswith("```"):
+                lines = lines[:-1]  # drop closing fence
+            text = "\n".join(lines).strip()
+
+        # 1. Try standard JSON parse
+        try:
+            result = json.loads(text)
+            if isinstance(result, dict):
+                return result
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pass
+
+        # 2. Regex fallback – extract individual fields from malformed JSON
+        result = dict(defaults)
+
+        # summary (greedy: grab as much as possible up to the closing quote)
+        m = re.search(
+            r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)"', text, re.DOTALL,
+        )
+        if m:
+            result["summary"] = (
+                m.group(1).replace('\\"', '"').replace("\\n", "\n")
+            )
+
+        # key_factors – array of strings
+        m = re.search(r'"key_factors"\s*:\s*\[(.*?)\]', text, re.DOTALL)
+        if m:
+            factors = re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(1))
+            if factors:
+                result["key_factors"] = [
+                    f.replace('\\"', '"') for f in factors
+                ]
+
+        # outlook
+        m = re.search(
+            r'"outlook"\s*:\s*"(bullish|bearish|neutral)"', text, re.IGNORECASE,
+        )
+        if m:
+            result["outlook"] = m.group(1).lower()
+
+        # numeric fields
+        for field in ("confidence", "impact_score", "prediction_bias"):
+            m = re.search(rf'"{field}"\s*:\s*(-?[\d.]+)', text)
+            if m:
+                try:
+                    result[field] = float(m.group(1))
+                except ValueError:
+                    pass
+
         return result
 
     # ------------------------------------------------------------------ #

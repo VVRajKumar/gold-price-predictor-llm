@@ -117,13 +117,10 @@ Also consider INR depreciation trends and import duty history.
 Provide your historical pattern analysis as JSON."""
 
         raw = self._ask_llm(prompt)
-        try:
-            result = json.loads(raw)
-        except json.JSONDecodeError:
-            result = {
-                "summary": raw, "outlook": "neutral", "confidence": 0.3,
-                "impact_score": 0.3, "prediction_bias": 0.0, "key_factors": [],
-            }
+        result = self._parse_llm_json(raw, defaults={
+            "summary": raw, "outlook": "neutral", "confidence": 0.3,
+            "impact_score": 0.3, "prediction_bias": 0.0, "key_factors": [],
+        })
 
         return AgentReport(
             agent_name=self.NAME,

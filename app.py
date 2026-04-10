@@ -5,6 +5,7 @@ Run with:  streamlit run app.py
 
 import sys
 import json
+import re
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
@@ -691,6 +692,17 @@ if plan.agent_reports:
             # Don't show raw error traces to users
             if isinstance(_agent_summary, str) and _agent_summary.startswith("ERROR:"):
                 _agent_summary = "Analysis temporarily unavailable; defaulting to neutral outlook."
+            # Handle dict summaries (e.g. cached as a nested object)
+            if isinstance(_agent_summary, dict) and "summary" in _agent_summary:
+                _agent_summary = _agent_summary["summary"]
+            # Strip markdown code fences the LLM sometimes wraps around JSON
+            if isinstance(_agent_summary, str):
+                _s = _agent_summary.strip()
+                if _s.startswith("```"):
+                    _lines = _s.split("\n")[1:]           # drop opening fence
+                    if _lines and _lines[-1].strip().startswith("```"):
+                        _lines = _lines[:-1]              # drop closing fence
+                    _agent_summary = "\n".join(_lines).strip()
             # Extract text from JSON-like summaries (e.g. stale cached
             # geopolitics agent responses that were stored as raw JSON)
             if isinstance(_agent_summary, str) and _agent_summary.strip().startswith("{"):
@@ -699,7 +711,10 @@ if plan.agent_reports:
                     if isinstance(_parsed, dict) and "summary" in _parsed:
                         _agent_summary = _parsed["summary"]
                 except (json.JSONDecodeError, ValueError):
-                    pass
+                    # Regex fallback: pull the "summary" value from malformed JSON
+                    _m = re.search(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)"', _agent_summary, re.DOTALL)
+                    if _m:
+                        _agent_summary = _m.group(1).replace('\\"', '"').replace("\\n", "\n")
             st.markdown(_clean_text(_agent_summary))
 
             factors = report.get("key_factors", [])

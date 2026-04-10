@@ -33,6 +33,11 @@ _HOURLY_SCORECARD_START = datetime(2026, 4, 4, 0, 0, 0)
 # is considered flat and the prediction is counted as directionally correct.
 _DIR_NEUTRAL_PCT = 0.05
 
+# Bump this version string whenever guardrail parameters change.
+# Triggers a one-time rebase that retroactively widens bands on all stored
+# plans so accuracy metrics reflect the new parameters immediately.
+_GUARDRAIL_VERSION = "v3_wider_bands_20260410"
+
 
 class AccuracyTracker:
     """Track and score past predictions vs actual prices."""
@@ -44,6 +49,7 @@ class AccuracyTracker:
         self._last_checked: Optional[str] = None
         self._auto_running = False
         self._purge_stale_entries()
+        self._rebase_guardrails()
 
     # ── Purge pre-INR / pre-cutoff entries ───────────────────────────
 
@@ -72,6 +78,87 @@ class AccuracyTracker:
             if d.get("predicted", 0) < 30000:
                 return False
         return True
+
+    # ── Retroactive guardrail rebase ─────────────────────────────────
+
+    def _rebase_guardrails(self):
+        """One-time rebase: widen bands on stored plans when guardrails change.
+
+        Old predictions had narrow bands due to aggressive double-clamping.
+        This retroactively applies the current (wider) horizon-aware band
+        envelope so that accuracy metrics (especially band_hit_rate) reflect
+        the updated prediction parameters immediately.
+
+        Uses a version marker file so the rebase only runs once per
+        guardrail parameter change (bump ``_GUARDRAIL_VERSION`` to re-run).
+        """
+        marker_path = CACHE_DIR / "guardrail_rebase.marker"
+        try:
+            if (marker_path.exists()
+                    and marker_path.read_text(encoding="utf-8").strip() == _GUARDRAIL_VERSION):
+                return  # already rebased for this version
+        except Exception:
+            pass
+
+        if not self._stored_plans:
+            # Write marker even when there are no plans so we don't
+            # retry on every startup.
+            try:
+                marker_path.write_text(_GUARDRAIL_VERSION, encoding="utf-8")
+            except Exception:
+                pass
+            return
+
+        from .guardrails import validate_prediction_plan, _band_envelope_pct
+
+        bands_widened = 0
+        for plan in self._stored_plans:
+            current_price = plan.get("current_price", 0)
+            preds = plan.get("daily_predictions", [])
+            if not preds or current_price <= 0:
+                continue
+
+            # Step 1: standard guardrails (enforces new min-band 1%, wider caps)
+            validate_prediction_plan(plan, current_price, len(preds))
+
+            # Step 2: horizon-aware band widening using the new envelope.
+            # _band_envelope_pct(h) returns the max-allowed band half-width
+            # as a fraction (e.g. 0.02 = 2%).  We use it as a *minimum*
+            # here so bands that were crushed by old double-clamping get
+            # expanded to the intended width.
+            for h, dp in enumerate(preds):
+                predicted = dp.get("predicted_price", current_price)
+                low = dp.get("low_range", predicted)
+                high = dp.get("high_range", predicted)
+
+                if predicted <= 0:
+                    continue
+
+                min_half = predicted * _band_envelope_pct(h)
+                current_half = (high - low) / 2.0
+
+                if current_half < min_half:
+                    dp["low_range"] = round(predicted - min_half, 2)
+                    dp["high_range"] = round(predicted + min_half, 2)
+                    bands_widened += 1
+
+        self._save_stored_plans()
+
+        # Clear accuracy log so all plans are re-evaluated with the wider
+        # bands on the next refresh_all() call.
+        self._log = []
+        self._save_log()
+
+        try:
+            marker_path.write_text(_GUARDRAIL_VERSION, encoding="utf-8")
+        except Exception:
+            pass
+
+        logger.info(
+            f"Guardrail rebase ({_GUARDRAIL_VERSION}): widened {bands_widened} "
+            f"prediction bands across {len(self._stored_plans)} plans, "
+            f"cleared accuracy log for re-evaluation"
+        )
 
     # ── Persistence ──────────────────────────────────────────────────
 

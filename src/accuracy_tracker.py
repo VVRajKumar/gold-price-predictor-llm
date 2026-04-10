@@ -434,6 +434,21 @@ class AccuracyTracker:
             except (ValueError, TypeError, KeyError):
                 pass
 
+        # Count total distinct hourly predictions across the FULL log
+        # (not limited to the recent_hours window) so "Unique Hours"
+        # reflects all hours we have ever predicted and scored.
+        all_hours_set: set[str] = set()
+        all_dates_set: set = set()
+        for ev in self._log:
+            for d in ev.get("daily_results", []):
+                date_key = d.get("date", "")
+                if date_key:
+                    all_hours_set.add(date_key)
+                    try:
+                        all_dates_set.add(datetime.strptime(date_key, "%Y-%m-%d %H:%M:%S").date())
+                    except (ValueError, TypeError):
+                        pass
+
         return {
             "total_predictions_evaluated": len(all_days),
             "unique_dates_evaluated": len(unique_dates),
@@ -444,6 +459,8 @@ class AccuracyTracker:
             "best_mae": round(min(r["mae"] for r in self._log), 2),
             "worst_mae": round(max(r["mae"] for r in self._log), 2),
             "avg_directional_accuracy": directional_accuracy,
+            "total_unique_hours": len(all_hours_set),
+            "total_unique_dates": len(all_dates_set),
         }
 
     # ── Refresh: re-evaluate ALL stored plans against latest data ────

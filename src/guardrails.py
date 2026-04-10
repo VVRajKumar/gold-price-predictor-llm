@@ -24,23 +24,24 @@ _MIN_INR_PRICE = 30_000.0
 _MAX_INR_PRICE = 500_000.0
 
 # Maximum hourly price change (%) considered plausible.
-# Gold rarely moves >0.5% in a single hour; tighter cap prevents compounding
-# errors in the auto-regressive prediction loop.
-_MAX_HOURLY_MOVE_PCT = 0.5
+# Gold can move ~1% in a single hour during volatile sessions; allow room
+# for genuine moves while still catching obvious errors.
+_MAX_HOURLY_MOVE_PCT = 1.0
 
 # Maximum total deviation (%) from current price over the full 24-hour horizon.
-# Indian gold rarely moves >3% in a day under normal conditions.
-_MAX_TOTAL_DEVIATION_PCT = 3.0
+# Indian gold can move 5%+ during volatile days (geopolitical shocks, rate
+# decisions).  A tighter cap forces predictions to under-shoot, inflating MAPE.
+_MAX_TOTAL_DEVIATION_PCT = 5.0
 
 # Band width limits (as % of predicted price)
-_MIN_BAND_PCT = 0.5     # band cannot be tighter than 0.5% of price (was 0.3%)
-_MAX_BAND_PCT = 8.0      # band cannot be wider than 8% of price
+_MIN_BAND_PCT = 1.0      # band cannot be tighter than 1% of price
+_MAX_BAND_PCT = 10.0      # band cannot be wider than 10% of price
 
-# Horizon-aware band deviation envelope (shared formula used by ML ensemble & guardrails).
+# Horizon-aware band deviation envelope (shared formula used by guardrails).
 # Returns the max allowed deviation (as a fraction) from predicted price for bands.
 def _band_envelope_pct(horizon_idx: int) -> float:
-    """Max band deviation at a given horizon step (fraction, e.g. 0.015 = 1.5%)."""
-    return min(0.05, 0.015 + 0.002 * horizon_idx)
+    """Max band deviation at a given horizon step (fraction, e.g. 0.02 = 2%)."""
+    return min(0.08, 0.02 + 0.003 * horizon_idx)
 
 # Overconfidence thresholds
 _OVERCONFIDENCE_THRESHOLD = 0.92   # individual agents

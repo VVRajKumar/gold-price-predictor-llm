@@ -135,7 +135,7 @@ class AccuracyTracker:
                     continue
 
                 min_half = predicted * _band_envelope_pct(h)
-                current_half = (high - low) / 2.0
+                current_half = abs(high - low) / 2.0
 
                 if current_half < min_half:
                     dp["low_range"] = round(predicted - min_half, 2)
@@ -525,7 +525,7 @@ class AccuracyTracker:
         # (not limited to the recent_hours window) so "Unique Hours"
         # reflects all hours we have ever predicted and scored.
         all_hours_set: set[str] = set()
-        all_dates_set: set[object] = set()
+        all_dates_set: set[datetime.date] = set()
         for ev in self._log:
             for d in ev.get("daily_results", []):
                 date_key = d.get("date", "")

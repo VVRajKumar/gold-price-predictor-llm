@@ -29,11 +29,13 @@ if "src" in sys.modules:
 try:
     from src.prediction_engine import PredictionEngine
     from src.time_utils import now_ist, parse_iso_to_ist
+    from src.accuracy_tracker import compute_accuracy_score
 except (KeyError, ImportError, AttributeError):
     for _k in [k for k in list(sys.modules) if k == "src" or k.startswith("src.")]:
         del sys.modules[_k]
     from src.prediction_engine import PredictionEngine
     from src.time_utils import now_ist, parse_iso_to_ist
+    from src.accuracy_tracker import compute_accuracy_score
 
 # ── Page config ──────────────────────────────────────────────────────
 st.set_page_config(
@@ -120,18 +122,6 @@ def _compute_directional_accuracy(data: pd.DataFrame) -> float:
     return round(correct / total * 100, 1) if total > 0 else 50.0
 
 
-def _compute_accuracy_score(mape: float, band_hit: float, direction: float) -> float:
-    """Compute a composite accuracy score (0–100).
-
-    Combines three independent quality dimensions:
-      • MAPE score (40%): 100 when MAPE=0%, 0 when MAPE≥10%
-      • Band Hit Rate (35%): directly used
-      • Directional Accuracy (25%): directly used
-    """
-    mape_score = max(0.0, min(100.0, 100 - mape * 10))
-    return round(mape_score * 0.40 + band_hit * 0.35 + direction * 0.25, 1)
-
-
 # Convert to DataFrame
 df = pd.DataFrame(archive)
 df["date"] = pd.to_datetime(df["date"], errors="coerce")
@@ -158,7 +148,7 @@ avg_mape = df["pct_error"].mean() if "pct_error" in df.columns else 0
 band_hit = (df["within_band"].sum() / len(df) * 100) if "within_band" in df.columns else 0
 avg_error = df["error"].abs().mean() if "error" in df.columns else 0
 dir_accuracy = _compute_directional_accuracy(df)
-overall_score = _compute_accuracy_score(avg_mape, band_hit, dir_accuracy)
+overall_score = compute_accuracy_score(avg_mape, band_hit, dir_accuracy)
 
 m1, m2, m3, m4, m5, m6, m7, m8 = st.columns(8)
 with m1:
@@ -344,7 +334,7 @@ daily_grouped = daily_summary.groupby("day").agg(
 daily_grouped["band_hit_rate"] = (daily_grouped["band_hits"] / daily_grouped["total"] * 100).round(1)
 daily_grouped["direction_accuracy"] = daily_grouped["day"].map(daily_dir_acc)
 daily_grouped["accuracy_score"] = daily_grouped.apply(
-    lambda r: _compute_accuracy_score(r["avg_mape"], r["band_hit_rate"], r["direction_accuracy"]),
+    lambda r: compute_accuracy_score(r["avg_mape"], r["band_hit_rate"], r["direction_accuracy"]),
     axis=1,
 )
 daily_grouped = daily_grouped.sort_values("day", ascending=False)

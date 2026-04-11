@@ -34,6 +34,26 @@ _HOURLY_SCORECARD_START = datetime(2026, 4, 4, 0, 0, 0)
 # is considered flat and the prediction is counted as directionally correct.
 _DIR_NEUTRAL_PCT = 0.01
 
+# ── Composite accuracy score weights & scaling ──────────────────────
+# MAPE score = max(0, 100 - MAPE * MAPE_SCALE_FACTOR).  A MAPE of 10%
+# maps to a score of 0; 0% maps to 100.
+MAPE_SCALE_FACTOR = 10
+MAPE_WEIGHT = 0.40
+BAND_HIT_WEIGHT = 0.35
+DIRECTION_WEIGHT = 0.25
+
+
+def compute_accuracy_score(mape: float, band_hit: float, direction: float) -> float:
+    """Composite accuracy score (0–100).
+
+    Combines three quality dimensions using the module-level weights:
+      • MAPE score (40%): 100 when MAPE=0%, 0 when MAPE≥10%
+      • Band Hit Rate (35%): percentage directly used
+      • Directional Accuracy (25%): percentage directly used
+    """
+    mape_score = max(0.0, min(100.0, 100 - mape * MAPE_SCALE_FACTOR))
+    return round(mape_score * MAPE_WEIGHT + band_hit * BAND_HIT_WEIGHT + direction * DIRECTION_WEIGHT, 1)
+
 # Bump this version string whenever guardrail parameters change.
 # Triggers a one-time rebase that retroactively widens bands on all stored
 # plans so accuracy metrics reflect the new parameters immediately.

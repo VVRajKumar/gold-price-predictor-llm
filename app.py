@@ -32,6 +32,7 @@ try:
     from src.prediction_engine import PredictionEngine
     from src.data_fetchers.market_data import MarketDataFetcher
     from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET
+    from src.accuracy_tracker import compute_accuracy_score
 except (KeyError, ImportError, AttributeError):
     # On Streamlit Cloud hot-reload the module cache can be in an inconsistent
     # state after the cleanup above.  Purge all stale src.* modules and retry.
@@ -41,6 +42,7 @@ except (KeyError, ImportError, AttributeError):
     from src.prediction_engine import PredictionEngine
     from src.data_fetchers.market_data import MarketDataFetcher
     from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET
+    from src.accuracy_tracker import compute_accuracy_score
 
 # ── Display-time name helpers ────────────────────────────────────────
 # Chart-friendly names (short labels for SHAP bar chart / table headers)
@@ -382,9 +384,8 @@ if _quick_agg and _quick_agg["total_predictions_evaluated"] > 0:
     _mape_icon = "🟢" if _mape < 2 else ("🟡" if _mape < 5 else "🔴")
     _hit_icon = "🟢" if _hit >= 80 else ("🟡" if _hit >= 60 else "🔴")
     _dir_icon = "🟢" if _dir >= 80 else ("🟡" if _dir >= 60 else "🔴")
-    # Composite accuracy score: MAPE (40%) + Band Hit (35%) + Direction (25%)
-    _mape_score = max(0.0, min(100.0, 100 - _mape * 10))
-    _acc_score = round(_mape_score * 0.40 + _hit * 0.35 + _dir * 0.25, 1)
+    # Composite accuracy score using shared function
+    _acc_score = compute_accuracy_score(_mape, _hit, _dir)
     _score_icon = "🟢" if _acc_score >= 75 else ("🟡" if _acc_score >= 50 else "🔴")
     st.markdown(
         f"""<div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);
@@ -966,9 +967,8 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         da_color = "🟢" if da >= 80 else ("🟡" if da >= 60 else "🔴")
         st.metric(f"{da_color} Direction Accuracy", f"{da:.0f}%")
     with m5:
-        # Composite accuracy score: MAPE (40%) + Band Hit (35%) + Direction (25%)
-        _sc_mape = max(0.0, min(100.0, 100 - mape * 10))
-        _sc_score = round(_sc_mape * 0.40 + hit * 0.35 + da * 0.25, 1)
+        # Composite accuracy score using shared function
+        _sc_score = compute_accuracy_score(mape, hit, da)
         _sc_icon = "🟢" if _sc_score >= 75 else ("🟡" if _sc_score >= 50 else "🔴")
         st.metric(f"{_sc_icon} Accuracy Score", f"{_sc_score:.0f}/100")
     with m6:

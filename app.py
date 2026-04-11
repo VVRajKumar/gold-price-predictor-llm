@@ -266,8 +266,14 @@ def outlook_emoji(outlook: str) -> str:
 # SIDEBAR
 # ════════════════════════════════════════════════════════════════════
 with st.sidebar:
-    st.title("🥇 Gold Predictor")
-    st.caption("Multi-Agent AI System")
+    st.markdown(
+        """<div style="text-align:center;padding:8px 0 2px 0;">
+        <span style="font-size:2.2rem;">🥇</span><br>
+        <span style="font-size:1.3rem;font-weight:700;letter-spacing:0.5px;">Gold Predictor</span><br>
+        <span style="font-size:0.8rem;color:#94a3b8;">Multi-Agent AI System</span>
+        </div>""",
+        unsafe_allow_html=True,
+    )
 
     view_mode = "Live Prediction"
 
@@ -289,19 +295,41 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-    st.markdown("### Agent Roster")
-    agent_names = [
-        "🌍 Geopolitics",
-        "📈 Trend Analysis",
-        "💰 ETF Flows",
-        "🏦 Macro Economics",
-        "🛢️ Oil & Energy",
-        "😨 Market Sentiment",
-        "📊 Technical Analysis",
-        "📜 Historical Patterns",
+
+    # ── Navigation ────────────────────────────────────────────────────
+    st.markdown(
+        '<span style="font-size:0.75rem;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Navigation</span>',
+        unsafe_allow_html=True,
+    )
+    st.page_link("app.py", label="🏠 Live Dashboard", icon=None)
+    st.page_link("pages/1_📜_Prediction_Archive.py", label="📜 Prediction Archive", icon=None)
+
+    st.divider()
+
+    # ── Agent roster as a compact styled grid ─────────────────────────
+    st.markdown(
+        '<span style="font-size:0.75rem;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Agent Roster</span>',
+        unsafe_allow_html=True,
+    )
+    _agent_list = [
+        ("🌍", "Geopolitics"),
+        ("📈", "Trend"),
+        ("💰", "ETF Flows"),
+        ("🏦", "Macro"),
+        ("🛢️", "Oil & Energy"),
+        ("😨", "Sentiment"),
+        ("📊", "Technical"),
+        ("📜", "Historical"),
     ]
-    for a in agent_names:
-        st.markdown(f"- {a}")
+    _agent_html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;">'
+    for _emoji, _name in _agent_list:
+        _agent_html += (
+            f'<div style="background:#16213e;border-radius:8px;padding:6px 10px;'
+            f'border:1px solid #2d3748;font-size:0.82rem;text-align:center;">'
+            f'{_emoji} {_name}</div>'
+        )
+    _agent_html += '</div>'
+    st.markdown(_agent_html, unsafe_allow_html=True)
 
     st.divider()
     st.caption(f"v1.0 · Updated {now_ist().strftime('%H:%M')}")
@@ -854,49 +882,57 @@ if _shap:
                 "For each upcoming hour, these are the top 3 factors pushing the price "
                 "up (↑ green) or down (↓ red)."
             )
-            # Show all 24 hours in a 3-column grid
-            cols_per_row = 3
-            for row_start in range(0, len(_hourly_shap), cols_per_row):
-                cols = st.columns(cols_per_row)
-                for ci, hd in enumerate(_hourly_shap[row_start:row_start + cols_per_row]):
-                    with cols[ci]:
-                        drivers_html = ""
-                        for d in hd.get("drivers", []):
-                            if isinstance(d, dict):
-                                color = "#00d4aa" if d["value"] > 0 else "#e74c3c"
-                                arrow = d["direction"]
-                                dname = _friendly(d["name"])
-                                drivers_html += (
-                                    f'<div style="margin:4px 0;">'
-                                    f'<span style="color:{color};font-weight:bold">{arrow}</span> '
-                                    f'{dname} '
-                                    f'<span style="color:{color}">({d["value"]:+.1f})</span>'
-                                    f'</div>'
-                                )
-                            else:
-                                # fallback for old string format — parse and rename
-                                import re as _re
-                                _m = _re.match(r'(\S+)\s+([↑↓])\s+\(([^)]+)\)', str(d))
-                                if _m:
-                                    _fn, _dir, _val = _m.groups()
-                                    _cval = float(_val)
-                                    _clr = '#00d4aa' if _cval > 0 else '#e74c3c'
+
+            def _render_shap_cards(shap_slice: list, cols_per_row: int = 3):
+                """Render a slice of hourly SHAP driver cards in a grid."""
+                for row_start in range(0, len(shap_slice), cols_per_row):
+                    cols = st.columns(cols_per_row)
+                    for ci, hd in enumerate(shap_slice[row_start:row_start + cols_per_row]):
+                        with cols[ci]:
+                            drivers_html = ""
+                            for d in hd.get("drivers", []):
+                                if isinstance(d, dict):
+                                    color = "#00d4aa" if d["value"] > 0 else "#e74c3c"
+                                    arrow = d["direction"]
+                                    dname = _friendly(d["name"])
                                     drivers_html += (
                                         f'<div style="margin:4px 0;">'
-                                        f'<span style="color:{_clr};font-weight:bold">{_dir}</span> '
-                                        f'{_friendly(_fn)} '
-                                        f'<span style="color:{_clr}">({_cval:+.1f})</span>'
+                                        f'<span style="color:{color};font-weight:bold">{arrow}</span> '
+                                        f'{dname} '
+                                        f'<span style="color:{color}">({d["value"]:+.1f})</span>'
                                         f'</div>'
                                     )
                                 else:
-                                    drivers_html += f'<div style="margin:4px 0;">{d}</div>'
-                        st.markdown(
-                            f'<div class="metric-card">'
-                            f'<h4 style="margin-bottom:8px">Hour {hd["hour"]}</h4>'
-                            f'{drivers_html}'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
+                                    import re as _re
+                                    _m = _re.match(r'(\S+)\s+([↑↓])\s+\(([^)]+)\)', str(d))
+                                    if _m:
+                                        _fn, _dir, _val = _m.groups()
+                                        _cval = float(_val)
+                                        _clr = '#00d4aa' if _cval > 0 else '#e74c3c'
+                                        drivers_html += (
+                                            f'<div style="margin:4px 0;">'
+                                            f'<span style="color:{_clr};font-weight:bold">{_dir}</span> '
+                                            f'{_friendly(_fn)} '
+                                            f'<span style="color:{_clr}">({_cval:+.1f})</span>'
+                                            f'</div>'
+                                        )
+                                    else:
+                                        drivers_html += f'<div style="margin:4px 0;">{d}</div>'
+                            st.markdown(
+                                f'<div class="metric-card">'
+                                f'<h4 style="margin-bottom:8px">Hour {hd["hour"]}</h4>'
+                                f'{drivers_html}'
+                                f'</div>',
+                                unsafe_allow_html=True,
+                            )
+
+            # Show first 6 hours directly, hide the rest behind "Show More"
+            _SHAP_PREVIEW = 6
+            _render_shap_cards(_hourly_shap[:_SHAP_PREVIEW])
+
+            if len(_hourly_shap) > _SHAP_PREVIEW:
+                with st.expander(f"📊 Show Hours {_SHAP_PREVIEW + 1}–{len(_hourly_shap)}", expanded=False):
+                    _render_shap_cards(_hourly_shap[_SHAP_PREVIEW:])
 else:
     st.info("🔄 ML model explainability will appear after the first prediction cycle completes.")
 

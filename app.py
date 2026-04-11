@@ -282,15 +282,15 @@ with st.sidebar:
     st.divider()
 
     if is_market_open():
-        if st.button("🔄 Generate New Prediction", use_container_width=True, type="primary"):
+        if st.button("🔄 Generate New Prediction", width="stretch", type="primary"):
             with st.spinner("Running 8 specialist agents … this takes 1-2 minutes"):
                 plan = engine.generate()
             st.success("Prediction updated!")
             st.rerun()
     else:
-        st.button("🔄 Generate New Prediction", use_container_width=True, type="primary", disabled=True)
+        st.button("🔄 Generate New Prediction", width="stretch", type="primary", disabled=True)
         st.info("📅 Market closed — prices held flat at Friday's close.")
-        if st.button("🔄 Refresh Weekend Analysis", use_container_width=True, type="secondary"):
+        if st.button("🔄 Refresh Weekend Analysis", width="stretch", type="secondary"):
             with st.spinner("Running agents for fresh weekend news … this takes 1-2 minutes"):
                 try:
                     plan = engine.generate_weekend_analysis()
@@ -379,7 +379,7 @@ if view_mode == "Weekly Archive":
             "Anchor Price": f"₹{float(plan_dict.get('current_price', 0)):,.2f}",
         })
 
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
     for item in weekly_archive:
         plan_dict = item.get("plan", {})
@@ -398,7 +398,7 @@ if view_mode == "Weekly Archive":
                     adf["key_driver"] = adf["key_driver"].apply(lambda x: _clean_text(str(x)) if x else x)
                 st.dataframe(
                     adf[["date", "predicted_price", "low_range", "high_range", "confidence", "key_driver"]],
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
     st.stop()
@@ -465,11 +465,11 @@ if not gold_df.empty:
             type="category",
             nticks=10,
         ),
-        yaxis=dict(fixedrange=True, title="Price (₹/10g)", tickformat=","),
+        yaxis=dict(fixedrange=True, title="Price (₹/10g)"),
     )
     st.plotly_chart(
         fig_ohlc,
-        use_container_width=True,
+        width="stretch",
         config={
             "scrollZoom": False,
             "doubleClick": False,
@@ -701,12 +701,12 @@ if plan.daily_predictions:
 
     fig.update_layout(
         template="plotly_dark", height=500,
-        yaxis=dict(title="Price (₹/10g)", tickformat=","),
+        yaxis_title="Price (₹/10g)",
         xaxis_title="Time (IST)",
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
         hovermode="x unified",
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Daily breakdown table
     _display_df = pred_df[["date", "predicted_price", "low_range", "high_range", "confidence", "key_driver"]].copy()
@@ -743,7 +743,7 @@ if plan.daily_predictions:
             "High (₹)": "₹{:,.2f}",
             "Confidence": "{:.0%}",
         }),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 else:
@@ -843,7 +843,7 @@ if _shap:
             showlegend=False,
             margin=dict(l=10, r=20, t=10, b=40),
         )
-        st.plotly_chart(fig_shap, use_container_width=True)
+        st.plotly_chart(fig_shap, width="stretch")
 
         # Legend
         st.markdown(
@@ -975,7 +975,7 @@ if plan.agent_reports:
                 title="Agent Confidence Levels",
             )
             fig_conf.update_layout(template="plotly_dark", height=400)
-            st.plotly_chart(fig_conf, use_container_width=True)
+            st.plotly_chart(fig_conf, width="stretch")
 
         with col2:
             fig_bias = px.bar(
@@ -984,7 +984,7 @@ if plan.agent_reports:
                 title="Agent Prediction Bias (-1 Bearish → +1 Bullish)",
             )
             fig_bias.update_layout(template="plotly_dark", height=400)
-            st.plotly_chart(fig_bias, use_container_width=True)
+            st.plotly_chart(fig_bias, width="stretch")
 
     # Individual agent cards
     # Beginner-friendly labels for metric tooltips
@@ -1379,11 +1379,11 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                 template="plotly_dark", height=450,
                 yaxis_title="Price (₹/10g)", xaxis_title="Time",
                 xaxis=dict(rangebreaks=[dict(bounds=["sat", "mon"])]),
-                yaxis=dict(range=_y_range, tickformat=",") if _y_range else dict(tickformat=","),
+                yaxis=dict(range=_y_range) if _y_range else {},
                 legend=dict(orientation="h", yanchor="bottom", y=1.02),
                 hovermode="x unified",
         )
-        st.plotly_chart(fig_acc, use_container_width=True)
+        st.plotly_chart(fig_acc, width="stretch")
 
         # ── Hourly Accuracy Table ────────────────────────────────
         with st.expander("📋 Hourly Accuracy Breakdown", expanded=False):
@@ -1411,7 +1411,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                     "Error (₹)": "{:+,.2f}",
                     "Error (%)": "{:.2f}%",
                 }),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
 
@@ -1439,7 +1439,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                 st.dataframe(
                     trend_df[["Generated At Display", "Hours Checked", "MAE (₹)", "MAPE (%)", "Band Hit (%)", "Direction (%)"]]
                     .rename(columns={"Generated At Display": "Generated At"}),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
 
@@ -1497,10 +1497,10 @@ if len(history) > 1:
     ))
     fig_hist.update_layout(
         template="plotly_dark", height=350,
-        yaxis=dict(title="Gold Price (₹/10g)", tickformat=","),
+        yaxis=dict(title="Gold Price (₹/10g)"),
         yaxis2=dict(title="Confidence", overlaying="y", side="right", range=[0, 1]),
     )
-    st.plotly_chart(fig_hist, use_container_width=True)
+    st.plotly_chart(fig_hist, width="stretch")
 
 # ── Footer ───────────────────────────────────────────────────────────
 st.divider()

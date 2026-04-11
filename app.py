@@ -31,7 +31,7 @@ if "src" in sys.modules:
 try:
     from src.prediction_engine import PredictionEngine
     from src.data_fetchers.market_data import MarketDataFetcher
-    from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET
+    from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open
     from src.accuracy_tracker import compute_accuracy_score
 except (KeyError, ImportError, AttributeError):
     # On Streamlit Cloud hot-reload the module cache can be in an inconsistent
@@ -41,7 +41,7 @@ except (KeyError, ImportError, AttributeError):
         del sys.modules[_k]
     from src.prediction_engine import PredictionEngine
     from src.data_fetchers.market_data import MarketDataFetcher
-    from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET
+    from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open
     from src.accuracy_tracker import compute_accuracy_score
 
 # ── Display-time name helpers ────────────────────────────────────────
@@ -225,6 +225,16 @@ with st.sidebar:
 # ════════════════════════════════════════════════════════════════════
 st.title("🥇 Indian Gold Price Prediction System (₹/10g)")
 st.caption("ML Ensemble (XGBoost + LightGBM + Ridge) · LLM for narrative only · SHAP explainability")
+
+# Weekend market-closed notice
+if not is_market_open():
+    _day_name = now_ist().strftime("%A")
+    st.warning(
+        f"📅 **Gold market is closed today ({_day_name}).** "
+        f"COMEX and MCX gold markets do not trade on weekends. "
+        f"Prices shown are from the last trading session (Friday). "
+        f"New predictions will resume automatically on Monday."
+    )
 
 if view_mode == "Weekly Archive":
     st.subheader("🗂️ Weekly Prediction Archive")

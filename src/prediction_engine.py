@@ -26,6 +26,7 @@ from . import cloud_storage
 from .time_utils import (
     iso_now_ist, now_ist,
     current_slot_ist, next_slot_ist, slot_id,
+    is_market_open, next_market_open_ist,
 )
 
 
@@ -212,9 +213,22 @@ class PredictionEngine:
         A new prediction is only generated when:
           - No plan exists at all
           - The current plan belongs to a different 6-hour slot
-        This prevents multiple redundant predictions on every session launch.
+        On weekends (Saturday/Sunday IST) the gold market is closed, so no new
+        prediction is generated — the most recent weekday plan is returned instead.
         """
         with self._lock:
+            # Skip automatic generation on weekends (market closed)
+            if not is_market_open():
+                if self._current_plan is not None:
+                    logger.info(
+                        "Weekend (market closed) — returning last weekday prediction"
+                    )
+                    return self._current_plan
+                logger.info(
+                    "Weekend (market closed) and no cached plan — skipping generation"
+                )
+                return None
+
             needs_generation = self._current_plan is None
             if self._current_plan is not None:
                 try:
@@ -290,7 +304,8 @@ class PredictionEngine:
         """Start a background thread that regenerates predictions on 6-hour slot boundaries.
 
         Predictions are aligned to 00:00, 06:00, 12:00, 18:00 IST.
-        The thread sleeps until the next slot boundary, then generates.
+        On weekends (Saturday/Sunday IST) the thread sleeps until Monday
+        since the gold market is closed and prices do not change.
         """
         if self._running:
             return
@@ -299,9 +314,24 @@ class PredictionEngine:
         def _loop():
             while self._running:
                 try:
+                    now = now_ist()
+
+                    # If it's a weekend, sleep until Monday 00:00 IST
+                    if not is_market_open(now):
+                        next_open = next_market_open_ist(now)
+                        wait_seconds = max(60, (next_open - now).total_seconds() + 30)
+                        logger.info(
+                            f"Auto-refresh: market closed (weekend) — sleeping until "
+                            f"{next_open.strftime('%H:%M %b %d')} IST "
+                            f"({wait_seconds / 3600:.1f} hours)"
+                        )
+                        time.sleep(wait_seconds)
+                        if not self._running:
+                            break
+                        continue
+
                     # Sleep until the next 6-hour slot boundary
                     next_slot = next_slot_ist()
-                    now = now_ist()
                     wait_seconds = max(60, (next_slot - now).total_seconds() + 30)
                     logger.info(
                         f"Auto-refresh: next prediction at {next_slot.strftime('%H:%M %b %d')} IST "
@@ -317,7 +347,7 @@ class PredictionEngine:
 
         t = threading.Thread(target=_loop, daemon=True, name="prediction-refresh")
         t.start()
-        logger.info("Auto-refresh started — aligned to 6-hour IST slots (00:00, 06:00, 12:00, 18:00)")
+        logger.info("Auto-refresh started — aligned to 6-hour IST slots (00:00, 06:00, 12:00, 18:00), weekends skipped")
 
     def stop_auto_refresh(self):
         self._running = False

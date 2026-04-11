@@ -401,13 +401,25 @@ class AccuracyTracker:
             pass
         current_price = plan_dict.get("current_price", 0)
 
-        # Fetch recent actual gold prices on hourly candles and convert to INR/10g
-        gold_df = self._market.fetch_ticker("GC=F", period_days=10, interval="1h")
+        # Fetch recent actual gold prices on hourly candles
+        # Try MCX first (native INR/10g), fall back to COMEX + conversion
+        gold_df = self._market.fetch_ticker("GOLD.NS", period_days=10, interval="1h")
+        _eval_source = "MCX"
+        if gold_df.empty or ("Close" in gold_df and
+                pd.to_numeric(gold_df["Close"].squeeze(), errors="coerce").dropna().empty):
+            gold_df = self._market.fetch_ticker("GC=F", period_days=10, interval="1h")
+            _eval_source = "COMEX"
+        elif ("Close" in gold_df and
+                float(pd.to_numeric(gold_df["Close"].squeeze(), errors="coerce").dropna().iloc[-1]) < 10_000):
+            gold_df = self._market.fetch_ticker("GC=F", period_days=10, interval="1h")
+            _eval_source = "COMEX"
         if gold_df.empty:
             return None
 
-        # Use time-aligned daily FX rates for accurate conversion
-        gold_df = self._market.convert_usd_to_inr(gold_df, period_days=15)
+        # Only convert if COMEX data (MCX is already INR/10g)
+        if _eval_source == "COMEX":
+            # Use time-aligned daily FX rates for accurate conversion
+            gold_df = self._market.convert_usd_to_inr(gold_df, period_days=15)
 
         # Convert gold data index from UTC to IST.
         # yfinance returns UTC timestamps (tz-stripped via tz_convert(None)).

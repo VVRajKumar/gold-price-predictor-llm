@@ -289,15 +289,24 @@ plan = engine.get_current_plan()
 
 # Always keep the live OHLC chart visible.
 st.subheader("🕯️ Live Indian Gold OHLC (10D) – INR/10g")
-gold_df = market.fetch_ticker("GC=F", period_days=10, interval="1h")
+# Try MCX gold first (native INR/10g), fall back to COMEX + FX conversion
+gold_df = market.fetch_ticker("GOLD.NS", period_days=10, interval="1h")
+_ohlc_source = "MCX (GOLD.NS)"
+if gold_df.empty or ("Close" in gold_df and pd.to_numeric(gold_df["Close"].squeeze(), errors="coerce").dropna().empty):
+    gold_df = market.fetch_ticker("GC=F", period_days=10, interval="1h")
+    _ohlc_source = "COMEX (GC=F) + FX"
+elif "Close" in gold_df and float(pd.to_numeric(gold_df["Close"].squeeze(), errors="coerce").dropna().iloc[-1]) < 10_000:
+    gold_df = market.fetch_ticker("GC=F", period_days=10, interval="1h")
+    _ohlc_source = "COMEX (GC=F) + FX"
 if not gold_df.empty:
     if isinstance(gold_df.index, pd.DatetimeIndex):
         latest_ts = gold_df.index.max()
         cutoff_ts = latest_ts - pd.Timedelta(days=10)
         gold_df = gold_df[gold_df.index >= cutoff_ts]
 
-    # Convert USD/oz to INR/10g using time-aligned daily FX rates
-    gold_df = market.convert_usd_to_inr(gold_df, period_days=10)
+    # Convert USD/oz to INR/10g only if COMEX data (MCX is already INR)
+    if _ohlc_source != "MCX (GOLD.NS)":
+        gold_df = market.convert_usd_to_inr(gold_df, period_days=10)
 
     # Convert index from UTC to IST so charts align with IST predictions
     if isinstance(gold_df.index, pd.DatetimeIndex) and not gold_df.empty:

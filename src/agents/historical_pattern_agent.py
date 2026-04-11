@@ -47,7 +47,15 @@ Return ONLY valid JSON, no markdown fences."""
         self._market = MarketDataFetcher()
 
     def gather_data(self) -> dict[str, Any]:
-        df = self._market.fetch_ticker("GC=F", period_days=365)
+        # Try MCX first, fall back to COMEX
+        df = self._market.fetch_ticker("GOLD.NS", period_days=365)
+        data_source = "MCX (GOLD.NS)"
+        if df.empty:
+            df = self._market.fetch_ticker("GC=F", period_days=365)
+            data_source = "COMEX (GC=F)"
+        elif float(pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna().iloc[-1]) < 10_000:
+            df = self._market.fetch_ticker("GC=F", period_days=365)
+            data_source = "COMEX (GC=F)"
         if df.empty:
             return {"error": "No data"}
 

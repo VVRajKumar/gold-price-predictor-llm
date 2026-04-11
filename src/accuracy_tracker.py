@@ -19,7 +19,7 @@ from loguru import logger
 
 from .config import CACHE_DIR
 from .data_fetchers.market_data import MarketDataFetcher
-from .time_utils import iso_now_ist, now_ist
+from .time_utils import iso_now_ist, now_ist, IST_OFFSET
 from . import cloud_storage
 
 
@@ -36,7 +36,7 @@ _DIR_NEUTRAL_PCT = 0.01
 # Bump this version string whenever guardrail parameters change.
 # Triggers a one-time rebase that retroactively widens bands on all stored
 # plans so accuracy metrics reflect the new parameters immediately.
-_GUARDRAIL_VERSION = "v4_tighter_bands_20260410"
+_GUARDRAIL_VERSION = "v5_ist_timezone_fix_20260411"
 
 
 class AccuracyTracker:
@@ -272,6 +272,18 @@ class AccuracyTracker:
 
         # Use time-aligned daily FX rates for accurate conversion
         gold_df = self._market.convert_usd_to_inr(gold_df, period_days=15)
+
+        # Convert gold data index from UTC to IST.
+        # yfinance returns UTC timestamps (tz-stripped via tz_convert(None)).
+        # Prediction timestamps are in IST, so we must align the index.
+        # After adding the IST offset, floor to the nearest hour so each
+        # UTC candle maps to a unique IST hour (max 30-min rounding error).
+        if not gold_df.empty and isinstance(gold_df.index, pd.DatetimeIndex):
+            gold_df.index = gold_df.index + pd.Timedelta(IST_OFFSET)
+            gold_df.index = gold_df.index.floor("h")
+            # Drop duplicate hours that may arise from rounding
+            gold_df = gold_df[~gold_df.index.duplicated(keep="last")]
+
         close = gold_df["Close"].squeeze()
         if isinstance(close, pd.DataFrame):
             close = close.iloc[:, 0]
@@ -318,6 +330,7 @@ class AccuracyTracker:
                 "error": round(error, 2),
                 "pct_error": round(pct_error, 2),
                 "within_band": within_band,
+                "plan_generated_at": generated_at,
             })
 
         if not evaluated_days:
@@ -395,11 +408,30 @@ class AccuracyTracker:
         return result
 
     def _get_actual_price(self, close_series: pd.Series, target_date) -> Optional[float]:
-        """Get the close for a target hour, checking prior hours for missing bars.
+        """Get the close for a target hour, using nearest-match with fallback.
 
-        Extends lookback up to 72 hours to handle weekends and market holidays
-        (e.g., Good Friday, Christmas) where no candles are available.
+        First tries nearest candle within 90 minutes (handles the 30-minute
+        IST offset from UTC candle boundaries).  Falls back to stepping
+        backwards hour-by-hour for up to 72 hours to handle weekends and
+        market holidays (e.g., Good Friday, Christmas).
         """
+        if close_series.empty:
+            return None
+
+        target = pd.Timestamp(target_date)
+
+        # 1. Try nearest candle within 90 minutes
+        try:
+            diffs = abs(close_series.index - target)
+            nearest_pos = diffs.argmin()
+            if diffs[nearest_pos] <= pd.Timedelta(minutes=90):
+                val = close_series.iloc[nearest_pos]
+                if pd.notna(val):
+                    return float(val)
+        except Exception:
+            pass
+
+        # 2. Fallback: step back hour-by-hour (weekends/holidays)
         for offset in range(0, 73):
             check = target_date - timedelta(hours=offset)
             idx = pd.Timestamp(check)
@@ -428,8 +460,9 @@ class AccuracyTracker:
             being diluted by hundreds of old, potentially poor predictions.
 
         Deduplication: when multiple plans predict the same hour, the
-        prediction that is **within the band** is preferred; among same-
-        band-status predictions the one with the lowest error % wins.
+        prediction from the plan generated **most recently before** that
+        hour is used.  This is the fairest approach because that plan had
+        the freshest market information at generation time.
 
         Directional accuracy is computed hour-over-hour from the
         deduplicated series (consistent with MAPE / MAE / Band Hit).
@@ -440,9 +473,13 @@ class AccuracyTracker:
         now_ts = now_ist().replace(minute=0, second=0, microsecond=0).replace(tzinfo=None)
         cutoff = now_ts - timedelta(hours=recent_hours)
 
-        # Collect all results keyed by predicted hour
+        # Collect all results keyed by predicted hour.
+        # For dedup: use the prediction from the most recently generated
+        # plan (closest to but before the predicted hour).  This avoids
+        # cherry-picking the best result from overlapping forecasts.
         by_date: dict = {}
         for ev in self._log:
+            plan_gen = ev.get("plan_generated_at", "")
             for d in ev.get("daily_results", []):
                 date_key = d.get("date", "")
 
@@ -454,15 +491,23 @@ class AccuracyTracker:
                 if d_ts < cutoff:
                     continue
 
-                # Prefer within-band predictions, then lowest pct_error.
-                # Tuple comparison: (False, err) < (True, err) so in-band
-                # predictions sort before out-of-band ones.
-                new_score = (not d.get("within_band", False), d.get("pct_error", float("inf")))
+                # Determine which plan generated this prediction
+                gen_at = d.get("plan_generated_at", plan_gen)
+
+                # Pick the most recently generated plan for each hour.
+                # Parse generation timestamps; prefer the one closest to
+                # (but before) the predicted hour.
                 if date_key in by_date:
                     old = by_date[date_key]
-                    old_score = (not old.get("within_band", False), old.get("pct_error", float("inf")))
-                    if new_score < old_score:
-                        by_date[date_key] = d
+                    old_gen = old.get("plan_generated_at", "")
+                    try:
+                        new_gen_dt = datetime.fromisoformat(str(gen_at)).replace(tzinfo=None)
+                        old_gen_dt = datetime.fromisoformat(str(old_gen)).replace(tzinfo=None)
+                        # Prefer more recent plan (closer to the predicted hour)
+                        if new_gen_dt > old_gen_dt:
+                            by_date[date_key] = d
+                    except (ValueError, TypeError):
+                        pass  # keep existing if we can't parse
                 else:
                     by_date[date_key] = d
 

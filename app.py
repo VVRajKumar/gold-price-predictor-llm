@@ -31,7 +31,7 @@ if "src" in sys.modules:
 try:
     from src.prediction_engine import PredictionEngine
     from src.data_fetchers.market_data import MarketDataFetcher
-    from src.time_utils import now_ist, parse_iso_to_ist
+    from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET
 except KeyError:
     # On Streamlit Cloud hot-reload the module cache can be in an inconsistent
     # state after the cleanup above.  A second import attempt resolves it.
@@ -40,7 +40,7 @@ except KeyError:
         importlib.reload(sys.modules["src"])
     from src.prediction_engine import PredictionEngine
     from src.data_fetchers.market_data import MarketDataFetcher
-    from src.time_utils import now_ist, parse_iso_to_ist
+    from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET
 
 # ── Display-time name helpers ────────────────────────────────────────
 # Chart-friendly names (short labels for SHAP bar chart / table headers)
@@ -137,11 +137,17 @@ accuracy_tracker = engine.get_accuracy_tracker()
 
 # Streamlit can sometimes keep a stale cached engine object across hot reloads.
 # If weekly API is missing or market fetcher lacks INR helpers, rebuild once.
-if not hasattr(engine, "ensure_weekly_prediction") or not hasattr(market, "convert_usd_to_inr"):
+if not hasattr(engine, "ensure_hourly_prediction") or not hasattr(market, "convert_usd_to_inr"):
     st.cache_resource.clear()
     engine = get_engine()
     market = get_market()
     accuracy_tracker = engine.get_accuracy_tracker()
+
+# Start background auto-refresh thread so predictions are regenerated at
+# each 6-hour IST slot boundary (00:00, 06:00, 12:00, 18:00) even if
+# the user hasn't refreshed the page.  The method is a no-op if already
+# running, so repeated Streamlit script re-runs are safe.
+engine.start_auto_refresh()
 
 
 def outlook_color(outlook: str) -> str:
@@ -237,16 +243,11 @@ if view_mode == "Weekly Archive":
 
 # MAIN DASHBOARD
 # ════════════════════════════════════════════════════════════════════
-# Don't auto-generate on every session launch.
-# Show the cached plan; only generate if no plan exists at all or the
-# 6-hour slot has changed (ensure_hourly_prediction handles this check).
+# Don't auto-generate on every page visit — just show the cached plan.
+# New predictions are created either:
+#   1. By the background auto-refresh thread (every 6-hour IST slot), or
+#   2. When the user clicks "Generate New Prediction" in the sidebar.
 plan = engine.get_current_plan()
-if plan is None:
-    # No cached plan at all — need at least one prediction
-    if hasattr(engine, "ensure_weekly_prediction"):
-        plan = engine.ensure_weekly_prediction()
-    else:
-        plan = engine.get_current_plan()
 
 # Always keep the live OHLC chart visible.
 st.subheader("🕯️ Live Indian Gold OHLC (10D) – INR/10g")
@@ -259,6 +260,12 @@ if not gold_df.empty:
 
     # Convert USD/oz to INR/10g using time-aligned daily FX rates
     gold_df = market.convert_usd_to_inr(gold_df, period_days=10)
+
+    # Convert index from UTC to IST so charts align with IST predictions
+    if isinstance(gold_df.index, pd.DatetimeIndex) and not gold_df.empty:
+        gold_df.index = gold_df.index + pd.Timedelta(IST_OFFSET)
+        gold_df.index = gold_df.index.floor("h")
+        gold_df = gold_df[~gold_df.index.duplicated(keep="last")]
 
     range_start = gold_df.index.min()
     range_end = gold_df.index.max()
@@ -936,7 +943,11 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
     # Collect all evaluated hourly results from every plan.
     all_daily = []
     for ev in all_evals:
+        _plan_gen = ev.get("plan_generated_at", "")
         for d in ev.get("daily_results", []):
+            # Ensure plan_generated_at is available for fair dedup
+            if "plan_generated_at" not in d:
+                d = dict(d, plan_generated_at=_plan_gen)
             all_daily.append(d)
 
     if all_daily:
@@ -944,14 +955,19 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         acc_df["date"] = pd.to_datetime(acc_df["date"])
 
         # When multiple predictions cover the same hour (from overlapping
-        # 24-hour forecasts), prefer within-band predictions first, then
-        # pick the lowest error %.  This ensures band-hit metrics and the
-        # chart stay consistent, and avoids penalising band_hit_rate by
-        # selecting a tight-band miss over a wider-band hit.
-        acc_df["_outside"] = ~acc_df["within_band"]
-        acc_df = acc_df.sort_values(["date", "_outside", "pct_error"])
-        acc_df = acc_df.drop_duplicates(subset="date", keep="first")
-        acc_df = acc_df.drop(columns=["_outside"])
+        # 24-hour forecasts), use the prediction from the most recently
+        # generated plan.  This is fair — the most recent plan had the
+        # freshest information.  Previous approach cherry-picked the best
+        # result, inflating metrics.
+        if "plan_generated_at" in acc_df.columns:
+            acc_df["_gen_at"] = pd.to_datetime(acc_df["plan_generated_at"], errors="coerce")
+            acc_df = acc_df.sort_values(["date", "_gen_at"], ascending=[True, False])
+            acc_df = acc_df.drop_duplicates(subset="date", keep="first")
+            acc_df = acc_df.drop(columns=["_gen_at"], errors="ignore")
+        else:
+            # Fallback if no plan_generated_at (old data)
+            acc_df = acc_df.sort_values(["date", "pct_error"])
+            acc_df = acc_df.drop_duplicates(subset="date", keep="first")
         acc_df = acc_df.sort_values("date")
 
         fig_acc = go.Figure()
@@ -1021,6 +1037,9 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         with st.expander("📋 Hourly Accuracy Breakdown", expanded=False):
             display_df = acc_df[["date", "predicted", "actual", "low_range",
                                  "high_range", "error", "pct_error", "within_band"]].copy()
+            # Sort chronologically (oldest → newest) so the table reads
+            # in natural time order instead of an arbitrary insertion order.
+            display_df = display_df.sort_values("date")
             display_df = display_df.rename(columns={
                 "date": "Hour",
                 "predicted": "Predicted (₹)",

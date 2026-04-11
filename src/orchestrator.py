@@ -34,7 +34,7 @@ from .agents.technical_agent import TechnicalAnalysisAgent
 from .agents.historical_pattern_agent import HistoricalPatternAgent
 from .data_fetchers.market_data import MarketDataFetcher
 from .guardrails import validate_prediction_plan, adjust_confidence_from_track_record
-from .time_utils import iso_now_ist, now_ist
+from .time_utils import iso_now_ist, now_ist, current_slot_ist, SLOT_HOURS
 from .ml_ensemble import MLEnsemble
 from .signal_extractor import extract_signals
 from .narrator import LLMNarrator, compute_ml_confidence
@@ -399,7 +399,14 @@ class Orchestrator:
 
         # 8. Assemble PredictionPlan
         #    Prices come from ML, narrative from LLM
-        start_hour = now_ist().replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        #    Align prediction hours to the 6-hour slot boundary (00, 06, 12, 18 IST)
+        #    so different plans generated within the same slot produce the same hour grid.
+        slot_start = current_slot_ist().replace(tzinfo=None)
+        now = now_ist().replace(tzinfo=None)
+        # Start from slot boundary + 1h, but never predict hours already past
+        slot_start_hour = slot_start.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        now_start_hour = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        start_hour = max(slot_start_hour, now_start_hour)
         target_times = [start_hour + timedelta(hours=i) for i in range(PREDICTION_HOURS)]
         hourly_drivers = narrative.get("hourly_drivers", [])
 

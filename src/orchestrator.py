@@ -581,7 +581,21 @@ class Orchestrator:
             )
         except (AttributeError, TypeError) as e:
             logger.error(f"Weekend narrator failed (stale cache?): {e}")
-            narrative = LLMNarrator._weekend_defaults()
+            narrative = {
+                "overall_outlook": "neutral",
+                "executive_summary": (
+                    "🔍 What's Happening: The gold market is closed for the weekend. "
+                    "No trading activity is taking place.\n"
+                    "📊 Why It Matters: Weekend developments could affect Monday's opening price.\n"
+                    "👀 What to Watch on Monday: Monitor any geopolitical or economic news "
+                    "that emerged over the weekend."
+                ),
+                "bull_case": "Not available — weekend analysis could not be generated.",
+                "bear_case": "Not available — weekend analysis could not be generated.",
+                "risk_factors": [
+                    "Weekend geopolitical developments could cause a gap at Monday's open"
+                ],
+            }
 
         # Build or update the plan
         if existing_plan is not None:

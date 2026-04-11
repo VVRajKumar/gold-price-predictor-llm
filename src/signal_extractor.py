@@ -122,12 +122,12 @@ def extract_signals(agent_reports: dict[str, dict]) -> dict[str, float]:
     # ── Sentiment ────────────────────────────────────────────────
     sent = agent_reports.get("sentiment_agent", {})
     if sent:
-        news_score = _safe_float(sent.get("data_points", {}).get("sentiment_score"))
+        news_score = _safe_float(sent.get("data_points", {}).get("news_sentiment_score"))
         fg = _FEAR_GREED_MAP.get(
             str(sent.get("data_points", {}).get("fear_greed_level", "neutral")).lower(), 0.0
         )
         if news_score != 0.0:
-            signals["sentiment_score"] = max(-1, min(1, 0.6 * news_score + 0.4 * fg))
+            signals["sentiment_score"] = max(-1.0, min(1.0, 0.6 * news_score + 0.4 * fg))
         else:
             signals["sentiment_score"] = _generic_signal(sent)
     else:
@@ -139,9 +139,12 @@ def extract_signals(agent_reports: dict[str, dict]) -> dict[str, float]:
         # Impact score (0-1) already captures how much geopolitics matters right now
         impact = _safe_float(geo.get("impact_score"), 0.5)
         outlook = _OUTLOOK_MAP.get(str(geo.get("outlook", "neutral")).lower(), 0.0)
-        # geopolitical_risk: 0 = calm, 1 = high tension
-        # bullish outlook + high impact → gold demand from risk → higher risk score
-        signals["geopolitical_risk"] = max(0, min(1, impact * (0.5 + 0.5 * max(outlook, 0)) if outlook else impact))
+        bias = _safe_float(geo.get("prediction_bias"), 0.0)
+        # geopolitical_risk: 0 = calm, 1 = high tension (gold-supportive)
+        # bullish outlook + positive bias → elevated risk → safe-haven gold demand
+        # neutral → moderate risk, bearish → reduced risk signal
+        direction_factor = 0.5 + 0.25 * outlook + 0.25 * bias
+        signals["geopolitical_risk"] = max(0.0, min(1.0, impact * direction_factor))
     else:
         signals["geopolitical_risk"] = 0.3  # mild baseline
 
@@ -152,7 +155,10 @@ def extract_signals(agent_reports: dict[str, dict]) -> dict[str, float]:
         rbi = _RBI_OUTLOOK_MAP.get(str(dp.get("rbi_rate_outlook", "holding")).lower(), 0.0)
         infl = _INFLATION_MAP.get(str(dp.get("inflation_trend", "stable")).lower(), 0.0)
         inr = _INR_OUTLOOK_MAP.get(str(dp.get("inr_outlook", "stable")).lower(), 0.0)
-        signals["macro_outlook"] = max(-1, min(1, rbi + infl + inr))
+        bias = _safe_float(macro.get("prediction_bias"), 0.0)
+        # Blend structured data (RBI + inflation + INR) with LLM's prediction bias
+        structured = rbi + infl + inr
+        signals["macro_outlook"] = max(-1.0, min(1.0, 0.6 * structured + 0.4 * bias))
     else:
         signals["macro_outlook"] = _generic_signal(macro) if macro else 0.0
 
@@ -164,7 +170,7 @@ def extract_signals(agent_reports: dict[str, dict]) -> dict[str, float]:
         rsi_val = _RSI_MAP.get(str(sigs.get("rsi", "neutral")).lower(), 0.0)
         macd_val = _MACD_MAP.get(str(sigs.get("macd", "neutral")).lower(), 0.0)
         bias = _safe_float(tech.get("prediction_bias"), 0.0)
-        signals["technical_signal"] = max(-1, min(1, 0.3 * rsi_val + 0.3 * macd_val + 0.4 * bias))
+        signals["technical_signal"] = max(-1.0, min(1.0, 0.3 * rsi_val + 0.3 * macd_val + 0.4 * bias))
     else:
         signals["technical_signal"] = 0.0
 
@@ -176,7 +182,7 @@ def extract_signals(agent_reports: dict[str, dict]) -> dict[str, float]:
             str(dp.get("institutional_demand", "neutral")).lower(), 0.0
         )
         bias = _safe_float(etf.get("prediction_bias"), 0.0)
-        signals["etf_flow_signal"] = max(-1, min(1, 0.5 * inst + 0.5 * bias))
+        signals["etf_flow_signal"] = max(-1.0, min(1.0, 0.5 * inst + 0.5 * bias))
     else:
         signals["etf_flow_signal"] = 0.0
 
@@ -188,7 +194,7 @@ def extract_signals(agent_reports: dict[str, dict]) -> dict[str, float]:
             str(dp.get("energy_inflation_risk", "moderate")).lower(), 0.0
         )
         bias = _safe_float(oil.get("prediction_bias"), 0.0)
-        signals["oil_energy_signal"] = max(-1, min(1, 0.4 * energy_risk + 0.6 * bias))
+        signals["oil_energy_signal"] = max(-1.0, min(1.0, 0.4 * energy_risk + 0.6 * bias))
     else:
         signals["oil_energy_signal"] = 0.0
 
@@ -200,7 +206,7 @@ def extract_signals(agent_reports: dict[str, dict]) -> dict[str, float]:
             str(dp.get("seasonal_bias", "neutral")).lower(), 0.0
         )
         bias = _safe_float(hist.get("prediction_bias"), 0.0)
-        signals["historical_seasonal"] = max(-1, min(1, 0.5 * seasonal + 0.5 * bias))
+        signals["historical_seasonal"] = max(-1.0, min(1.0, 0.5 * seasonal + 0.5 * bias))
     else:
         signals["historical_seasonal"] = 0.0
 
@@ -212,8 +218,9 @@ def extract_signals(agent_reports: dict[str, dict]) -> dict[str, float]:
             str(dp.get("trend_strength", "moderate")).lower(), 0.5
         )
         outlook_val = _OUTLOOK_MAP.get(str(trend.get("outlook", "neutral")).lower(), 0.0)
-        # Combine: direction (outlook) × magnitude (strength)
-        signals["trend_strength"] = max(-1, min(1, outlook_val * strength))
+        bias = _safe_float(trend.get("prediction_bias"), 0.0)
+        # Combine: direction (outlook) × magnitude (strength), blended with bias
+        signals["trend_strength"] = max(-1.0, min(1.0, 0.6 * (outlook_val * strength) + 0.4 * bias))
     else:
         signals["trend_strength"] = 0.0
 

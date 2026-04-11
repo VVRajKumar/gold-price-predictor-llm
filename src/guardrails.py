@@ -48,6 +48,9 @@ _OVERCONFIDENCE_THRESHOLD = 0.92   # individual agents
 _META_OVERCONFIDENCE_THRESHOLD = 0.88   # overall plan
 _CONFIDENCE_PENALTY = 0.15          # how much to penalise
 
+# Bias-outlook alignment: treat |bias| below this as "LLM didn't provide a real value"
+_BIAS_NEAR_ZERO = 0.05
+
 
 # ── Agent Report Guardrails ─────────────────────────────────────────
 
@@ -86,6 +89,16 @@ def validate_agent_report(report_dict: dict[str, Any], agent_name: str) -> dict[
     # ── Impact Score ──
     impact = _safe_float(report_dict.get("impact_score"), 0.5)
     impact = _clamp(impact, 0.0, 1.0)
+    # Floor: directional outlook with meaningful confidence should have
+    # a minimum impact score so the agent actually influences the forecast.
+    if outlook in ("bullish", "bearish") and confidence >= 0.3:
+        min_impact = round(confidence * 0.4, 3)
+        if impact < min_impact:
+            corrections.append(
+                f"impact_score {impact:.2f} too low for {outlook} outlook "
+                f"(conf={confidence:.2f}) → raised to {min_impact:.2f}"
+            )
+            impact = min_impact
     report_dict["impact_score"] = round(impact, 3)
 
     # ── Prediction Bias ──
@@ -93,13 +106,32 @@ def validate_agent_report(report_dict: dict[str, Any], agent_name: str) -> dict[
     bias = _clamp(bias, -1.0, 1.0)
     report_dict["prediction_bias"] = round(bias, 3)
 
-    # ── Bias-Outlook coherence ──
-    if outlook == "bullish" and bias < -0.3:
-        corrections.append(f"bias {bias:+.2f} contradicts bullish outlook → clamped to 0.0")
-        report_dict["prediction_bias"] = 0.0
-    elif outlook == "bearish" and bias > 0.3:
-        corrections.append(f"bias {bias:+.2f} contradicts bearish outlook → clamped to 0.0")
-        report_dict["prediction_bias"] = 0.0
+    # ── Bias-Outlook alignment ──
+    # When the outlook is directional but bias is missing / near-zero,
+    # infer a meaningful bias from the confidence so that the agent's
+    # opinion actually influences the ML ensemble.
+    if outlook == "bullish" and bias < _BIAS_NEAR_ZERO:
+        inferred = round(confidence * 0.6, 3)
+        if bias < -0.3:
+            corrections.append(
+                f"bias {bias:+.2f} contradicts bullish outlook → inferred +{inferred:.2f}"
+            )
+        else:
+            corrections.append(
+                f"bias {bias:+.2f} too low for bullish outlook → inferred +{inferred:.2f}"
+            )
+        report_dict["prediction_bias"] = inferred
+    elif outlook == "bearish" and bias > -_BIAS_NEAR_ZERO:
+        inferred = round(-confidence * 0.6, 3)
+        if bias > 0.3:
+            corrections.append(
+                f"bias {bias:+.2f} contradicts bearish outlook → inferred {inferred:+.2f}"
+            )
+        else:
+            corrections.append(
+                f"bias {bias:+.2f} too high for bearish outlook → inferred {inferred:+.2f}"
+            )
+        report_dict["prediction_bias"] = inferred
 
     if corrections:
         logger.warning(f"[guardrail:{agent_name}] Corrections: {'; '.join(corrections)}")

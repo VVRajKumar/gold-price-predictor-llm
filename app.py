@@ -89,6 +89,32 @@ def _clean_text(text: str) -> str:
         text = text.replace(code, friendly)
     return text
 
+
+def _text_to_bullets(text: str) -> str:
+    """Convert a paragraph-style summary into bullet points.
+
+    Splits on sentence boundaries (. followed by space/uppercase) and
+    returns an HTML unordered list.  If the text is already bullet-pointed
+    (contains '•' or '- ') it is returned as-is with minimal formatting.
+    """
+    if not text or not text.strip():
+        return text
+
+    # Already has bullet points – just return as-is
+    if "•" in text or re.search(r"(?m)^[-*]\s", text):
+        return text
+
+    # Split into sentences – handle common abbreviations to avoid false splits
+    sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', text.strip())
+    # Filter out empty sentences and very short fragments
+    sentences = [s.strip().rstrip('.') for s in sentences if s.strip() and len(s.strip()) > 10]
+
+    if len(sentences) <= 1:
+        # Single sentence – still show as a bullet for consistency
+        return f"• {text.strip()}"
+
+    return "\n".join(f"• {s.strip()}" for s in sentences)
+
 # ── Page config ──────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Indian Gold Price Predictor – Agentic AI",
@@ -190,9 +216,6 @@ with st.sidebar:
     for a in agent_names:
         st.markdown(f"- {a}")
 
-    st.divider()
-    st.markdown("📜 **[Prediction Archive →](./📜_Prediction_Archive)**")
-    st.caption("Full historical log of all predictions")
     st.divider()
     st.caption(f"v1.0 · Updated {now_ist().strftime('%H:%M')}")
 
@@ -381,15 +404,19 @@ with st.expander("📋 Executive Summary", expanded=True):
     if _summary and (_summary.strip().startswith("{") or _summary.strip().startswith("[")):
         st.code(_summary, language="json")
     elif _summary:
-        # Render with styled card for readability
-        _esc = _html_mod.escape(_summary)
-        _summary_html = _esc.replace("\n\n", "</p><p style='margin:12px 0;line-height:1.7;'>")
-        _summary_html = _summary_html.replace("\n", "<br>")
+        # Convert to bullet points and render with styled card
+        _bullets = _text_to_bullets(_summary)
+        _esc = _html_mod.escape(_bullets)
+        _bullet_lines = _esc.split("\n")
+        _li_items = "".join(
+            f'<li style="margin:6px 0;line-height:1.7;">{line.lstrip("• ").strip()}</li>'
+            for line in _bullet_lines if line.strip()
+        )
         st.markdown(f"""
         <div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);
             border-radius:12px;padding:24px 28px;margin:8px 0;
             border:1px solid #2d3748;line-height:1.7;font-size:15px;">
-            <p style="margin:0 0 12px 0;line-height:1.7;">{_summary_html}</p>
+            <ul style="margin:0;padding-left:20px;">{_li_items}</ul>
         </div>
         """, unsafe_allow_html=True)
     else:
@@ -780,15 +807,19 @@ if plan.agent_reports:
                             _factors_raw = re.findall(r'"((?:[^"\\]|\\.)*)"', _kf.group(1))
                             if _factors_raw:
                                 report["key_factors"] = [f.replace('\\"', '"') for f in _factors_raw]
-            # Render summary in styled container
+            # Render summary in styled container as bullet points
             _cleaned_summary = _clean_text(_agent_summary)
-            _esc_summary = _html_mod.escape(_cleaned_summary)
-            _summary_p = _esc_summary.replace("\n\n", "</p><p style='margin:8px 0;line-height:1.6;'>")
-            _summary_p = _summary_p.replace("\n", "<br>")
+            _bullets_text = _text_to_bullets(_cleaned_summary)
+            _esc_summary = _html_mod.escape(_bullets_text)
+            _bullet_lines = _esc_summary.split("\n")
+            _li_items = "".join(
+                f'<li style="margin:4px 0;line-height:1.6;">{line.lstrip("• ").strip()}</li>'
+                for line in _bullet_lines if line.strip()
+            )
             st.markdown(
                 f'<div style="background:#111827;border-radius:8px;padding:14px 18px;'
                 f'margin:8px 0;line-height:1.6;font-size:14px;border:1px solid #1f2937;">'
-                f'<p style="margin:0;line-height:1.6;">{_summary_p}</p></div>',
+                f'<ul style="margin:0;padding-left:20px;">{_li_items}</ul></div>',
                 unsafe_allow_html=True,
             )
 

@@ -65,6 +65,9 @@ st.caption(
     "This archive is never trimmed — it grows with every evaluated prediction."
 )
 
+# ── Navigation ───────────────────────────────────────────────────────
+st.markdown("🏠 **[← Back to Home](./)**")
+
 # ── Load archive data ────────────────────────────────────────────────
 archive = accuracy_tracker.get_prediction_archive()
 

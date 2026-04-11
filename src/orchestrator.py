@@ -332,7 +332,7 @@ class Orchestrator:
         # 1. Get current gold price in INR per 10 grams
         current_price = self._market.get_gold_inr_price()
         if not isinstance(current_price, (int, float)) or not math.isfinite(current_price) or current_price <= 0:
-            logger.warning("Invalid INR gold price; attempting fallback via COMEX + USD/INR")
+            logger.warning("Invalid INR gold price from MCX; attempting fallback via COMEX + USD/INR")
             fallback_df = self._market.fetch_ticker("GC=F", period_days=14)
             usdinr = self._market.get_usdinr_rate()
             if not fallback_df.empty and "Close" in fallback_df:

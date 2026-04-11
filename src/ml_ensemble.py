@@ -17,7 +17,13 @@ Confidence bands:
 Explainability:
   - SHAP TreeExplainer on the XGBoost base model → per-feature contributions
 
-All prices are internally USD/oz.  Conversion to INR/10g happens once at the end.
+Data sources:
+  - Training/prediction uses COMEX (GC=F) hourly candles because MCX (GOLD.NS)
+    hourly data is unreliable on Yahoo Finance (only daily candles available).
+  - All prices are internally USD/oz.  Conversion to INR/10g happens once at the
+    end using time-aligned USD/INR rates.
+  - MCX is used as the primary source for daily prices in agents, accuracy
+    tracking, and UI display (see market_data.py).
 """
 
 from __future__ import annotations
@@ -234,6 +240,9 @@ class MLEnsemble:
             return False
 
         # 1. Fetch hourly gold data
+        # Using COMEX (GC=F) because MCX (GOLD.NS) hourly data is unavailable
+        # on Yahoo Finance.  COMEX closely tracks MCX; the final predictions
+        # are converted to INR/10g using time-aligned USD/INR rates.
         df = self._market.fetch_ticker("GC=F", period_days=_TRAIN_PERIOD_DAYS, interval="1h")
         if df.empty or "Close" not in df:
             logger.warning("ML ensemble: no training data")
@@ -345,6 +354,7 @@ class MLEnsemble:
             return []
 
         try:
+            # Using COMEX hourly data for prediction (MCX hourly unavailable on Yahoo)
             df = self._market.fetch_ticker("GC=F", period_days=30, interval="1h")
             if df.empty:
                 return []

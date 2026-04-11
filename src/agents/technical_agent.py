@@ -64,8 +64,9 @@ class TechnicalAnalysisAgent(BaseAgent):
 focused on the INDIAN gold market (INR per 10 grams).
 You interpret RSI, MACD, Bollinger Bands, moving averages, support/resistance,
 and candlestick patterns to forecast short-term gold price movement.
-Note: Technical indicators are computed on COMEX gold (GC=F) which closely tracks
-MCX gold. Your analysis should frame conclusions for Indian gold prices in INR.
+Note: Technical indicators are computed on MCX gold (GOLD.NS) when available,
+or COMEX gold (GC=F) as fallback.  Both closely track Indian gold prices.
+Your analysis should frame conclusions for Indian gold prices in INR.
 
 Given technical indicator data, produce a JSON analysis with these EXACT keys:
 {
@@ -85,7 +86,15 @@ Return ONLY valid JSON, no markdown fences."""
         self._market = MarketDataFetcher()
 
     def gather_data(self) -> dict[str, Any]:
-        df = self._market.fetch_ticker("GC=F", period_days=120)
+        # Try MCX gold first (already in INR), fall back to COMEX
+        source = "MCX (GOLD.NS)"
+        df = self._market.fetch_ticker("GOLD.NS", period_days=120)
+        if df.empty or pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna().empty:
+            source = "COMEX (GC=F)"
+            df = self._market.fetch_ticker("GC=F", period_days=120)
+        elif float(pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna().iloc[-1]) < 10_000:
+            source = "COMEX (GC=F)"
+            df = self._market.fetch_ticker("GC=F", period_days=120)
         if df.empty:
             return {"error": "No gold data"}
 
@@ -110,13 +119,14 @@ Return ONLY valid JSON, no markdown fences."""
             ), 2),
         }
 
-        return {"indicators": indicators}
+        return {"indicators": indicators, "data_source": source}
 
     def analyse(self, data: dict[str, Any]) -> AgentReport:
         if "error" in data:
             return AgentReport(agent_name=self.NAME, summary="No data available")
 
-        prompt = f"""Analyse the following technical indicators for gold (GC=F / MCX reference).
+        source = data.get("data_source", "COMEX (GC=F)")
+        prompt = f"""Analyse the following technical indicators for gold ({source}).
 Frame your conclusions for the INDIAN gold market (INR per 10 grams).
 
 ## Technical Indicators

@@ -31,7 +31,7 @@ if "src" in sys.modules:
 try:
     from src.prediction_engine import PredictionEngine
     from src.data_fetchers.market_data import MarketDataFetcher
-    from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET
+    from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open
     from src.accuracy_tracker import compute_accuracy_score
 except (KeyError, ImportError, AttributeError):
     # On Streamlit Cloud hot-reload the module cache can be in an inconsistent
@@ -41,7 +41,7 @@ except (KeyError, ImportError, AttributeError):
         del sys.modules[_k]
     from src.prediction_engine import PredictionEngine
     from src.data_fetchers.market_data import MarketDataFetcher
-    from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET
+    from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open
     from src.accuracy_tracker import compute_accuracy_score
 
 # ── Display-time name helpers ────────────────────────────────────────
@@ -226,6 +226,16 @@ with st.sidebar:
 st.title("🥇 Indian Gold Price Prediction System (₹/10g)")
 st.caption("ML Ensemble (XGBoost + LightGBM + Ridge) · LLM for narrative only · SHAP explainability")
 
+# Weekend market-closed notice
+if not is_market_open():
+    _day_name = now_ist().strftime("%A")
+    st.warning(
+        f"📅 **Gold market is closed today ({_day_name}).** "
+        f"COMEX and MCX gold markets do not trade on weekends. "
+        f"Prices shown are from the last trading session (Friday). "
+        f"New predictions will resume automatically on Monday."
+    )
+
 if view_mode == "Weekly Archive":
     st.subheader("🗂️ Weekly Prediction Archive")
     weekly_archive = engine.get_weekly_archive()
@@ -279,15 +289,24 @@ plan = engine.get_current_plan()
 
 # Always keep the live OHLC chart visible.
 st.subheader("🕯️ Live Indian Gold OHLC (10D) – INR/10g")
-gold_df = market.fetch_ticker("GC=F", period_days=10, interval="1h")
+# Try MCX gold first (native INR/10g), fall back to COMEX + FX conversion
+gold_df = market.fetch_ticker("GOLD.NS", period_days=10, interval="1h")
+_ohlc_source = "MCX (GOLD.NS)"
+if gold_df.empty or ("Close" in gold_df and pd.to_numeric(gold_df["Close"].squeeze(), errors="coerce").dropna().empty):
+    gold_df = market.fetch_ticker("GC=F", period_days=10, interval="1h")
+    _ohlc_source = "COMEX (GC=F) + FX"
+elif "Close" in gold_df and float(pd.to_numeric(gold_df["Close"].squeeze(), errors="coerce").dropna().iloc[-1]) < 10_000:
+    gold_df = market.fetch_ticker("GC=F", period_days=10, interval="1h")
+    _ohlc_source = "COMEX (GC=F) + FX"
 if not gold_df.empty:
     if isinstance(gold_df.index, pd.DatetimeIndex):
         latest_ts = gold_df.index.max()
         cutoff_ts = latest_ts - pd.Timedelta(days=10)
         gold_df = gold_df[gold_df.index >= cutoff_ts]
 
-    # Convert USD/oz to INR/10g using time-aligned daily FX rates
-    gold_df = market.convert_usd_to_inr(gold_df, period_days=10)
+    # Convert USD/oz to INR/10g only if COMEX data (MCX is already INR)
+    if _ohlc_source != "MCX (GOLD.NS)":
+        gold_df = market.convert_usd_to_inr(gold_df, period_days=10)
 
     # Convert index from UTC to IST so charts align with IST predictions
     if isinstance(gold_df.index, pd.DatetimeIndex) and not gold_df.empty:

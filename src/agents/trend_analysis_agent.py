@@ -16,7 +16,8 @@ class TrendAnalysisAgent(BaseAgent):
     SYSTEM_PROMPT = """You are a senior commodities trader specialising in Indian gold price trends.
 You analyse price data, moving averages, momentum, and rate-of-change to determine
 the prevailing trend direction and strength for gold in India (INR per 10 grams).
-Note: underlying data uses COMEX gold (GC=F) which closely tracks MCX gold.
+Note: underlying data uses MCX gold (GOLD.NS) when available, or COMEX gold (GC=F)
+as fallback.  Both closely track Indian gold prices.
 Consider USD/INR exchange rate movements as an additional trend factor.
 
 Given recent gold price data, produce a JSON analysis with these EXACT keys:
@@ -40,7 +41,15 @@ Return ONLY valid JSON, no markdown fences."""
 
     def gather_data(self) -> dict[str, Any]:
         summary = self._market.get_gold_summary(period_days=90)
-        df = self._market.fetch_ticker("GC=F", period_days=90)
+        # Try MCX first for raw price data, fall back to COMEX
+        df = self._market.fetch_ticker("GOLD.NS", period_days=90)
+        data_source = "MCX (GOLD.NS)"
+        if df.empty:
+            df = self._market.fetch_ticker("GC=F", period_days=90)
+            data_source = "COMEX (GC=F)"
+        elif float(pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna().iloc[-1]) < 10_000:
+            df = self._market.fetch_ticker("GC=F", period_days=90)
+            data_source = "COMEX (GC=F)"
         correlations = self._market.get_correlation_snapshot(90)
 
         # Compute simple moving averages

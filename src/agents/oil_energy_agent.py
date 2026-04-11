@@ -44,6 +44,17 @@ Return ONLY valid JSON, no markdown fences."""
         oil_df = self._market.fetch_ticker("CL=F", period_days=90)
         gold_df = self._market.fetch_ticker("GC=F", period_days=90)
 
+        # Also try MCX gold for India-specific context
+        mcx_gold_df = self._market.fetch_ticker("GOLD.NS", period_days=90)
+        mcx_gold_info = {}
+        if not mcx_gold_df.empty:
+            mcx_close = mcx_gold_df["Close"].squeeze()
+            if len(mcx_close) > 0 and float(mcx_close.iloc[-1]) > 10_000:
+                mcx_gold_info = {
+                    "current_price_inr_10g": round(float(mcx_close.iloc[-1]), 2),
+                    "context": "primary_indian",
+                }
+
         oil_info = {}
         if not oil_df.empty:
             oil_close = oil_df["Close"].squeeze()
@@ -76,11 +87,14 @@ Return ONLY valid JSON, no markdown fences."""
         return {
             "oil_info": oil_info,
             "gold_oil_ratio": gold_oil_ratio,
+            "mcx_gold": mcx_gold_info,
             "energy_news_headlines": [a["title"] for a in energy_news[:10]],
         }
 
     def analyse(self, data: dict[str, Any]) -> AgentReport:
-        prompt = f"""Analyse the following oil/energy data and its impact on gold.
+        prompt = f"""Analyse the following oil/energy data and its impact on INDIAN gold prices.
+India is a major oil importer — rising oil prices widen India's current account
+deficit, weaken the rupee, and push Indian gold prices higher.
 
 ## Oil Market Data
 {json.dumps(data.get('oil_info', {}), indent=2)}
@@ -88,9 +102,13 @@ Return ONLY valid JSON, no markdown fences."""
 ## Gold-Oil Ratio
 {data.get('gold_oil_ratio', 'N/A')}  (Historical average ~15-25)
 
+## MCX Gold (Indian Reference)
+{json.dumps(data.get('mcx_gold', {}), indent=2)}
+
 ## Energy News Headlines
 {chr(10).join(['- ' + h for h in data.get('energy_news_headlines', [])])}
 
+Focus on the impact on Indian gold prices and the rupee.
 Provide your analysis as JSON."""
 
         raw = self._ask_llm(prompt)
@@ -113,6 +131,7 @@ Provide your analysis as JSON."""
                 "energy_headlines_used": data.get("energy_news_headlines", [])[:10],
                 "energy_headlines_count": len(data.get("energy_news_headlines", []) or []),
                 **data.get("oil_info", {}),
+                **data.get("mcx_gold", {}),
             },
             raw_llm_response=raw,
         )

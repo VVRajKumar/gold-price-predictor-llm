@@ -92,6 +92,19 @@ Return ONLY valid JSON, no markdown fences."""
                 ),
             }
 
+        # BSE Sensex for broader Indian market sentiment
+        sensex_df = self._market.fetch_ticker("^BSESN", period_days=30)
+        sensex_info = {}
+        if not sensex_df.empty:
+            sensex_close = sensex_df["Close"].squeeze()
+            sensex_info = {
+                "current": round(float(sensex_close.iloc[-1]), 2),
+                "30d_change_pct": round(
+                    (float(sensex_close.iloc[-1]) - float(sensex_close.iloc[0]))
+                    / float(sensex_close.iloc[0]) * 100, 2
+                ),
+            }
+
         # COMEX gold (global reference)
         comex_df = self._market.fetch_ticker("GC=F", period_days=30)
         comex_info = {}
@@ -102,7 +115,22 @@ Return ONLY valid JSON, no markdown fences."""
                 "current_usd": round(float(close.iloc[-1]), 2),
                 "7d_change": round(float(close.iloc[-1]) - float(close.iloc[-min(7, len(close))]), 2),
                 "30d_change": round(float(close.iloc[-1]) - float(close.iloc[0]), 2),
+                "context": "global_reference",
             }
+
+        # MCX Gold (primary Indian gold reference)
+        mcx_df = self._market.fetch_ticker("GOLD.NS", period_days=30)
+        mcx_info = {}
+        if not mcx_df.empty:
+            mcx_close = mcx_df["Close"].squeeze()
+            if len(mcx_close) > 0 and float(mcx_close.iloc[-1]) > 10_000:
+                mcx_info = {
+                    "symbol": "GOLD.NS (MCX)",
+                    "current_inr_10g": round(float(mcx_close.iloc[-1]), 2),
+                    "7d_change": round(float(mcx_close.iloc[-1]) - float(mcx_close.iloc[-min(7, len(mcx_close))]), 2),
+                    "30d_change": round(float(mcx_close.iloc[-1]) - float(mcx_close.iloc[0]), 2),
+                    "context": "primary_indian",
+                }
 
         return {
             "macro_summary": macro_summary,
@@ -111,34 +139,44 @@ Return ONLY valid JSON, no markdown fences."""
             "usdinr": usdinr_info,
             "dxy_index": dxy_info,
             "nifty50": nifty_info,
+            "sensex": sensex_info,
+            "mcx_gold": mcx_info,
             "comex_gold": comex_info,
         }
 
     def analyse(self, data: dict[str, Any]) -> AgentReport:
         prompt = f"""Analyse the following macroeconomic data and its implications for INDIAN gold prices (INR).
+India-specific data is the PRIMARY driver; global data provides supplementary context.
 
-## India-Specific Macro (RBI, CPI, Import Duty)
+## India-Specific Macro (RBI, CPI, Import Duty, 10Y Bond, Forex Reserves) — PRIMARY
 {json.dumps(data.get('india_macro', {}), indent=2)}
 
-## India Seasonal / Festival Context
+## India Seasonal / Festival Context — PRIMARY
 {json.dumps(data.get('india_seasonal', {}), indent=2)}
 
-## Global Macro Indicators (FRED – US reference, affects India via USD)
-{json.dumps(data.get('macro_summary', {}), indent=2)}
+## MCX Gold (Indian Gold Market) — PRIMARY
+{json.dumps(data.get('mcx_gold', {}), indent=2)}
 
-## USD/INR Exchange Rate
+## USD/INR Exchange Rate — PRIMARY (directly affects Indian gold)
 {json.dumps(data.get('usdinr', {}), indent=2)}
 
-## US Dollar Index (DXY) – affects INR
-{json.dumps(data.get('dxy_index', {}), indent=2)}
-
-## Nifty 50 (Indian Equity Market)
+## Nifty 50 (Indian Equity Market) — PRIMARY
 {json.dumps(data.get('nifty50', {}), indent=2)}
 
-## COMEX Gold (Global Reference in USD)
+## BSE Sensex (Indian Equity Market) — PRIMARY
+{json.dumps(data.get('sensex', {}), indent=2)}
+
+## Global Macro Indicators (FRED – US reference, global context only)
+{json.dumps(data.get('macro_summary', {}), indent=2)}
+
+## US Dollar Index (DXY) – global context, affects INR indirectly
+{json.dumps(data.get('dxy_index', {}), indent=2)}
+
+## COMEX Gold (Global Reference in USD) – global context
 {json.dumps(data.get('comex_gold', {}), indent=2)}
 
 Focus on how these factors affect gold prices in India (INR per 10 grams).
+Prioritise Indian data (RBI rate, India CPI, INR, MCX gold, Sensex, festival demand).
 Consider the dual impact: global gold price moves AND INR exchange rate changes.
 Provide your macro analysis as JSON."""
 
@@ -162,7 +200,9 @@ Provide your macro analysis as JSON."""
                 "inr_outlook": result.get("inr_outlook", "stable"),
                 **data.get("usdinr", {}),
                 **data.get("dxy_index", {}),
+                **data.get("mcx_gold", {}),
                 **data.get("comex_gold", {}),
+                **data.get("sensex", {}),
             },
             raw_llm_response=raw,
         )

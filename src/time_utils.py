@@ -70,7 +70,6 @@ def slot_id(dt: datetime) -> str:
 # MCX Gold market hours (IST)
 MCX_MARKET_OPEN_HOUR = 9    # Monday–Friday market opens at 09:00 IST
 MCX_MARKET_CLOSE_HOUR = 23  # Friday market closes at ~23:30 IST
-MCX_MARKET_CLOSE_MIN = 30   # (minute component of close time)
 
 
 def is_market_open(dt: datetime | None = None) -> bool:

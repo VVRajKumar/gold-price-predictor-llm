@@ -450,16 +450,18 @@ class Orchestrator:
         # All times are IST — no other timezone is used.
         if daily:
             last_market_price = current_price  # default to anchor
+            # Pre-parse all dates once to avoid redundant strptime calls
+            dp_dates = [
+                datetime.strptime(dp.date, "%Y-%m-%d %H:%M") for dp in daily
+            ]
             # First pass: find the last price during active market hours
-            for dp in daily:
-                dp_dt = datetime.strptime(dp.date, "%Y-%m-%d %H:%M")
+            for dp, dp_dt in zip(daily, dp_dates):
                 if not is_market_closed_ist(dp_dt):
                     last_market_price = dp.predicted_price
                 else:
                     break  # first closed hour found
             # Second pass: flatline all market-closed hours
-            for dp in daily:
-                dp_dt = datetime.strptime(dp.date, "%Y-%m-%d %H:%M")
+            for dp, dp_dt in zip(daily, dp_dates):
                 if is_market_closed_ist(dp_dt):
                     dp.predicted_price = round(last_market_price, 2)
                     dp.low_range = round(last_market_price * 0.998, 2)

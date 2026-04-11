@@ -52,6 +52,7 @@ class AccuracyTracker:
         self._auto_running = False
         self._purge_stale_entries()
         self._rebase_guardrails()
+        self._backfill_archive_from_log()
 
     # ── Purge pre-INR / pre-cutoff entries ───────────────────────────
 
@@ -160,6 +161,51 @@ class AccuracyTracker:
             f"prediction bands across {len(self._stored_plans)} plans, "
             f"cleared accuracy log for re-evaluation"
         )
+
+    # ── Backfill archive from accuracy log ───────────────────────────
+
+    def _backfill_archive_from_log(self):
+        """Ensure all evaluated hourly results from the accuracy log are
+        also present in the prediction archive.
+
+        The archive was introduced after the accuracy log, so some older
+        evaluations (e.g. April 4-6) may only exist in accuracy_log.json.
+        This method copies any missing entries into the permanent archive.
+        """
+        if not self._log:
+            return
+
+        # Build set of existing archive keys for fast lookup
+        existing_keys: set[tuple[str, str]] = set()
+        for entry in self._archive:
+            existing_keys.add(
+                (entry.get("plan_generated_at", ""), entry.get("date", ""))
+            )
+
+        added = 0
+        for evaluation in self._log:
+            gen_at = evaluation.get("plan_generated_at", "")
+            for d in evaluation.get("daily_results", []):
+                key = (gen_at, d.get("date", ""))
+                if key not in existing_keys:
+                    entry_data = {
+                        "plan_generated_at": gen_at,
+                        "evaluated_at": evaluation.get("evaluated_at", ""),
+                        "current_price_at_prediction": evaluation.get(
+                            "current_price_at_prediction", 0
+                        ),
+                        **d,
+                    }
+                    self._archive.append(entry_data)
+                    existing_keys.add(key)
+                    added += 1
+
+        if added:
+            self._save_archive()
+            logger.info(
+                f"Archive backfill: added {added} entries from accuracy log "
+                f"(total archive: {len(self._archive)})"
+            )
 
     # ── Persistence ──────────────────────────────────────────────────
 

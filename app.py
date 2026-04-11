@@ -467,16 +467,29 @@ if plan is None:
 import math as _math
 _live_fx = market.get_usdinr_rate()
 _valid_price = _math.isfinite(plan.current_price) and plan.current_price > 0
+_is_weekend = not is_market_open()
 c1, c2, c3, c4, c5, c6 = st.columns(6)
 with c1:
-    st.metric("Current Price", f"₹{plan.current_price:,.2f}" if _valid_price else "N/A")
+    _price_label = "Current Price (Fri Close)" if _is_weekend else "Current Price"
+    st.metric(_price_label, f"₹{plan.current_price:,.2f}" if _valid_price else "N/A")
 with c2:
     color = outlook_color(plan.overall_outlook)
     st.metric("Outlook", f"{outlook_emoji(plan.overall_outlook)} {plan.overall_outlook.upper()}")
 with c3:
-    st.metric("Confidence", f"{plan.overall_confidence:.0%}")
+    # During weekends, market is closed so confidence is 95% (price is flat)
+    _display_conf = 0.95 if _is_weekend else plan.overall_confidence
+    st.metric("Confidence", f"{_display_conf:.0%}")
 with c4:
-    if plan.daily_predictions and _valid_price:
+    if _is_weekend and _valid_price:
+        # Weekend: 24-Hour Target is the same as Friday's close (market is flat)
+        st.metric(
+            "24-Hour Target",
+            f"₹{plan.current_price:,.2f}",
+            delta=0,
+            delta_color="off",
+            help="Market is closed — price held flat at Friday's closing level",
+        )
+    elif plan.daily_predictions and _valid_price:
         horizon_target = plan.daily_predictions[-1]
         delta = horizon_target.predicted_price - plan.current_price
         st.metric(
@@ -820,51 +833,67 @@ if _shap:
     # ── Row 3: Hour-by-Hour Drivers ──────────────────────────────────
     _hourly_shap = _shap.get("hourly_drivers", [])
     if _hourly_shap:
-        st.markdown("#### Hour-by-Hour: What Moves Each Prediction")
-        st.caption(
-            "For each upcoming hour, these are the top 3 factors pushing the price "
-            "up (↑ green) or down (↓ red)."
-        )
-        # Show in a 3-column grid
-        cols_per_row = 3
-        for row_start in range(0, min(12, len(_hourly_shap)), cols_per_row):
-            cols = st.columns(cols_per_row)
-            for ci, hd in enumerate(_hourly_shap[row_start:row_start + cols_per_row]):
-                with cols[ci]:
-                    drivers_html = ""
-                    for d in hd.get("drivers", []):
-                        if isinstance(d, dict):
-                            color = "#00d4aa" if d["value"] > 0 else "#e74c3c"
-                            arrow = d["direction"]
-                            dname = _friendly(d["name"])
-                            drivers_html += (
-                                f'<div style="margin:4px 0;">'
-                                f'<span style="color:{color};font-weight:bold">{arrow}</span> '
-                                f'{dname} '
-                                f'<span style="color:{color}">({d["value"]:+.1f})</span>'
-                                f'</div>'
-                            )
-                        else:
-                            # fallback for old string format — parse and rename
-                            import re as _re
-                            _m = _re.match(r'(\S+)\s+([↑↓])\s+\(([^)]+)\)', str(d))
-                            if _m:
-                                _fn, _dir, _val = _m.groups()
-                                _cval = float(_val)
-                                _clr = '#00d4aa' if _cval > 0 else '#e74c3c'
+        if _is_weekend:
+            # Weekend: market is closed — show a single notice instead of SHAP cards
+            st.markdown("#### Hour-by-Hour: What Moves Each Prediction")
+            st.markdown(
+                """<div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);
+                border-radius:12px;padding:20px 24px;margin:10px 0;
+                border:2px solid #fbbf24;text-align:center;">
+                <h4 style="color:#fbbf24;margin:0 0 8px 0;">📅 Market Closed — Weekend</h4>
+                <p style="color:#e2e8f0;margin:0;font-size:14px;">
+                The gold market is closed. No hourly predictions are being made.<br>
+                Hour-by-hour SHAP analysis will resume when the market reopens on Monday.
+                </p>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown("#### Hour-by-Hour: What Moves Each Prediction")
+            st.caption(
+                "For each upcoming hour, these are the top 3 factors pushing the price "
+                "up (↑ green) or down (↓ red)."
+            )
+            # Show all 24 hours in a 3-column grid
+            cols_per_row = 3
+            for row_start in range(0, len(_hourly_shap), cols_per_row):
+                cols = st.columns(cols_per_row)
+                for ci, hd in enumerate(_hourly_shap[row_start:row_start + cols_per_row]):
+                    with cols[ci]:
+                        drivers_html = ""
+                        for d in hd.get("drivers", []):
+                            if isinstance(d, dict):
+                                color = "#00d4aa" if d["value"] > 0 else "#e74c3c"
+                                arrow = d["direction"]
+                                dname = _friendly(d["name"])
                                 drivers_html += (
                                     f'<div style="margin:4px 0;">'
-                                    f'<span style="color:{_clr};font-weight:bold">{_dir}</span> '
-                                    f'{_friendly(_fn)} '
-                                    f'<span style="color:{_clr}">({_cval:+.1f})</span>'
+                                    f'<span style="color:{color};font-weight:bold">{arrow}</span> '
+                                    f'{dname} '
+                                    f'<span style="color:{color}">({d["value"]:+.1f})</span>'
                                     f'</div>'
                                 )
                             else:
-                                drivers_html += f'<div style="margin:4px 0;">{d}</div>'
-                    st.markdown(
-                        f'<div class="metric-card">'
-                        f'<h4 style="margin-bottom:8px">Hour {hd["hour"]}</h4>'
-                        f'{drivers_html}'
+                                # fallback for old string format — parse and rename
+                                import re as _re
+                                _m = _re.match(r'(\S+)\s+([↑↓])\s+\(([^)]+)\)', str(d))
+                                if _m:
+                                    _fn, _dir, _val = _m.groups()
+                                    _cval = float(_val)
+                                    _clr = '#00d4aa' if _cval > 0 else '#e74c3c'
+                                    drivers_html += (
+                                        f'<div style="margin:4px 0;">'
+                                        f'<span style="color:{_clr};font-weight:bold">{_dir}</span> '
+                                        f'{_friendly(_fn)} '
+                                        f'<span style="color:{_clr}">({_cval:+.1f})</span>'
+                                        f'</div>'
+                                    )
+                                else:
+                                    drivers_html += f'<div style="margin:4px 0;">{d}</div>'
+                        st.markdown(
+                            f'<div class="metric-card">'
+                            f'<h4 style="margin-bottom:8px">Hour {hd["hour"]}</h4>'
+                            f'{drivers_html}'
                         f'</div>',
                         unsafe_allow_html=True,
                     )

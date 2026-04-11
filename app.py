@@ -1090,6 +1090,13 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
 
         fig_acc = go.Figure()
 
+        # Detect market-closed hours for weekday/weekend visual split
+        acc_df["_is_closed"] = acc_df["date"].apply(
+            lambda dt: is_market_closed_ist(dt.to_pydatetime())
+        )
+        _acc_weekday = acc_df[~acc_df["_is_closed"]]
+        _acc_weekend = acc_df[acc_df["_is_closed"]]
+
         # Prediction band
         fig_acc.add_trace(go.Scatter(
                 x=acc_df["date"], y=acc_df["high_range"],
@@ -1103,21 +1110,34 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                 line=dict(width=0),
         ))
 
-        # Predicted line
-        fig_acc.add_trace(go.Scatter(
-                x=acc_df["date"], y=acc_df["predicted"],
-                mode="lines+markers", name="Predicted",
-                line=dict(color="#00d4aa", width=2, dash="dash"),
-                marker=dict(size=7, symbol="diamond"),
-        ))
+        # Weekday predicted line — solid green
+        if not _acc_weekday.empty:
+            fig_acc.add_trace(go.Scatter(
+                    x=_acc_weekday["date"], y=_acc_weekday["predicted"],
+                    mode="lines+markers", name="Predicted",
+                    line=dict(color="#00d4aa", width=2),
+                    marker=dict(size=7, symbol="diamond"),
+            ))
 
-        # Actual line
+        # Weekend predicted line — dotted green (merged with actual)
+        if not _acc_weekend.empty:
+            fig_acc.add_trace(go.Scatter(
+                    x=_acc_weekend["date"], y=_acc_weekend["predicted"],
+                    mode="lines+markers", name="Predicted (Market Closed)",
+                    line=dict(color="#00d4aa", width=2, dash="dot"),
+                    marker=dict(size=5, symbol="diamond"),
+            ))
+
+        # Actual line — solid yellow
         fig_acc.add_trace(go.Scatter(
                 x=acc_df["date"], y=acc_df["actual"],
                 mode="lines+markers", name="Actual",
                 line=dict(color="#ffd93d", width=2),
                 marker=dict(size=7),
         ))
+
+        # Clean up temp column
+        acc_df = acc_df.drop(columns=["_is_closed"], errors="ignore")
 
         # Color markers for within/outside band
         outside = acc_df[~acc_df["within_band"]]

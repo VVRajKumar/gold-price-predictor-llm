@@ -48,6 +48,9 @@ _OVERCONFIDENCE_THRESHOLD = 0.92   # individual agents
 _META_OVERCONFIDENCE_THRESHOLD = 0.88   # overall plan
 _CONFIDENCE_PENALTY = 0.15          # how much to penalise
 
+# Bias-outlook alignment: treat |bias| below this as "LLM didn't provide a real value"
+_BIAS_NEAR_ZERO = 0.05
+
 
 # ── Agent Report Guardrails ─────────────────────────────────────────
 
@@ -107,7 +110,6 @@ def validate_agent_report(report_dict: dict[str, Any], agent_name: str) -> dict[
     # When the outlook is directional but bias is missing / near-zero,
     # infer a meaningful bias from the confidence so that the agent's
     # opinion actually influences the ML ensemble.
-    _BIAS_NEAR_ZERO = 0.05  # treat |bias| <= this as "LLM didn't provide a real value"
     if outlook == "bullish" and bias < _BIAS_NEAR_ZERO:
         inferred = round(confidence * 0.6, 3)
         if bias < -0.3:

@@ -122,15 +122,23 @@ def is_market_closed_ist(dt: datetime) -> bool:
 def next_market_open_ist(dt: datetime | None = None) -> datetime:
     """Return the next MCX market-open time: Monday 09:00 IST.
 
-    This is intended to be called when the market is closed (weekend).
+    This is intended to be called when the market is closed (weekend or
+    Monday pre-market).
     From Saturday it returns Monday 09:00; from Sunday it returns Monday 09:00.
+    From Monday before 09:00 it returns the same Monday at 09:00 (not next week).
     """
     if dt is None:
         dt = now_ist()
+    wd = dt.weekday()
+    # Monday before market open → same-day 09:00
+    if wd == 0 and dt.hour < MCX_MARKET_OPEN_HOUR:
+        return dt.replace(
+            hour=MCX_MARKET_OPEN_HOUR, minute=0, second=0, microsecond=0
+        )
     # Advance to the next Monday (weekday 0)
-    days_ahead = (7 - dt.weekday()) % 7  # Saturday→2, Sunday→1
+    days_ahead = (7 - wd) % 7  # Saturday→2, Sunday→1
     if days_ahead == 0:
-        # Already Monday; if called on a weekday, advance to next Monday.
+        # Already Monday (after market open); advance to next Monday.
         days_ahead = 7
     next_monday = dt + timedelta(days=days_ahead)
     return next_monday.replace(

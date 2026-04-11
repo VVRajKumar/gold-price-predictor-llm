@@ -290,6 +290,24 @@ class PredictionEngine:
         """Backward-compatible wrapper retained for existing callers."""
         return self.ensure_hourly_prediction()
 
+    def generate_weekend_analysis(self) -> "PredictionPlan":
+        """Run agents for fresh weekend news and generate Monday-focused narrative.
+
+        The market is closed, so no ML predictions are made. Agents still
+        gather live intelligence (news, geopolitics, sentiment). The LLM
+        narrator produces a weekend briefing about what to expect on Monday.
+
+        Price data from the existing cached plan is preserved.
+        """
+        with self._lock:
+            logger.info("PredictionEngine: generating weekend analysis …")
+            plan = self._orchestrator.generate_weekend_analysis(
+                existing_plan=self._current_plan,
+            )
+            self._current_plan = plan
+            self._save_plan(plan)
+            return plan
+
     def get_current_plan(self) -> Optional[PredictionPlan]:
         return self._current_plan
 
@@ -312,8 +330,10 @@ class PredictionEngine:
         """Start a background thread that regenerates predictions on 6-hour slot boundaries.
 
         Predictions are aligned to 00:00, 06:00, 12:00, 18:00 IST.
-        On weekends (Saturday/Sunday IST) the thread sleeps until Monday
-        since the gold market is closed and prices do not change.
+        On weekends (Saturday/Sunday IST) the thread runs weekend analysis
+        every 6 hours so agents gather fresh news and the narrative stays
+        up-to-date with a Monday-reopening focus.  Full ML prediction
+        generation resumes automatically on Monday 09:00 IST.
         """
         if self._running:
             return
@@ -324,19 +344,49 @@ class PredictionEngine:
                 try:
                     now = now_ist()
 
-                    # If it's a weekend, sleep until Monday 00:00 IST
                     if not is_market_open(now):
+                        # Weekend / Monday pre-market — run weekend analysis
+                        # every 6 hours to keep agents updated with fresh news.
+                        next_slot = next_slot_ist()
                         next_open = next_market_open_ist(now)
-                        wait_seconds = max(60, (next_open - now).total_seconds() + 30)
-                        logger.info(
-                            f"Auto-refresh: market closed (weekend) — sleeping until "
-                            f"{next_open.strftime('%H:%M %b %d')} IST "
-                            f"({wait_seconds / 3600:.1f} hours)"
-                        )
-                        time.sleep(wait_seconds)
-                        if not self._running:
-                            break
-                        continue
+                        # If the next slot is before market opens, use the slot;
+                        # otherwise wake at Monday market open for full generation.
+                        if next_slot < next_open:
+                            wait_seconds = max(60, (next_slot - now).total_seconds() + 30)
+                            logger.info(
+                                f"Auto-refresh: market closed — weekend analysis at "
+                                f"{next_slot.strftime('%H:%M %b %d')} IST "
+                                f"({wait_seconds / 3600:.1f} hours)"
+                            )
+                            time.sleep(wait_seconds)
+                            if not self._running:
+                                break
+                            # Still weekend? Run weekend analysis (agents + narrative)
+                            if not is_market_open():
+                                logger.info("Auto-refresh: running weekend analysis (agents + narrative)")
+                                try:
+                                    self.generate_weekend_analysis()
+                                except Exception as e:
+                                    logger.warning(f"Weekend analysis failed: {e}")
+                                continue
+                            # Market just opened — fall through to generate
+                            logger.info("Auto-refresh: market reopened — generating prediction")
+                            self.generate()
+                            continue
+                        else:
+                            wait_seconds = max(60, (next_open - now).total_seconds() + 30)
+                            logger.info(
+                                f"Auto-refresh: market closed — sleeping until "
+                                f"{next_open.strftime('%H:%M %b %d')} IST "
+                                f"({wait_seconds / 3600:.1f} hours)"
+                            )
+                            time.sleep(wait_seconds)
+                            if not self._running:
+                                break
+                            # Woke at Monday market open — generate immediately
+                            logger.info("Auto-refresh: market reopened — generating prediction")
+                            self.generate()
+                            continue
 
                     # Sleep until the next 6-hour slot boundary
                     next_slot = next_slot_ist()
@@ -348,6 +398,17 @@ class PredictionEngine:
                     time.sleep(wait_seconds)
                     if not self._running:
                         break
+                    # Re-check after sleeping: the next slot may have landed
+                    # on a weekend (e.g. Friday 18:00 → Saturday 00:00).
+                    if not is_market_open():
+                        logger.info(
+                            "Auto-refresh: woke on weekend/holiday — running weekend analysis"
+                        )
+                        try:
+                            self.generate_weekend_analysis()
+                        except Exception as e:
+                            logger.warning(f"Weekend analysis failed: {e}")
+                        continue
                     self.generate()
                 except Exception as e:
                     logger.error(f"Auto-refresh failed: {e}")
@@ -355,7 +416,7 @@ class PredictionEngine:
 
         t = threading.Thread(target=_loop, daemon=True, name="prediction-refresh")
         t.start()
-        logger.info("Auto-refresh started — aligned to 6-hour IST slots (00:00, 06:00, 12:00, 18:00), weekends skipped")
+        logger.info("Auto-refresh started — aligned to 6-hour IST slots, weekend analysis every 6 hours")
 
     def stop_auto_refresh(self):
         self._running = False

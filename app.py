@@ -266,8 +266,14 @@ def outlook_emoji(outlook: str) -> str:
 # SIDEBAR
 # ════════════════════════════════════════════════════════════════════
 with st.sidebar:
-    st.title("🥇 Gold Predictor")
-    st.caption("Multi-Agent AI System")
+    st.markdown(
+        """<div style="text-align:center;padding:8px 0 2px 0;">
+        <span style="font-size:2.2rem;">🥇</span><br>
+        <span style="font-size:1.3rem;font-weight:700;letter-spacing:0.5px;">Gold Predictor</span><br>
+        <span style="font-size:0.8rem;color:#94a3b8;">Multi-Agent AI System</span>
+        </div>""",
+        unsafe_allow_html=True,
+    )
 
     view_mode = "Live Prediction"
 
@@ -282,21 +288,48 @@ with st.sidebar:
     else:
         st.button("🔄 Generate New Prediction", width="stretch", type="primary", disabled=True)
         st.info("📅 Market closed — prices held flat at Friday's close.")
+        if st.button("🔄 Refresh Weekend Analysis", width="stretch", type="secondary"):
+            with st.spinner("Running agents for fresh weekend news … this takes 1-2 minutes"):
+                plan = engine.generate_weekend_analysis()
+            st.success("Weekend analysis updated with latest news!")
+            st.rerun()
 
     st.divider()
-    st.markdown("### Agent Roster")
-    agent_names = [
-        "🌍 Geopolitics",
-        "📈 Trend Analysis",
-        "💰 ETF Flows",
-        "🏦 Macro Economics",
-        "🛢️ Oil & Energy",
-        "😨 Market Sentiment",
-        "📊 Technical Analysis",
-        "📜 Historical Patterns",
+
+    # ── Navigation ────────────────────────────────────────────────────
+    st.markdown(
+        '<span style="font-size:0.75rem;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Navigation</span>',
+        unsafe_allow_html=True,
+    )
+    st.page_link("app.py", label="🏠 Live Dashboard", icon=None)
+    st.page_link("pages/1_📜_Prediction_Archive.py", label="📜 Prediction Archive", icon=None)
+
+    st.divider()
+
+    # ── Agent roster as a compact styled grid ─────────────────────────
+    st.markdown(
+        '<span style="font-size:0.75rem;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Agent Roster</span>',
+        unsafe_allow_html=True,
+    )
+    _agent_list = [
+        ("🌍", "Geopolitics"),
+        ("📈", "Trend"),
+        ("💰", "ETF Flows"),
+        ("🏦", "Macro"),
+        ("🛢️", "Oil & Energy"),
+        ("😨", "Sentiment"),
+        ("📊", "Technical"),
+        ("📜", "Historical"),
     ]
-    for a in agent_names:
-        st.markdown(f"- {a}")
+    _agent_html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;">'
+    for _emoji, _name in _agent_list:
+        _agent_html += (
+            f'<div style="background:#16213e;border-radius:8px;padding:6px 10px;'
+            f'border:1px solid #2d3748;font-size:0.82rem;text-align:center;">'
+            f'{_emoji} {_name}</div>'
+        )
+    _agent_html += '</div>'
+    st.markdown(_agent_html, unsafe_allow_html=True)
 
     st.divider()
     st.caption(f"v1.0 · Updated {now_ist().strftime('%H:%M')}")
@@ -310,16 +343,24 @@ st.caption("ML Ensemble (XGBoost + LightGBM + Ridge) · LLM for narrative only �
 if not is_market_open():
     _day_name = now_ist().strftime("%A")
     _cached_plan = engine.get_current_plan()
-    if _cached_plan is not None:
-        st.info(
-            f"📅 **Gold market is closed ({_day_name}).** "
-            f"Prices are held flat at Friday's closing level. "
-            f"Live predictions resume automatically on Monday."
-        )
-    else:
+    _next_open = "Monday 09:00 IST"
+    st.markdown(
+        f"""<div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);
+        border-radius:12px;padding:20px 24px;margin:10px 0;
+        border:2px solid #fbbf24;text-align:center;">
+        <h3 style="color:#fbbf24;margin:0 0 8px 0;">📅 Market Closed — {_day_name}</h3>
+        <p style="color:#e2e8f0;margin:0;font-size:15px;">
+        The MCX gold market is closed for the weekend. Prices are held flat at Friday's closing level.<br>
+        Trading resumes <b>{_next_open}</b>.
+        Use <b>Refresh Weekend Analysis</b> in the sidebar to get fresh news and a Monday outlook.
+        </p>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+    if _cached_plan is None:
         st.warning(
-            f"📅 **Gold market is closed ({_day_name}).** "
-            f"No prediction available yet — will auto-generate on Monday."
+            "No prediction available yet — will auto-generate on Monday. "
+            "You can click **Refresh Weekend Analysis** for a preview of Monday's outlook."
         )
 
 if view_mode == "Weekly Archive":
@@ -403,9 +444,14 @@ if not gold_df.empty:
     range_start = gold_df.index.min()
     range_end = gold_df.index.max()
 
+    # Build formatted tick labels for a categorical x-axis.
+    # A categorical axis places every candle at equal spacing,
+    # which eliminates all visual gaps (weekends AND overnight).
+    _ohlc_labels = gold_df.index.strftime("%b %d %H:%M")
+
     fig_ohlc = go.Figure()
     fig_ohlc.add_trace(go.Candlestick(
-        x=gold_df.index,
+        x=_ohlc_labels,
         open=gold_df["Open"],
         high=gold_df["High"],
         low=gold_df["Low"],
@@ -419,8 +465,8 @@ if not gold_df.empty:
         xaxis_rangeslider_visible=False,
         xaxis=dict(
             fixedrange=True,
-            range=[range_start, range_end + pd.Timedelta(hours=2)],
-            rangebreaks=[dict(bounds=["sat", "mon"])],
+            type="category",
+            nticks=10,
         ),
         yaxis=dict(fixedrange=True, title="Price (₹/10g)"),
     )
@@ -449,16 +495,29 @@ if plan is None:
 import math as _math
 _live_fx = market.get_usdinr_rate()
 _valid_price = _math.isfinite(plan.current_price) and plan.current_price > 0
+_is_weekend = not is_market_open()
 c1, c2, c3, c4, c5, c6 = st.columns(6)
 with c1:
-    st.metric("Current Price", f"₹{plan.current_price:,.2f}" if _valid_price else "N/A")
+    _price_label = "Current Price (Fri Close)" if _is_weekend else "Current Price"
+    st.metric(_price_label, f"₹{plan.current_price:,.2f}" if _valid_price else "N/A")
 with c2:
     color = outlook_color(plan.overall_outlook)
     st.metric("Outlook", f"{outlook_emoji(plan.overall_outlook)} {plan.overall_outlook.upper()}")
 with c3:
-    st.metric("Confidence", f"{plan.overall_confidence:.0%}")
+    # During weekends, market is closed so confidence is 95% (price is flat)
+    _display_conf = 0.95 if _is_weekend else plan.overall_confidence
+    st.metric("Confidence", f"{_display_conf:.0%}")
 with c4:
-    if plan.daily_predictions and _valid_price:
+    if _is_weekend and _valid_price:
+        # Weekend: 24-Hour Target is the same as Friday's close (market is flat)
+        st.metric(
+            "24-Hour Target",
+            f"₹{plan.current_price:,.2f}",
+            delta=0,
+            delta_color="off",
+            help="Market is closed — price held flat at Friday's closing level",
+        )
+    elif plan.daily_predictions and _valid_price:
         horizon_target = plan.daily_predictions[-1]
         delta = horizon_target.predicted_price - plan.current_price
         st.metric(
@@ -669,7 +728,7 @@ if plan.daily_predictions:
             _display_df.loc[_fcp.index, "low_range"] = (_fcp * 0.998).round(2)
             _display_df.loc[_fcp.index, "high_range"] = (_fcp * 1.002).round(2)
             _display_df.loc[_fcp.index, "confidence"] = 0.95
-            _display_df.loc[_fcp.index, "key_driver"] = "Market closed (weekend) — price held flat"
+            _display_df.loc[_fcp.index, "key_driver"] = "Market closed (weekend) — price held flat at closing"
     _display_df["key_driver"] = _display_df["key_driver"].apply(lambda x: _clean_text(str(x)) if x else x)
     st.dataframe(
         _display_df
@@ -802,54 +861,78 @@ if _shap:
     # ── Row 3: Hour-by-Hour Drivers ──────────────────────────────────
     _hourly_shap = _shap.get("hourly_drivers", [])
     if _hourly_shap:
-        st.markdown("#### Hour-by-Hour: What Moves Each Prediction")
-        st.caption(
-            "For each upcoming hour, these are the top 3 factors pushing the price "
-            "up (↑ green) or down (↓ red)."
-        )
-        # Show in a 3-column grid
-        cols_per_row = 3
-        for row_start in range(0, min(12, len(_hourly_shap)), cols_per_row):
-            cols = st.columns(cols_per_row)
-            for ci, hd in enumerate(_hourly_shap[row_start:row_start + cols_per_row]):
-                with cols[ci]:
-                    drivers_html = ""
-                    for d in hd.get("drivers", []):
-                        if isinstance(d, dict):
-                            color = "#00d4aa" if d["value"] > 0 else "#e74c3c"
-                            arrow = d["direction"]
-                            dname = _friendly(d["name"])
-                            drivers_html += (
-                                f'<div style="margin:4px 0;">'
-                                f'<span style="color:{color};font-weight:bold">{arrow}</span> '
-                                f'{dname} '
-                                f'<span style="color:{color}">({d["value"]:+.1f})</span>'
-                                f'</div>'
+        if _is_weekend:
+            # Weekend: market is closed — show a single notice instead of SHAP cards
+            st.markdown("#### Hour-by-Hour: What Moves Each Prediction")
+            st.markdown(
+                """<div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);
+                border-radius:12px;padding:20px 24px;margin:10px 0;
+                border:2px solid #fbbf24;text-align:center;">
+                <h4 style="color:#fbbf24;margin:0 0 8px 0;">📅 Market Closed — Weekend</h4>
+                <p style="color:#e2e8f0;margin:0;font-size:14px;">
+                The gold market is closed. No hourly predictions are being made.<br>
+                Hour-by-hour SHAP analysis will resume when the market reopens on Monday.
+                </p>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown("#### Hour-by-Hour: What Moves Each Prediction")
+            st.caption(
+                "For each upcoming hour, these are the top 3 factors pushing the price "
+                "up (↑ green) or down (↓ red)."
+            )
+
+            def _render_shap_cards(shap_slice: list, cols_per_row: int = 3):
+                """Render a slice of hourly SHAP driver cards in a grid."""
+                for row_start in range(0, len(shap_slice), cols_per_row):
+                    cols = st.columns(cols_per_row)
+                    for ci, hd in enumerate(shap_slice[row_start:row_start + cols_per_row]):
+                        with cols[ci]:
+                            drivers_html = ""
+                            for d in hd.get("drivers", []):
+                                if isinstance(d, dict):
+                                    color = "#00d4aa" if d["value"] > 0 else "#e74c3c"
+                                    arrow = d["direction"]
+                                    dname = _friendly(d["name"])
+                                    drivers_html += (
+                                        f'<div style="margin:4px 0;">'
+                                        f'<span style="color:{color};font-weight:bold">{arrow}</span> '
+                                        f'{dname} '
+                                        f'<span style="color:{color}">({d["value"]:+.1f})</span>'
+                                        f'</div>'
+                                    )
+                                else:
+                                    import re as _re
+                                    _m = _re.match(r'(\S+)\s+([↑↓])\s+\(([^)]+)\)', str(d))
+                                    if _m:
+                                        _fn, _dir, _val = _m.groups()
+                                        _cval = float(_val)
+                                        _clr = '#00d4aa' if _cval > 0 else '#e74c3c'
+                                        drivers_html += (
+                                            f'<div style="margin:4px 0;">'
+                                            f'<span style="color:{_clr};font-weight:bold">{_dir}</span> '
+                                            f'{_friendly(_fn)} '
+                                            f'<span style="color:{_clr}">({_cval:+.1f})</span>'
+                                            f'</div>'
+                                        )
+                                    else:
+                                        drivers_html += f'<div style="margin:4px 0;">{d}</div>'
+                            st.markdown(
+                                f'<div class="metric-card">'
+                                f'<h4 style="margin-bottom:8px">Hour {hd["hour"]}</h4>'
+                                f'{drivers_html}'
+                                f'</div>',
+                                unsafe_allow_html=True,
                             )
-                        else:
-                            # fallback for old string format — parse and rename
-                            import re as _re
-                            _m = _re.match(r'(\S+)\s+([↑↓])\s+\(([^)]+)\)', str(d))
-                            if _m:
-                                _fn, _dir, _val = _m.groups()
-                                _cval = float(_val)
-                                _clr = '#00d4aa' if _cval > 0 else '#e74c3c'
-                                drivers_html += (
-                                    f'<div style="margin:4px 0;">'
-                                    f'<span style="color:{_clr};font-weight:bold">{_dir}</span> '
-                                    f'{_friendly(_fn)} '
-                                    f'<span style="color:{_clr}">({_cval:+.1f})</span>'
-                                    f'</div>'
-                                )
-                            else:
-                                drivers_html += f'<div style="margin:4px 0;">{d}</div>'
-                    st.markdown(
-                        f'<div class="metric-card">'
-                        f'<h4 style="margin-bottom:8px">Hour {hd["hour"]}</h4>'
-                        f'{drivers_html}'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
+
+            # Show first 6 hours directly, hide the rest behind "Show More"
+            _SHAP_PREVIEW = 6
+            _render_shap_cards(_hourly_shap[:_SHAP_PREVIEW])
+
+            if len(_hourly_shap) > _SHAP_PREVIEW:
+                with st.expander(f"📊 Show Hours {_SHAP_PREVIEW + 1}–{len(_hourly_shap)}", expanded=False):
+                    _render_shap_cards(_hourly_shap[_SHAP_PREVIEW:])
 else:
     st.info("🔄 ML model explainability will appear after the first prediction cycle completes.")
 
@@ -1284,6 +1367,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                 title="Predicted vs Actual Indian Gold Price (₹/10g)",
                 template="plotly_dark", height=450,
                 yaxis_title="Price (₹/10g)", xaxis_title="Time",
+                xaxis=dict(rangebreaks=[dict(bounds=["sat", "mon"])]),
                 yaxis=dict(range=_y_range) if _y_range else {},
                 legend=dict(orientation="h", yanchor="bottom", y=1.02),
                 hovermode="x unified",

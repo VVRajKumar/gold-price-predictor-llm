@@ -60,18 +60,35 @@ def get_engine() -> PredictionEngine:
 engine = get_engine()
 accuracy_tracker = engine.get_accuracy_tracker()
 
+# ── Sidebar ──────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown(
+        """<div style="text-align:center;padding:8px 0 2px 0;">
+        <span style="font-size:2.2rem;">🥇</span><br>
+        <span style="font-size:1.3rem;font-weight:700;letter-spacing:0.5px;">Gold Predictor</span><br>
+        <span style="font-size:0.8rem;color:#94a3b8;">Prediction Archive</span>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+
+    st.divider()
+
+    # ── Navigation ────────────────────────────────────────────────────
+    st.markdown(
+        '<span style="font-size:0.75rem;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Navigation</span>',
+        unsafe_allow_html=True,
+    )
+    st.page_link("app.py", label="🏠 Back to Home", icon=None)
+    st.page_link("pages/1_📜_Prediction_Archive.py", label="📜 Prediction Archive", icon=None)
+
+    st.divider()
+    st.caption(f"v1.0 · Updated {now_ist().strftime('%H:%M')}")
+
 # ── Header ───────────────────────────────────────────────────────────
 st.title("📜 Prediction Archive")
 st.caption(
     "Complete historical log of all predicted vs actual Indian gold prices (₹/10g). "
     "This archive is never trimmed — it grows with every evaluated prediction."
-)
-
-# ── Navigation ───────────────────────────────────────────────────────
-st.markdown(
-    '🏠 <a href="./" target="_self" style="color: inherit; text-decoration: none;">'
-    '<b>← Back to Home</b></a>',
-    unsafe_allow_html=True,
 )
 
 # ── Load archive data ────────────────────────────────────────────────
@@ -312,6 +329,7 @@ fig.update_layout(
     height=550,
     yaxis_title="Price (₹/10g)",
     xaxis_title="Time (IST)",
+    xaxis=dict(rangebreaks=[dict(bounds=["sat", "mon"])]),
     yaxis=dict(range=_y_range) if _y_range else {},
     legend=dict(orientation="h", yanchor="bottom", y=1.02),
     hovermode="x unified",

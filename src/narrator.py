@@ -137,6 +137,47 @@ Do NOT wrap in markdown fences.
 """
 
 
+_WEEKEND_NARRATOR_SYSTEM = """You are a friendly Gold Market Analyst writing a WEEKEND briefing that is easy to understand for everyday investors and beginners.
+
+IMPORTANT CONTEXT: The gold market (MCX) is currently CLOSED for the weekend.
+Trading will resume on Monday morning (09:00 IST).
+
+You are given fresh intelligence from 8 specialist agents who have gathered the latest
+news, geopolitical developments, economic data, and market signals DURING the weekend.
+There are NO ML predictions because the market is closed — no trading is happening.
+
+YOUR ROLE: Analyze what has happened over the weekend and predict what is likely to
+happen when the market reopens on Monday.  Focus on:
+- What news/events occurred during the weekend that could impact gold prices
+- How these factors might affect the Monday opening price
+- Whether gold is likely to gap up, gap down, or open near Friday's close
+
+WRITING STYLE RULES:
+- Write in plain, conversational English a 16-year-old could understand.
+- Avoid jargon. If you must use a financial term, briefly explain it in parentheses.
+- Use short sentences and short paragraphs (2-3 sentences each).
+- Structure the executive_summary in 3 clear sections separated by newlines:
+    1. "🔍 What's Happening:" — "The gold market is closed for the weekend." Then 2-3 sentences about weekend news/developments.
+    2. "📊 Why It Matters:" — 2-3 sentences on how weekend events could affect Monday's opening.
+    3. "👀 What to Watch on Monday:" — 2-3 sentences on what investors should monitor when the market reopens.
+- For bull_case: what could push gold UP when the market reopens Monday.
+- For bear_case: what could push gold DOWN when the market reopens Monday.
+- For risk_factors: weekend events or Monday-morning catalysts that could cause surprises.
+
+Return ONLY valid JSON with these EXACT keys:
+{
+  "overall_outlook": "bullish" | "bearish" | "neutral",
+  "executive_summary": "3-section weekend summary using the format above",
+  "bull_case": "what could push gold UP on Monday's opening",
+  "bear_case": "what could push gold DOWN on Monday's opening",
+  "risk_factors": ["risk1", "risk2", ...]
+}
+
+Do NOT include any price numbers in your output.
+Do NOT wrap in markdown fences.
+"""
+
+
 class LLMNarrator:
     """Generates prose narrative from ML predictions + agent intelligence."""
 
@@ -192,6 +233,93 @@ class LLMNarrator:
         result = _sanitize_technical_names(result)
 
         return result
+
+    def narrate_weekend(
+        self,
+        agent_reports: dict[str, dict],
+        current_price: float,
+    ) -> dict[str, Any]:
+        """Produce a weekend-specific narrative focused on Monday reopening.
+
+        No ML predictions are used — agents provide fresh intelligence about
+        weekend news/events and the LLM synthesizes a Monday outlook.
+        """
+        sections = [
+            f"WEEKEND BRIEFING — Gold market is CLOSED.",
+            f"Last Friday closing price: ₹{current_price:,.2f} per 10g.",
+            f"Current day: {now_ist().strftime('%A %B %d, %Y')}.",
+            "",
+            "The following agent reports contain FRESH intelligence gathered during "
+            "the weekend. Use these to analyze what will happen when the market "
+            "reopens on Monday morning.",
+        ]
+
+        if agent_reports:
+            sections.append("\n## Agent Intelligence Reports (Weekend Update)\n")
+            for name, report in agent_reports.items():
+                if not isinstance(report, dict):
+                    continue
+                bias = report.get('prediction_bias', 0)
+                bias = bias if isinstance(bias, (int, float)) else 0
+                conf = report.get('confidence', 0)
+                conf = conf if isinstance(conf, (int, float)) else 0
+                kf = report.get('key_factors', []) or []
+                sections.append(
+                    f"### {name.replace('_', ' ').title()}\n"
+                    f"- Outlook: {report.get('outlook', 'N/A')} | "
+                    f"Confidence: {conf:.2f} | "
+                    f"Bias: {bias:+.2f}\n"
+                    f"- Summary: {str(report.get('summary', ''))[:500]}\n"
+                    f"- Key factors: {', '.join(str(k) for k in kf[:5])}\n"
+                )
+
+        sections.append(
+            "\nBased on the weekend intelligence above, write your weekend "
+            "briefing as JSON focusing on what will happen when the market "
+            "reopens on Monday."
+        )
+
+        prompt = "\n".join(sections)
+
+        try:
+            response = self._llm.invoke([
+                SystemMessage(content=_WEEKEND_NARRATOR_SYSTEM),
+                HumanMessage(content=prompt),
+            ])
+            result = json.loads(response.content)
+        except json.JSONDecodeError:
+            logger.warning("Weekend narrator returned invalid JSON – using defaults")
+            result = self._weekend_defaults()
+        except Exception as e:
+            logger.error(f"Weekend narrator LLM call failed: {e}")
+            result = self._weekend_defaults()
+
+        # Validate
+        outlook = str(result.get("overall_outlook", "neutral")).lower()
+        if outlook not in {"bullish", "bearish", "neutral"}:
+            outlook = "neutral"
+        result["overall_outlook"] = outlook
+
+        result = _sanitize_technical_names(result)
+        return result
+
+    @staticmethod
+    def _weekend_defaults() -> dict:
+        return {
+            "overall_outlook": "neutral",
+            "executive_summary": (
+                "🔍 What's Happening: The gold market is closed for the weekend. "
+                "No trading activity is taking place.\n"
+                "📊 Why It Matters: Weekend developments could affect Monday's opening price.\n"
+                "👀 What to Watch on Monday: Monitor any geopolitical or economic news "
+                "that emerged over the weekend."
+            ),
+            "bull_case": "Not available — weekend analysis could not be generated.",
+            "bear_case": "Not available — weekend analysis could not be generated.",
+            "risk_factors": [
+                "Weekend geopolitical developments could cause a gap at Monday's open"
+            ],
+        }
 
     def _build_prompt(
         self,

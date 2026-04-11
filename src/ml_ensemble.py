@@ -354,13 +354,7 @@ class MLEnsemble:
             return []
 
         try:
-            # Using COMEX hourly data for prediction (MCX hourly unavailable on Yahoo).
-            # COMEX (GC=F) trades nearly 24/7 (Sun evening – Fri afternoon US time),
-            # so lag features (1h, 2h, 6h avg, etc.) are available even when MCX is
-            # closed (weekends, Monday pre-market).  This means the Monday 09:00 IST
-            # prediction has continuous COMEX price history to build features from,
-            # avoiding stale/missing lag data.  The orchestrator's weekend flatline
-            # logic then overrides market-closed hours with Friday's MCX close.
+            # Using COMEX hourly data for prediction (MCX hourly unavailable on Yahoo)
             df = self._market.fetch_ticker("GC=F", period_days=30, interval="1h")
             if df.empty:
                 return []

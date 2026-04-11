@@ -79,6 +79,7 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.page_link("app.py", label="🏠 Back to Home", icon=None)
+    st.page_link("pages/1_📜_Prediction_Archive.py", label="📜 Prediction Archive", icon=None)
 
     st.divider()
     st.caption(f"v1.0 · Updated {now_ist().strftime('%H:%M')}")
@@ -291,23 +292,9 @@ fig.add_trace(go.Scatter(
 # Weekend predicted line — dotted green, merged with actual price.
 # Market is closed so the prediction equals Friday's close (= actual).
 # Drawn AFTER the yellow actual line so it stays visible on top.
-# Bridge from the last weekday point so the lines are not disjointed.
 if not _weekend_df.empty:
-    _wk_x = list(_weekend_df["date"])
-    _wk_y = list(_weekend_df["actual"])
-    # Bridge: prepend last weekday point to connect the segments
-    if not _weekday_df.empty:
-        _bridge_row = _weekday_df.iloc[-1]
-        _wk_x = [_bridge_row["date"]] + _wk_x
-        _wk_y = [_bridge_row["actual"]] + _wk_y
-    # Bridge: append first weekday point AFTER the weekend to reconnect
-    _post_weekend = _weekday_df[_weekday_df["date"] > _weekend_df["date"].max()]
-    if not _post_weekend.empty:
-        _post_row = _post_weekend.iloc[0]
-        _wk_x = _wk_x + [_post_row["date"]]
-        _wk_y = _wk_y + [_post_row["actual"]]
     fig.add_trace(go.Scatter(
-        x=_wk_x, y=_wk_y,
+        x=_weekend_df["date"], y=_weekend_df["actual"],
         mode="lines+markers", name="Predicted (Market Closed)",
         line=dict(color="#00d4aa", width=2, dash="dot"),
         marker=dict(size=4, symbol="diamond"),

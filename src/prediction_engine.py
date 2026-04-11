@@ -348,6 +348,13 @@ class PredictionEngine:
                     time.sleep(wait_seconds)
                     if not self._running:
                         break
+                    # Re-check after sleeping: the next slot may have landed
+                    # on a weekend (e.g. Friday 18:00 → Saturday 00:00).
+                    if not is_market_open():
+                        logger.info(
+                            "Auto-refresh: woke on weekend/holiday — skipping generation"
+                        )
+                        continue
                     self.generate()
                 except Exception as e:
                     logger.error(f"Auto-refresh failed: {e}")

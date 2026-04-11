@@ -403,9 +403,14 @@ if not gold_df.empty:
     range_start = gold_df.index.min()
     range_end = gold_df.index.max()
 
+    # Build formatted tick labels for a categorical x-axis.
+    # A categorical axis places every candle at equal spacing,
+    # which eliminates all visual gaps (weekends AND overnight).
+    _ohlc_labels = gold_df.index.strftime("%b %d %H:%M")
+
     fig_ohlc = go.Figure()
     fig_ohlc.add_trace(go.Candlestick(
-        x=gold_df.index,
+        x=_ohlc_labels,
         open=gold_df["Open"],
         high=gold_df["High"],
         low=gold_df["Low"],
@@ -419,8 +424,8 @@ if not gold_df.empty:
         xaxis_rangeslider_visible=False,
         xaxis=dict(
             fixedrange=True,
-            range=[range_start, range_end + pd.Timedelta(hours=2)],
-            rangebreaks=[dict(bounds=["sat", "mon"])],
+            type="category",
+            nticks=10,
         ),
         yaxis=dict(fixedrange=True, title="Price (₹/10g)"),
     )
@@ -1284,6 +1289,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                 title="Predicted vs Actual Indian Gold Price (₹/10g)",
                 template="plotly_dark", height=450,
                 yaxis_title="Price (₹/10g)", xaxis_title="Time",
+                xaxis=dict(rangebreaks=[dict(bounds=["sat", "mon"])]),
                 yaxis=dict(range=_y_range) if _y_range else {},
                 legend=dict(orientation="h", yanchor="bottom", y=1.02),
                 hovermode="x unified",

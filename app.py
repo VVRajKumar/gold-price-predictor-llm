@@ -31,7 +31,7 @@ if "src" in sys.modules:
 try:
     from src.prediction_engine import PredictionEngine
     from src.data_fetchers.market_data import MarketDataFetcher
-    from src.time_utils import now_ist, parse_iso_to_ist
+    from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET
 except KeyError:
     # On Streamlit Cloud hot-reload the module cache can be in an inconsistent
     # state after the cleanup above.  A second import attempt resolves it.
@@ -40,7 +40,7 @@ except KeyError:
         importlib.reload(sys.modules["src"])
     from src.prediction_engine import PredictionEngine
     from src.data_fetchers.market_data import MarketDataFetcher
-    from src.time_utils import now_ist, parse_iso_to_ist
+    from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET
 
 # ── Display-time name helpers ────────────────────────────────────────
 # Chart-friendly names (short labels for SHAP bar chart / table headers)
@@ -262,7 +262,7 @@ if not gold_df.empty:
 
     # Convert index from UTC to IST so charts align with IST predictions
     if isinstance(gold_df.index, pd.DatetimeIndex) and not gold_df.empty:
-        gold_df.index = gold_df.index + pd.Timedelta(hours=5, minutes=30)
+        gold_df.index = gold_df.index + pd.Timedelta(IST_OFFSET)
         gold_df.index = gold_df.index.floor("h")
         gold_df = gold_df[~gold_df.index.duplicated(keep="last")]
 

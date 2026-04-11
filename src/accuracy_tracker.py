@@ -279,7 +279,7 @@ class AccuracyTracker:
         # After adding the IST offset, floor to the nearest hour so each
         # UTC candle maps to a unique IST hour (max 30-min rounding error).
         if not gold_df.empty and isinstance(gold_df.index, pd.DatetimeIndex):
-            gold_df.index = gold_df.index + pd.Timedelta(hours=5, minutes=30)
+            gold_df.index = gold_df.index + pd.Timedelta(IST_OFFSET)
             gold_df.index = gold_df.index.floor("h")
             # Drop duplicate hours that may arise from rounding
             gold_df = gold_df[~gold_df.index.duplicated(keep="last")]

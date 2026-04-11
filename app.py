@@ -260,6 +260,12 @@ if not gold_df.empty:
     # Convert USD/oz to INR/10g using time-aligned daily FX rates
     gold_df = market.convert_usd_to_inr(gold_df, period_days=10)
 
+    # Convert index from UTC to IST so charts align with IST predictions
+    if isinstance(gold_df.index, pd.DatetimeIndex) and not gold_df.empty:
+        gold_df.index = gold_df.index + pd.Timedelta(hours=5, minutes=30)
+        gold_df.index = gold_df.index.floor("h")
+        gold_df = gold_df[~gold_df.index.duplicated(keep="last")]
+
     range_start = gold_df.index.min()
     range_end = gold_df.index.max()
 
@@ -936,7 +942,11 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
     # Collect all evaluated hourly results from every plan.
     all_daily = []
     for ev in all_evals:
+        _plan_gen = ev.get("plan_generated_at", "")
         for d in ev.get("daily_results", []):
+            # Ensure plan_generated_at is available for fair dedup
+            if "plan_generated_at" not in d:
+                d = dict(d, plan_generated_at=_plan_gen)
             all_daily.append(d)
 
     if all_daily:
@@ -944,14 +954,19 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         acc_df["date"] = pd.to_datetime(acc_df["date"])
 
         # When multiple predictions cover the same hour (from overlapping
-        # 24-hour forecasts), prefer within-band predictions first, then
-        # pick the lowest error %.  This ensures band-hit metrics and the
-        # chart stay consistent, and avoids penalising band_hit_rate by
-        # selecting a tight-band miss over a wider-band hit.
-        acc_df["_outside"] = ~acc_df["within_band"]
-        acc_df = acc_df.sort_values(["date", "_outside", "pct_error"])
-        acc_df = acc_df.drop_duplicates(subset="date", keep="first")
-        acc_df = acc_df.drop(columns=["_outside"])
+        # 24-hour forecasts), use the prediction from the most recently
+        # generated plan.  This is fair — the most recent plan had the
+        # freshest information.  Previous approach cherry-picked the best
+        # result, inflating metrics.
+        if "plan_generated_at" in acc_df.columns:
+            acc_df["_gen_at"] = pd.to_datetime(acc_df["plan_generated_at"], errors="coerce")
+            acc_df = acc_df.sort_values(["date", "_gen_at"], ascending=[True, False])
+            acc_df = acc_df.drop_duplicates(subset="date", keep="first")
+            acc_df = acc_df.drop(columns=["_gen_at"], errors="ignore")
+        else:
+            # Fallback if no plan_generated_at (old data)
+            acc_df = acc_df.sort_values(["date", "pct_error"])
+            acc_df = acc_df.drop_duplicates(subset="date", keep="first")
         acc_df = acc_df.sort_values("date")
 
         fig_acc = go.Figure()

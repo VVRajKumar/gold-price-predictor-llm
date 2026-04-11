@@ -137,11 +137,17 @@ accuracy_tracker = engine.get_accuracy_tracker()
 
 # Streamlit can sometimes keep a stale cached engine object across hot reloads.
 # If weekly API is missing or market fetcher lacks INR helpers, rebuild once.
-if not hasattr(engine, "ensure_weekly_prediction") or not hasattr(market, "convert_usd_to_inr"):
+if not hasattr(engine, "ensure_hourly_prediction") or not hasattr(market, "convert_usd_to_inr"):
     st.cache_resource.clear()
     engine = get_engine()
     market = get_market()
     accuracy_tracker = engine.get_accuracy_tracker()
+
+# Start background auto-refresh thread so predictions are regenerated at
+# each 6-hour IST slot boundary (00:00, 06:00, 12:00, 18:00) even if
+# the user hasn't refreshed the page.  The method is a no-op if already
+# running, so repeated Streamlit script re-runs are safe.
+engine.start_auto_refresh()
 
 
 def outlook_color(outlook: str) -> str:
@@ -237,16 +243,10 @@ if view_mode == "Weekly Archive":
 
 # MAIN DASHBOARD
 # ════════════════════════════════════════════════════════════════════
-# Don't auto-generate on every session launch.
-# Show the cached plan; only generate if no plan exists at all or the
-# 6-hour slot has changed (ensure_hourly_prediction handles this check).
-plan = engine.get_current_plan()
-if plan is None:
-    # No cached plan at all — need at least one prediction
-    if hasattr(engine, "ensure_weekly_prediction"):
-        plan = engine.ensure_weekly_prediction()
-    else:
-        plan = engine.get_current_plan()
+# On every page visit, check the 6-hour slot.  ensure_hourly_prediction()
+# returns the cached plan immediately when the slot hasn't changed, but
+# regenerates if we've crossed into a new slot (00:00/06:00/12:00/18:00 IST).
+plan = engine.ensure_hourly_prediction()
 
 # Always keep the live OHLC chart visible.
 st.subheader("🕯️ Live Indian Gold OHLC (10D) – INR/10g")
@@ -1036,6 +1036,9 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         with st.expander("📋 Hourly Accuracy Breakdown", expanded=False):
             display_df = acc_df[["date", "predicted", "actual", "low_range",
                                  "high_range", "error", "pct_error", "within_band"]].copy()
+            # Sort chronologically (oldest → newest) so the table reads
+            # in natural time order instead of an arbitrary insertion order.
+            display_df = display_df.sort_values("date")
             display_df = display_df.rename(columns={
                 "date": "Hour",
                 "predicted": "Predicted (₹)",

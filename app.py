@@ -205,12 +205,7 @@ with st.sidebar:
             st.rerun()
     else:
         st.button("🔄 Generate New Prediction", width="stretch", type="primary", disabled=True)
-        _cached = engine.get_current_plan()
-        if _cached is not None:
-            _gen_at = _cached.generated_at[:16].replace("T", " ")
-            st.info(f"📅 Market closed (weekend). Showing last prediction from **{_gen_at} IST**.")
-        else:
-            st.warning("📅 Market closed (weekend). No cached prediction available — will auto-generate on Monday.")
+        st.info("📅 Market closed — prices held flat at Friday's close.")
 
     st.divider()
     st.markdown("### Agent Roster")
@@ -240,19 +235,15 @@ if not is_market_open():
     _day_name = now_ist().strftime("%A")
     _cached_plan = engine.get_current_plan()
     if _cached_plan is not None:
-        _gen_at = _cached_plan.generated_at[:16].replace("T", " ")
-        st.warning(
-            f"📅 **Gold market is closed today ({_day_name}).** "
-            f"COMEX and MCX gold markets do not trade on weekends. "
-            f"Displaying the last prediction from **{_gen_at} IST** (Friday's session). "
-            f"New predictions will resume automatically on Monday."
+        st.info(
+            f"📅 **Gold market is closed ({_day_name}).** "
+            f"Prices are held flat at Friday's closing level. "
+            f"Live predictions resume automatically on Monday."
         )
     else:
         st.warning(
-            f"📅 **Gold market is closed today ({_day_name}).** "
-            f"COMEX and MCX gold markets do not trade on weekends. "
-            f"No cached prediction is available. "
-            f"New predictions will resume automatically on Monday."
+            f"📅 **Gold market is closed ({_day_name}).** "
+            f"No prediction available yet — will auto-generate on Monday."
         )
 
 if view_mode == "Weekly Archive":
@@ -473,6 +464,11 @@ if plan.daily_predictions:
     pred_df = pd.DataFrame([dp.model_dump() for dp in plan.daily_predictions])
     pred_df["date"] = pd.to_datetime(pred_df["date"])
 
+    # Detect weekend (market-closed) hours in predictions
+    pred_df["_is_weekend"] = pred_df["date"].dt.weekday >= 5  # Sat=5, Sun=6
+    _has_weekend_hours = pred_df["_is_weekend"].any()
+    _all_weekend = pred_df["_is_weekend"].all()
+
     # Reuse the already-converted INR data from the OHLC chart above
     # (avoids a second fetch+convert which can double-convert on Cloud)
     gold_recent = gold_df.copy() if not gold_df.empty else pd.DataFrame()
@@ -502,26 +498,49 @@ if plan.daily_predictions:
             line=dict(color="#ffd93d", width=2),
         ))
 
-    # Prediction band
-    fig.add_trace(go.Scatter(
-        x=pred_df["date"], y=pred_df["high_range"],
-        mode="lines", name="Upper Band",
-        line=dict(width=0), showlegend=False,
-    ))
-    fig.add_trace(go.Scatter(
-        x=pred_df["date"], y=pred_df["low_range"],
-        mode="lines", name="Prediction Range",
-        fill="tonexty", fillcolor="rgba(0,212,170,0.15)",
-        line=dict(width=0),
-    ))
+    if _all_weekend:
+        # All prediction hours are on the weekend — show prediction as
+        # a continuation of the actual price line (same yellow color).
+        fig.add_trace(go.Scatter(
+            x=pred_df["date"], y=pred_df["predicted_price"],
+            mode="lines", name="Market Closed (Flat)",
+            line=dict(color="#ffd93d", width=2, dash="dot"),
+        ))
+    else:
+        # Split predictions into weekday (active) and weekend (flat) segments
+        weekday_preds = pred_df[~pred_df["_is_weekend"]]
+        weekend_preds = pred_df[pred_df["_is_weekend"]]
 
-    # Prediction line
-    fig.add_trace(go.Scatter(
-        x=pred_df["date"], y=pred_df["predicted_price"],
-        mode="lines+markers", name="Predicted",
-        line=dict(color="#00d4aa", width=3),
-        marker=dict(size=10, symbol="circle"),
-    ))
+        # Prediction band (only for weekday active predictions)
+        if not weekday_preds.empty:
+            fig.add_trace(go.Scatter(
+                x=weekday_preds["date"], y=weekday_preds["high_range"],
+                mode="lines", name="Upper Band",
+                line=dict(width=0), showlegend=False,
+            ))
+            fig.add_trace(go.Scatter(
+                x=weekday_preds["date"], y=weekday_preds["low_range"],
+                mode="lines", name="Prediction Range",
+                fill="tonexty", fillcolor="rgba(0,212,170,0.15)",
+                line=dict(width=0),
+            ))
+
+        # Active prediction line (weekday hours)
+        if not weekday_preds.empty:
+            fig.add_trace(go.Scatter(
+                x=weekday_preds["date"], y=weekday_preds["predicted_price"],
+                mode="lines+markers", name="Predicted",
+                line=dict(color="#00d4aa", width=3),
+                marker=dict(size=10, symbol="circle"),
+            ))
+
+        # Weekend flatline — shown as dotted yellow continuation of actual
+        if not weekend_preds.empty:
+            fig.add_trace(go.Scatter(
+                x=weekend_preds["date"], y=weekend_preds["predicted_price"],
+                mode="lines", name="Market Closed (Flat)",
+                line=dict(color="#ffd93d", width=2, dash="dot"),
+            ))
 
     fig.update_layout(
         template="plotly_dark", height=500,

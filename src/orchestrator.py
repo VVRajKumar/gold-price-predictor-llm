@@ -443,6 +443,31 @@ class Orchestrator:
                     key_driver="Fallback baseline (ML unavailable)",
                 ))
 
+        # ── Weekend flatline ────────────────────────────────────────
+        # If any predicted hours fall on Saturday or Sunday (IST weekday 5/6),
+        # flatline those hours at the last Friday market price with tight bands.
+        # Gold markets (COMEX/MCX) are closed on weekends, so predictions beyond
+        # Friday are meaningless — just hold the last known price.
+        # Note: dp.date is already in IST (derived from current_slot_ist above).
+        if daily:
+            last_market_price = current_price  # default to anchor
+            # First pass: find the last weekday price
+            for dp in daily:
+                dp_weekday = datetime.strptime(dp.date, "%Y-%m-%d %H:%M").weekday()
+                if dp_weekday < 5:  # Monday=0 … Friday=4
+                    last_market_price = dp.predicted_price
+                else:
+                    break  # first weekend hour found
+            # Second pass: flatline weekend hours
+            for dp in daily:
+                dp_weekday = datetime.strptime(dp.date, "%Y-%m-%d %H:%M").weekday()
+                if dp_weekday >= 5:  # Saturday=5, Sunday=6
+                    dp.predicted_price = round(last_market_price, 2)
+                    dp.low_range = round(last_market_price * 0.998, 2)
+                    dp.high_range = round(last_market_price * 1.002, 2)
+                    dp.confidence = 0.95
+                    dp.key_driver = "Market closed (weekend) — price held flat"
+
         # Overall confidence from ML band widths (NOT from LLM)
         ml_confidence = compute_ml_confidence(ml_predictions, current_price)
 

@@ -290,19 +290,14 @@ with st.sidebar:
         st.info("📅 Market closed — prices held flat at Friday's close.")
         if st.button("🔄 Refresh Weekend Analysis", width="stretch", type="secondary"):
             with st.spinner("Running agents for fresh weekend news … this takes 1-2 minutes"):
-                plan = engine.generate_weekend_analysis()
-            st.success("Weekend analysis updated with latest news!")
-            st.rerun()
+                try:
+                    plan = engine.generate_weekend_analysis()
+                    st.success("Weekend analysis updated with latest news!")
+                    st.rerun()
+                except Exception as _wk_err:
+                    st.error(f"Weekend analysis failed: {_wk_err}. Please try again later.")
 
     st.divider()
-
-    # ── Navigation ────────────────────────────────────────────────────
-    st.markdown(
-        '<span style="font-size:0.75rem;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Navigation</span>',
-        unsafe_allow_html=True,
-    )
-    st.page_link("app.py", label="🏠 Live Dashboard", icon=None)
-    st.page_link("pages/1_📜_Prediction_Archive.py", label="📜 Prediction Archive", icon=None)
 
     st.divider()
 
@@ -1329,9 +1324,23 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         # Weekend predicted line — dotted green, merged with actual price.
         # Market is closed so the prediction equals Friday's close (= actual).
         # Drawn AFTER the yellow actual line so it stays visible on top.
+        # Bridge from the last weekday point so the lines are not disjointed.
         if not _acc_weekend.empty:
+            _wk_x = list(_acc_weekend["date"])
+            _wk_y = list(_acc_weekend["actual"])
+            # Bridge: prepend last weekday point to connect the segments
+            if not _acc_weekday.empty:
+                _bridge_row = _acc_weekday.iloc[-1]
+                _wk_x = [_bridge_row["date"]] + _wk_x
+                _wk_y = [_bridge_row["actual"]] + _wk_y
+            # Bridge: append first weekday point AFTER the weekend to reconnect
+            _post_weekend = _acc_weekday[_acc_weekday["date"] > _acc_weekend["date"].max()]
+            if not _post_weekend.empty:
+                _post_row = _post_weekend.iloc[0]
+                _wk_x = _wk_x + [_post_row["date"]]
+                _wk_y = _wk_y + [_post_row["actual"]]
             fig_acc.add_trace(go.Scatter(
-                    x=_acc_weekend["date"], y=_acc_weekend["actual"],
+                    x=_wk_x, y=_wk_y,
                     mode="lines+markers", name="Predicted (Market Closed)",
                     line=dict(color="#00d4aa", width=2, dash="dot"),
                     marker=dict(size=5, symbol="diamond"),

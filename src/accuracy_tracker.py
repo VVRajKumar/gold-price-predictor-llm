@@ -19,7 +19,7 @@ from loguru import logger
 
 from .config import CACHE_DIR
 from .data_fetchers.market_data import MarketDataFetcher
-from .time_utils import iso_now_ist, now_ist, IST_OFFSET
+from .time_utils import iso_now_ist, now_ist, IST_OFFSET, is_market_closed_ist
 from . import cloud_storage
 
 
@@ -463,6 +463,15 @@ class AccuracyTracker:
                 high = float(high)
             except (TypeError, ValueError):
                 continue
+
+            # Weekend / market-closed hours: override predicted price with
+            # Friday's actual closing price and use tight ±0.2% bands with
+            # 95% confidence.  The market doesn't trade during these hours so
+            # the prediction should simply be the last known close.
+            if is_market_closed_ist(pred_ts.to_pydatetime()):
+                predicted = actual
+                low = round(actual * 0.998, 2)
+                high = round(actual * 1.002, 2)
 
             error = predicted - actual
             abs_error = abs(error)

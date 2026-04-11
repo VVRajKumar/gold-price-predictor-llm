@@ -32,12 +32,12 @@ try:
     from src.prediction_engine import PredictionEngine
     from src.data_fetchers.market_data import MarketDataFetcher
     from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET
-except KeyError:
+except (KeyError, ImportError, AttributeError):
     # On Streamlit Cloud hot-reload the module cache can be in an inconsistent
-    # state after the cleanup above.  A second import attempt resolves it.
+    # state after the cleanup above.  Purge all stale src.* modules and retry.
     import importlib
-    if "src" in sys.modules:
-        importlib.reload(sys.modules["src"])
+    for _k in [k for k in list(sys.modules) if k == "src" or k.startswith("src.")]:
+        del sys.modules[_k]
     from src.prediction_engine import PredictionEngine
     from src.data_fetchers.market_data import MarketDataFetcher
     from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET

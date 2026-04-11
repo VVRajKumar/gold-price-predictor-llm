@@ -51,15 +51,18 @@ XGBOOST_BLEND_WEIGHT = float(os.getenv("XGBOOST_BLEND_WEIGHT", "0.45"))
 HISTORICAL_LOOKBACK_DAYS = 365
 
 # ── Ticker Symbols ──────────────────────────────────────────────────
-GOLD_TICKER = "GC=F"           # COMEX Gold Futures (base reference)
-MCX_GOLD_TICKER = "GOLD.NS"   # MCX Gold via NSE (INR-denominated proxy)
-SILVER_TICKER = "SI=F"         # Silver Futures
-OIL_TICKER = "CL=F"           # Crude Oil Futures
-DXY_TICKER = "DX-Y.NYB"       # US Dollar Index (affects INR gold)
+# Primary: Indian market tickers
+MCX_GOLD_TICKER = "GOLD.NS"   # MCX Gold via NSE (INR-denominated – primary source)
 USDINR_TICKER = "INR=X"       # USD/INR exchange rate
 NIFTY_TICKER = "^NSEI"        # Nifty 50 Index
-INDIA_VIX_TICKER = "^INDIAVIX" # India VIX
 SENSEX_TICKER = "^BSESN"      # BSE Sensex
+INDIA_VIX_TICKER = "^INDIAVIX" # India VIX
+
+# Global reference tickers (supplements Indian data)
+GOLD_TICKER = "GC=F"           # COMEX Gold Futures (fallback when MCX unavailable)
+SILVER_TICKER = "SI=F"         # Silver Futures (global reference)
+OIL_TICKER = "CL=F"           # Crude Oil Futures (global reference)
+DXY_TICKER = "DX-Y.NYB"       # US Dollar Index (global reference, affects INR)
 TREASURY_10Y = "^TNX"         # US 10-Year Treasury (global reference)
 
 GOLD_ETF_TICKERS = [
@@ -74,11 +77,11 @@ GOLD_FUND_TICKERS = [
 ]
 GOLD_MINER_TICKERS = ["TITAN.NS", "TBZ.NS", "RAJESHEXPO.NS"]
 
-# ── FRED Series IDs (global macro reference – supplements India-specific data) ──
+# ── FRED Series IDs (global macro context – supplements India-specific data) ──
+# These are US-based indicators that influence Indian gold through global spillover.
+# They are NOT the primary drivers; India macro data (RBI, India CPI) is primary.
 FRED_SERIES = {
     "us_fed_funds_rate": "FEDFUNDS",          # US Fed rate (global spillover)
     "us_cpi": "CPIAUCSL",                     # US CPI (global inflation ref)
     "us_real_interest_rate": "REAINTRATREARAT10Y",
-    "us_m2_money_supply": "M2SL",
-    "us_inflation_expectation": "T5YIE",
 }

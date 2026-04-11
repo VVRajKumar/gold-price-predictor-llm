@@ -123,12 +123,17 @@ class MacroDataFetcher:
 
     # ------------------------------------------------------------------ #
     def get_macro_summary(self) -> dict:
-        """Return a compact summary of key macro indicators."""
+        """Return a compact summary of key macro indicators.
+
+        Note: These are US/global macro indicators from FRED.  They serve as
+        *global context* for Indian gold — not the primary drivers.  India-specific
+        macro data (RBI repo rate, India CPI, import duty) comes from india_context.py.
+        """
         summary = {}
         for name in FRED_SERIES:
             df = self.fetch_series(name, lookback_days=180)
             if df.empty:
-                summary[name] = {"latest": None, "change_6m": None}
+                summary[name] = {"latest": None, "change_6m": None, "context": "global_reference"}
                 continue
 
             latest_val = float(df["value"].iloc[-1])
@@ -140,5 +145,6 @@ class MacroDataFetcher:
                 "date": df.index[-1].strftime("%Y-%m-%d"),
                 "6m_change": change,
                 "6m_change_pct": round(change / abs(first_val) * 100, 2) if first_val != 0 else 0,
+                "context": "global_reference",
             }
         return summary

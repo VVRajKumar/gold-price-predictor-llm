@@ -12,8 +12,8 @@ from loguru import logger
 from cachetools import TTLCache
 
 from ..config import (
-    GOLD_TICKER, SILVER_TICKER, OIL_TICKER, DXY_TICKER,
-    USDINR_TICKER, NIFTY_TICKER, INDIA_VIX_TICKER,
+    GOLD_TICKER, MCX_GOLD_TICKER, SILVER_TICKER, OIL_TICKER, DXY_TICKER,
+    USDINR_TICKER, NIFTY_TICKER, INDIA_VIX_TICKER, SENSEX_TICKER,
     HISTORICAL_LOOKBACK_DAYS,
 )
 
@@ -74,14 +74,18 @@ def _yf_download_with_retry(
 class MarketDataFetcher:
     """Fetch OHLCV market data for gold and correlated assets."""
 
+    # Indian market tickers (primary)
     TICKERS = {
+        "gold_mcx": MCX_GOLD_TICKER,
         "gold": GOLD_TICKER,
+        "usdinr": USDINR_TICKER,
+        "nifty50": NIFTY_TICKER,
+        "sensex": SENSEX_TICKER,
+        "india_vix": INDIA_VIX_TICKER,
+        # Global reference tickers
         "silver": SILVER_TICKER,
         "oil": OIL_TICKER,
         "usd_index": DXY_TICKER,
-        "usdinr": USDINR_TICKER,
-        "nifty50": NIFTY_TICKER,
-        "india_vix": INDIA_VIX_TICKER,
     }
 
     # ------------------------------------------------------------------ #
@@ -264,7 +268,24 @@ class MarketDataFetcher:
 
     # ------------------------------------------------------------------ #
     def get_gold_inr_price(self, period_days: int = 7) -> float:
-        """Return gold price in INR per 10 grams (Indian standard unit)."""
+        """Return gold price in INR per 10 grams (Indian standard unit).
+
+        Strategy: try MCX (GOLD.NS) first since it's already in INR/10g,
+        fall back to COMEX (GC=F) + USD/INR conversion.
+        """
+        # Primary: MCX Gold (already INR-denominated)
+        mcx_df = self.fetch_ticker(MCX_GOLD_TICKER, period_days=period_days)
+        if not mcx_df.empty:
+            close = mcx_df["Close"].squeeze()
+            if hasattr(close, "iloc") and len(close) > 0:
+                price = float(close.iloc[-1])
+                # MCX gold is in INR per 10g; sanity check (should be > 10,000)
+                if price > 10_000:
+                    logger.info(f"MCX gold price: ₹{price:,.2f}/10g (primary source)")
+                    return round(price, 2)
+                logger.warning(f"MCX gold price ₹{price:.2f} looks too low, falling back to COMEX")
+
+        # Fallback: COMEX Gold + USD/INR conversion
         usd_rate = self.get_usdinr_rate()
         df = self.fetch_ticker(GOLD_TICKER, period_days=period_days)
         if df.empty:
@@ -274,12 +295,47 @@ class MarketDataFetcher:
             usd_per_oz = float(close.iloc[-1])
             # 1 troy oz = 31.1035 grams → per 10g
             inr_per_10g = (usd_per_oz / 31.1035) * 10 * usd_rate
+            logger.info(f"COMEX gold price: ₹{inr_per_10g:,.2f}/10g (fallback via COMEX+FX)")
             return round(inr_per_10g, 2)
         return 0.0
 
     # ------------------------------------------------------------------ #
     def get_gold_summary(self, period_days: int = 30) -> dict:
-        """Return a compact dict summarising recent gold price action in INR/10g."""
+        """Return a compact dict summarising recent gold price action in INR/10g.
+
+        Strategy: try MCX (GOLD.NS) first since it's already in INR/10g,
+        fall back to COMEX (GC=F) + USD/INR conversion.
+        """
+        # Try MCX first (native INR/10g – no conversion needed)
+        mcx_df = self.fetch_ticker(MCX_GOLD_TICKER, period_days)
+        if not mcx_df.empty:
+            close = pd.to_numeric(mcx_df["Close"].squeeze(), errors="coerce").dropna()
+            if not close.empty and float(close.iloc[-1]) > 10_000:
+                high = pd.to_numeric(mcx_df["High"].squeeze(), errors="coerce").dropna()
+                low = pd.to_numeric(mcx_df["Low"].squeeze(), errors="coerce").dropna()
+                volume = pd.to_numeric(mcx_df["Volume"].squeeze(), errors="coerce").dropna() if "Volume" in mcx_df else pd.Series(dtype=float)
+
+                current = float(close.iloc[-1])
+                prev = float(close.iloc[-2]) if len(close) > 1 else current
+                daily_change_pct = 0.0 if prev == 0 else (current - prev) / prev * 100
+
+                return {
+                    "current_price": round(current, 2),
+                    "prev_close": round(prev, 2),
+                    "daily_change_pct": round(float(daily_change_pct), 3),
+                    "30d_high": round(float(high.max()), 2) if not high.empty else round(current, 2),
+                    "30d_low": round(float(low.min()), 2) if not low.empty else round(current, 2),
+                    "30d_avg": round(float(close.mean()), 2),
+                    "30d_volatility": round(float(close.pct_change().dropna().std() * 100), 4) if len(close) > 2 else 0.0,
+                    "volume_latest": int(volume.iloc[-1]) if not volume.empty else 0,
+                    "data_points": int(len(close)),
+                    "as_of": close.index[-1].strftime("%Y-%m-%d"),
+                    "currency": "INR",
+                    "unit": "per 10 grams",
+                    "source": "MCX (GOLD.NS)",
+                }
+
+        # Fallback: COMEX Gold + USD/INR conversion
         df = self.fetch_ticker(GOLD_TICKER, period_days)
         if df.empty:
             return {"error": "No gold data available"}
@@ -324,20 +380,52 @@ class MarketDataFetcher:
             "as_of": close.index[-1].strftime("%Y-%m-%d"),
             "currency": "INR",
             "unit": "per 10 grams",
+            "source": "COMEX (GC=F) + USD/INR conversion",
         }
+
+    # ------------------------------------------------------------------ #
+    def fetch_gold_inr_ohlc(
+        self,
+        period_days: int = 30,
+        interval: str = "1h",
+    ) -> tuple[pd.DataFrame, str]:
+        """Fetch gold OHLC data in INR/10g, trying MCX first.
+
+        Returns (DataFrame, source_label).  MCX data is already INR/10g;
+        COMEX data is converted via USD/INR.
+        """
+        # Primary: MCX Gold (daily only – hourly data may not be available)
+        if interval == "1d":
+            mcx_df = self.fetch_ticker(MCX_GOLD_TICKER, period_days=period_days, interval=interval)
+            if not mcx_df.empty:
+                close = pd.to_numeric(mcx_df["Close"].squeeze(), errors="coerce").dropna()
+                if not close.empty and float(close.iloc[-1]) > 10_000:
+                    logger.info(f"Using MCX gold data ({len(mcx_df)} rows)")
+                    return mcx_df, "MCX (GOLD.NS)"
+
+        # Fallback: COMEX Gold + USD/INR conversion
+        comex_df = self.fetch_ticker(GOLD_TICKER, period_days=period_days, interval=interval)
+        if comex_df.empty:
+            return pd.DataFrame(), "unavailable"
+
+        converted = self.convert_usd_to_inr(comex_df, period_days=period_days)
+        return converted, "COMEX (GC=F) + FX"
 
     # ------------------------------------------------------------------ #
     def get_correlation_snapshot(self, period_days: int = 90) -> dict:
         """Compute recent correlations between gold and other assets."""
         all_data = self.fetch_all(period_days)
-        gold_close = all_data.get("gold")
+        # Use MCX gold if available, else COMEX
+        gold_close = all_data.get("gold_mcx")
+        if gold_close is None or gold_close.empty:
+            gold_close = all_data.get("gold")
         if gold_close is None or gold_close.empty:
             return {}
 
         gold_returns = gold_close["Close"].squeeze().pct_change().dropna()
         correlations = {}
         for name, df in all_data.items():
-            if name == "gold" or df.empty:
+            if name in ("gold", "gold_mcx") or df.empty:
                 continue
             other_returns = df["Close"].squeeze().pct_change().dropna()
             # Align indices

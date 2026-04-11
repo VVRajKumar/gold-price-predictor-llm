@@ -35,6 +35,10 @@ _HOURLY_SCORECARD_START = datetime(2026, 4, 4, 0, 0, 0)
 # 0.05% ≈ ₹36 at ₹73k — ignores noise from bid/ask spread & rounding.
 _DIR_NEUTRAL_PCT = 0.05
 
+# Market-closed (weekend) band factors: predicted = actual, bands ±0.2%
+_MARKET_CLOSED_BAND_LOWER = 0.998  # -0.2%
+_MARKET_CLOSED_BAND_UPPER = 1.002  # +0.2%
+
 # ── Composite accuracy score weights & scaling ──────────────────────
 # MAPE score = max(0, 100 - MAPE * MAPE_SCALE_FACTOR).  A MAPE of 10%
 # maps to a score of 0; 0% maps to 100.
@@ -470,8 +474,8 @@ class AccuracyTracker:
             # the prediction should simply be the last known close.
             if is_market_closed_ist(pred_ts.to_pydatetime()):
                 predicted = actual
-                low = round(actual * 0.998, 2)
-                high = round(actual * 1.002, 2)
+                low = round(actual * _MARKET_CLOSED_BAND_LOWER, 2)
+                high = round(actual * _MARKET_CLOSED_BAND_UPPER, 2)
 
             error = predicted - actual
             abs_error = abs(error)

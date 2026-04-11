@@ -51,8 +51,11 @@ class AccuracyTracker:
         self._last_checked: Optional[str] = None
         self._auto_running = False
         self._purge_stale_entries()
-        self._rebase_guardrails()
+        # Backfill archive BEFORE rebase so that data from the accuracy log
+        # (e.g. April 4-6 evaluations) is copied to the permanent archive
+        # before _rebase_guardrails() clears the log for re-evaluation.
         self._backfill_archive_from_log()
+        self._rebase_guardrails()
 
     # ── Purge pre-INR / pre-cutoff entries ───────────────────────────
 

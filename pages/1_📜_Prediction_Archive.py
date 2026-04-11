@@ -66,7 +66,11 @@ st.caption(
 )
 
 # ── Navigation ───────────────────────────────────────────────────────
-st.markdown("🏠 **[← Back to Home](./)**")
+st.markdown(
+    '🏠 <a href="./" target="_self" style="color: inherit; text-decoration: none;">'
+    '<b>← Back to Home</b></a>',
+    unsafe_allow_html=True,
+)
 
 # ── Load archive data ────────────────────────────────────────────────
 archive = accuracy_tracker.get_prediction_archive()
@@ -78,6 +82,55 @@ if not archive:
         "from the main dashboard and check back after those hours have passed."
     )
     st.stop()
+
+# ── Helper: compute directional accuracy from a sorted DataFrame ─────
+def _compute_directional_accuracy(data: pd.DataFrame) -> float:
+    """Compute directional accuracy from consecutive hourly predictions.
+
+    Returns the percentage of hours where the predicted direction of
+    price movement matched the actual direction.  When the actual price
+    moved less than 0.01%, the market is considered flat and counted as
+    correct regardless of prediction.
+    """
+    _NEUTRAL_PCT = 0.01
+    if len(data) < 2 or "predicted" not in data.columns or "actual" not in data.columns:
+        return 50.0
+    sorted_df = data.sort_values("date").reset_index(drop=True)
+    correct = 0
+    total = 0
+    for i in range(1, len(sorted_df)):
+        prev_actual = sorted_df.loc[i - 1, "actual"]
+        curr_predicted = sorted_df.loc[i, "predicted"]
+        curr_actual = sorted_df.loc[i, "actual"]
+        if prev_actual <= 0:
+            continue
+        # Only compare consecutive hours (gap ≤ 2 hours)
+        gap = (sorted_df.loc[i, "date"] - sorted_df.loc[i - 1, "date"]).total_seconds()
+        if gap > 2 * 3600:
+            continue
+        actual_move_pct = abs(curr_actual - prev_actual) / prev_actual * 100
+        total += 1
+        if actual_move_pct < _NEUTRAL_PCT:
+            correct += 1  # flat market – auto-correct
+        else:
+            pred_dir = 1 if curr_predicted >= prev_actual else -1
+            actual_dir = 1 if curr_actual >= prev_actual else -1
+            if pred_dir == actual_dir:
+                correct += 1
+    return round(correct / total * 100, 1) if total > 0 else 50.0
+
+
+def _compute_accuracy_score(mape: float, band_hit: float, direction: float) -> float:
+    """Compute a composite accuracy score (0–100).
+
+    Combines three independent quality dimensions:
+      • MAPE score (40%): 100 when MAPE=0%, 0 when MAPE≥10%
+      • Band Hit Rate (35%): directly used
+      • Directional Accuracy (25%): directly used
+    """
+    mape_score = max(0.0, min(100.0, 100 - mape * 10))
+    return round(mape_score * 0.40 + band_hit * 0.35 + direction * 0.25, 1)
+
 
 # Convert to DataFrame
 df = pd.DataFrame(archive)
@@ -104,8 +157,10 @@ unique_dates = df["date"].dt.date.nunique()
 avg_mape = df["pct_error"].mean() if "pct_error" in df.columns else 0
 band_hit = (df["within_band"].sum() / len(df) * 100) if "within_band" in df.columns else 0
 avg_error = df["error"].abs().mean() if "error" in df.columns else 0
+dir_accuracy = _compute_directional_accuracy(df)
+overall_score = _compute_accuracy_score(avg_mape, band_hit, dir_accuracy)
 
-m1, m2, m3, m4, m5, m6 = st.columns(6)
+m1, m2, m3, m4, m5, m6, m7, m8 = st.columns(8)
 with m1:
     st.metric("📊 Total Hours", f"{total_hours}")
 with m2:
@@ -119,7 +174,21 @@ with m5:
     hit_icon = "🟢" if band_hit >= 80 else ("🟡" if band_hit >= 60 else "🔴")
     st.metric(f"{hit_icon} Band Hit Rate", f"{band_hit:.1f}%")
 with m6:
+    dir_icon = "🟢" if dir_accuracy >= 80 else ("🟡" if dir_accuracy >= 60 else "🔴")
+    st.metric(f"{dir_icon} Direction", f"{dir_accuracy:.1f}%")
+with m7:
+    score_icon = "🟢" if overall_score >= 75 else ("🟡" if overall_score >= 50 else "🔴")
+    st.metric(f"{score_icon} Accuracy Score", f"{overall_score:.1f}")
+with m8:
     st.metric("🗓️ Date Range", f"{date_range_start.strftime('%b %d')} – {date_range_end.strftime('%b %d')}")
+
+st.caption(
+    "**MAPE** = Mean Absolute Percentage Error · "
+    "**MAE** = Mean Absolute Error in ₹ · "
+    "**Band Hit** = % of hours within predicted range · "
+    "**Direction** = % of hours with correct price direction · "
+    "**Accuracy Score** = Composite (0–100) combining MAPE 40%, Band Hit 35%, Direction 25%"
+)
 
 # ── Filters ──────────────────────────────────────────────────────────
 st.divider()
@@ -259,6 +328,12 @@ st.subheader("📅 Daily Performance Summary")
 
 daily_summary = filtered_df.copy()
 daily_summary["day"] = daily_summary["date"].dt.date
+
+# Compute directional accuracy per day
+daily_dir_acc: dict = {}
+for day_val, day_group in daily_summary.groupby("day"):
+    daily_dir_acc[day_val] = _compute_directional_accuracy(day_group)
+
 daily_grouped = daily_summary.groupby("day").agg(
     hours_evaluated=("date", "count"),
     avg_mape=("pct_error", "mean"),
@@ -267,14 +342,21 @@ daily_grouped = daily_summary.groupby("day").agg(
     total=("within_band", "count"),
 ).reset_index()
 daily_grouped["band_hit_rate"] = (daily_grouped["band_hits"] / daily_grouped["total"] * 100).round(1)
+daily_grouped["direction_accuracy"] = daily_grouped["day"].map(daily_dir_acc)
+daily_grouped["accuracy_score"] = daily_grouped.apply(
+    lambda r: _compute_accuracy_score(r["avg_mape"], r["band_hit_rate"], r["direction_accuracy"]),
+    axis=1,
+)
 daily_grouped = daily_grouped.sort_values("day", ascending=False)
 
-display_daily = daily_grouped[["day", "hours_evaluated", "avg_mape", "avg_mae", "band_hit_rate"]].rename(columns={
+display_daily = daily_grouped[["day", "hours_evaluated", "avg_mape", "avg_mae", "band_hit_rate", "direction_accuracy", "accuracy_score"]].rename(columns={
     "day": "Date",
     "hours_evaluated": "Hours",
     "avg_mape": "Avg MAPE (%)",
     "avg_mae": "Avg MAE (₹)",
     "band_hit_rate": "Band Hit Rate (%)",
+    "direction_accuracy": "Direction (%)",
+    "accuracy_score": "Score",
 })
 
 st.dataframe(
@@ -282,6 +364,8 @@ st.dataframe(
         "Avg MAPE (%)": "{:.2f}",
         "Avg MAE (₹)": "₹{:,.2f}",
         "Band Hit Rate (%)": "{:.1f}",
+        "Direction (%)": "{:.1f}",
+        "Score": "{:.1f}",
     }),
     use_container_width=True,
     hide_index=True,

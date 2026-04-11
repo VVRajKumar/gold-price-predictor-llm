@@ -382,11 +382,16 @@ if _quick_agg and _quick_agg["total_predictions_evaluated"] > 0:
     _mape_icon = "🟢" if _mape < 2 else ("🟡" if _mape < 5 else "🔴")
     _hit_icon = "🟢" if _hit >= 80 else ("🟡" if _hit >= 60 else "🔴")
     _dir_icon = "🟢" if _dir >= 80 else ("🟡" if _dir >= 60 else "🔴")
+    # Composite accuracy score: MAPE (40%) + Band Hit (35%) + Direction (25%)
+    _mape_score = max(0.0, min(100.0, 100 - _mape * 10))
+    _acc_score = round(_mape_score * 0.40 + _hit * 0.35 + _dir * 0.25, 1)
+    _score_icon = "🟢" if _acc_score >= 75 else ("🟡" if _acc_score >= 50 else "🔴")
     st.markdown(
         f"""<div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);
         border-radius:12px;padding:14px 20px;margin:10px 0;
         border:1px solid #2d3748;display:flex;justify-content:space-around;
         flex-wrap:wrap;gap:10px;text-align:center;">
+        <span>{_score_icon} <b>Score</b> {_acc_score:.0f}/100</span>
         <span>{_mape_icon} <b>MAPE</b> {_mape:.1f}%</span>
         <span>{_hit_icon} <b>Band Hit</b> {_hit:.0f}%</span>
         <span>{_dir_icon} <b>Direction</b> {_dir:.0f}%</span>
@@ -945,7 +950,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
 if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
     # ── Aggregate Metrics Row ────────────────────────────────────
     st.markdown("#### Overall Accuracy (Last 72 Hours)")
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
     with m1:
         mape = agg_stats["overall_mape"]
         mape_color = "🟢" if mape < 2 else ("🟡" if mape < 5 else "🔴")
@@ -961,6 +966,12 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         da_color = "🟢" if da >= 80 else ("🟡" if da >= 60 else "🔴")
         st.metric(f"{da_color} Direction Accuracy", f"{da:.0f}%")
     with m5:
+        # Composite accuracy score: MAPE (40%) + Band Hit (35%) + Direction (25%)
+        _sc_mape = max(0.0, min(100.0, 100 - mape * 10))
+        _sc_score = round(_sc_mape * 0.40 + hit * 0.35 + da * 0.25, 1)
+        _sc_icon = "🟢" if _sc_score >= 75 else ("🟡" if _sc_score >= 50 else "🔴")
+        st.metric(f"{_sc_icon} Accuracy Score", f"{_sc_score:.0f}/100")
+    with m6:
         _unique_hrs = agg_stats.get('total_unique_hours', agg_stats['total_predictions_evaluated'])
         _unique_days = agg_stats.get('total_unique_dates', agg_stats.get('unique_dates_evaluated', '?'))
         st.metric("📊 Unique Hours", f"{_unique_hrs}")
@@ -970,7 +981,8 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         "**MAPE** = Mean Absolute Percentage Error (lower is better) · "
         "**MAE** = Mean Absolute Error in ₹ · "
         "**Band Hit Rate** = % of hours actual price fell within predicted range · "
-        "**Direction** = % of hours predicted direction matched actual"
+        "**Direction** = % of hours predicted direction matched actual · "
+        "**Accuracy Score** = Composite score (0–100) combining MAPE, Band Hit & Direction"
     )
 
     # ── Predicted vs Actual Chart ────────────────────────────────

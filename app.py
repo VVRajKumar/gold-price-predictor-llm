@@ -474,7 +474,7 @@ if plan.daily_predictions:
     gold_recent = gold_df.copy() if not gold_df.empty else pd.DataFrame()
 
     fig = go.Figure()
-    close_series = pd.Series(dtype=float)  # initialise empty; filled below if data exists
+    close_series = pd.Series(dtype=float)  # initialize empty; filled below if data exists
 
     # Historical prices (already in INR/10g from the OHLC section)
     if not gold_recent.empty:
@@ -551,11 +551,10 @@ if plan.daily_predictions:
         # Use actual (Friday close) prices instead of predicted prices
         # so the green dotted line merges with the yellow actual line.
         if not close_series.empty:
-            wk_y = [
-                float(close_series.asof(ts)) if ts in close_series.index or close_series.index.min() <= ts
-                else row["predicted_price"]
-                for ts, row in zip(weekend_preds["date"], weekend_preds.to_dict("records"))
-            ]
+            wk_y = []
+            for ts, pred_price in zip(weekend_preds["date"], weekend_preds["predicted_price"]):
+                val = close_series.asof(ts)
+                wk_y.append(float(val) if pd.notna(val) else float(pred_price))
         else:
             wk_y = list(weekend_preds["predicted_price"])
         if not active_preds.empty:
@@ -563,8 +562,9 @@ if plan.daily_predictions:
             wk_x = [bridge["date"]] + wk_x
             # Bridge point also uses actual price if available
             bridge_ts = bridge["date"]
-            if not close_series.empty and close_series.index.min() <= bridge_ts:
-                wk_y = [float(close_series.asof(bridge_ts))] + wk_y
+            bridge_val = close_series.asof(bridge_ts) if not close_series.empty else None
+            if pd.notna(bridge_val):
+                wk_y = [float(bridge_val)] + wk_y
             else:
                 wk_y = [bridge["predicted_price"]] + wk_y
         fig.add_trace(go.Scatter(

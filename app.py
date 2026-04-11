@@ -32,6 +32,7 @@ try:
     from src.prediction_engine import PredictionEngine
     from src.data_fetchers.market_data import MarketDataFetcher
     from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET
+    from src.accuracy_tracker import compute_accuracy_score
 except (KeyError, ImportError, AttributeError):
     # On Streamlit Cloud hot-reload the module cache can be in an inconsistent
     # state after the cleanup above.  Purge all stale src.* modules and retry.
@@ -41,6 +42,7 @@ except (KeyError, ImportError, AttributeError):
     from src.prediction_engine import PredictionEngine
     from src.data_fetchers.market_data import MarketDataFetcher
     from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET
+    from src.accuracy_tracker import compute_accuracy_score
 
 # ── Display-time name helpers ────────────────────────────────────────
 # Chart-friendly names (short labels for SHAP bar chart / table headers)
@@ -382,11 +384,15 @@ if _quick_agg and _quick_agg["total_predictions_evaluated"] > 0:
     _mape_icon = "🟢" if _mape < 2 else ("🟡" if _mape < 5 else "🔴")
     _hit_icon = "🟢" if _hit >= 80 else ("🟡" if _hit >= 60 else "🔴")
     _dir_icon = "🟢" if _dir >= 80 else ("🟡" if _dir >= 60 else "🔴")
+    # Composite accuracy score using shared function
+    _acc_score = compute_accuracy_score(_mape, _hit, _dir)
+    _score_icon = "🟢" if _acc_score >= 75 else ("🟡" if _acc_score >= 50 else "🔴")
     st.markdown(
         f"""<div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);
         border-radius:12px;padding:14px 20px;margin:10px 0;
         border:1px solid #2d3748;display:flex;justify-content:space-around;
         flex-wrap:wrap;gap:10px;text-align:center;">
+        <span>{_score_icon} <b>Score</b> {_acc_score:.0f}/100</span>
         <span>{_mape_icon} <b>MAPE</b> {_mape:.1f}%</span>
         <span>{_hit_icon} <b>Band Hit</b> {_hit:.0f}%</span>
         <span>{_dir_icon} <b>Direction</b> {_dir:.0f}%</span>
@@ -945,7 +951,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
 if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
     # ── Aggregate Metrics Row ────────────────────────────────────
     st.markdown("#### Overall Accuracy (Last 72 Hours)")
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
     with m1:
         mape = agg_stats["overall_mape"]
         mape_color = "🟢" if mape < 2 else ("🟡" if mape < 5 else "🔴")
@@ -961,6 +967,11 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         da_color = "🟢" if da >= 80 else ("🟡" if da >= 60 else "🔴")
         st.metric(f"{da_color} Direction Accuracy", f"{da:.0f}%")
     with m5:
+        # Composite accuracy score using shared function
+        _sc_score = compute_accuracy_score(mape, hit, da)
+        _sc_icon = "🟢" if _sc_score >= 75 else ("🟡" if _sc_score >= 50 else "🔴")
+        st.metric(f"{_sc_icon} Accuracy Score", f"{_sc_score:.0f}/100")
+    with m6:
         _unique_hrs = agg_stats.get('total_unique_hours', agg_stats['total_predictions_evaluated'])
         _unique_days = agg_stats.get('total_unique_dates', agg_stats.get('unique_dates_evaluated', '?'))
         st.metric("📊 Unique Hours", f"{_unique_hrs}")
@@ -970,7 +981,8 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         "**MAPE** = Mean Absolute Percentage Error (lower is better) · "
         "**MAE** = Mean Absolute Error in ₹ · "
         "**Band Hit Rate** = % of hours actual price fell within predicted range · "
-        "**Direction** = % of hours predicted direction matched actual"
+        "**Direction** = % of hours predicted direction matched actual · "
+        "**Accuracy Score** = Composite score (0–100) combining MAPE, Band Hit & Direction"
     )
 
     # ── Predicted vs Actual Chart ────────────────────────────────

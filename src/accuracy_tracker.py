@@ -32,7 +32,33 @@ _HOURLY_SCORECARD_START = datetime(2026, 4, 4, 0, 0, 0)
 
 # Directional neutral zone: if actual moved less than this %, the market
 # is considered flat and the prediction is counted as directionally correct.
-_DIR_NEUTRAL_PCT = 0.01
+# 0.05% ≈ ₹36 at ₹73k — ignores noise from bid/ask spread & rounding.
+_DIR_NEUTRAL_PCT = 0.05
+
+# ── Composite accuracy score weights & scaling ──────────────────────
+# MAPE score = max(0, 100 - MAPE * MAPE_SCALE_FACTOR).  A MAPE of 10%
+# maps to a score of 0; 0% maps to 100.
+MAPE_SCALE_FACTOR = 10
+# Weights reflect the relative importance of each metric for a gold
+# price predictor.  Directional accuracy is the most actionable signal
+# for trading decisions (knowing *which way* price moves matters more
+# than exact magnitude), so it receives the highest weight.  MAPE
+# captures overall closeness; band hit captures calibration quality.
+MAPE_WEIGHT = 0.35
+BAND_HIT_WEIGHT = 0.30
+DIRECTION_WEIGHT = 0.35
+
+
+def compute_accuracy_score(mape: float, band_hit: float, direction: float) -> float:
+    """Composite accuracy score (0–100).
+
+    Combines three quality dimensions using the module-level weights:
+      • MAPE score (35%): 100 when MAPE=0%, 0 when MAPE≥10%
+      • Band Hit Rate (30%): percentage directly used
+      • Directional Accuracy (35%): percentage directly used
+    """
+    mape_score = max(0.0, min(100.0, 100 - mape * MAPE_SCALE_FACTOR))
+    return round(mape_score * MAPE_WEIGHT + band_hit * BAND_HIT_WEIGHT + direction * DIRECTION_WEIGHT, 1)
 
 # Bump this version string whenever guardrail parameters change.
 # Triggers a one-time rebase that retroactively widens bands on all stored
@@ -51,8 +77,11 @@ class AccuracyTracker:
         self._last_checked: Optional[str] = None
         self._auto_running = False
         self._purge_stale_entries()
-        self._rebase_guardrails()
+        # Backfill archive BEFORE rebase so that data from the accuracy log
+        # (e.g. April 4-6 evaluations) is copied to the permanent archive
+        # before _rebase_guardrails() clears the log for re-evaluation.
         self._backfill_archive_from_log()
+        self._rebase_guardrails()
 
     # ── Purge pre-INR / pre-cutoff entries ───────────────────────────
 

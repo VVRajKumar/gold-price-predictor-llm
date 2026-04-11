@@ -395,14 +395,35 @@ class MLEnsemble:
                 effective_multiplier = 1.0 + (agent_multiplier - 1.0) * horizon_decay
                 p_final_usd *= effective_multiplier
 
+                # ── Short-term momentum carry-through ──
+                # If recent history shows a clear directional trend, nudge the
+                # prediction slightly in that direction.  This helps the model
+                # follow through on genuine market moves instead of always
+                # reverting toward the mean (which hurts directional accuracy).
+                # The nudge decays with horizon: strongest for the first few
+                # hours, fades out by hour 8 so it doesn't cause drift.
+                if len(history) >= 3 and ref_usd_price > 0 and h < 8:
+                    # Compute average of last 3 hourly returns
+                    recent = history[-3:]
+                    avg_ret = (recent[-1] - recent[0]) / recent[0] if recent[0] > 0 else 0.0
+                    # Cap at ±0.5% per step to avoid amplifying noise
+                    avg_ret = max(-0.005, min(0.005, avg_ret / 2.0))
+                    # Decay: full effect for h=0..2, linearly fading to 0 by h=8
+                    momentum_decay = max(0.0, 1.0 - h / 8.0)
+                    p_final_usd *= (1.0 + avg_ret * momentum_decay)
+
                 # ── Mean-reversion pressure ──
                 # Prevent autoregressive drift by blending the prediction with
                 # the reference price.  The blend increases for later horizons
                 # so near-term predictions stay responsive while far-horizon
                 # ones don't compound into unrealistic trends.
-                # Gentle ramp (0.015*h, cap 30%) preserves directional signal
-                # from the model while still damping extreme far-horizon drift.
-                reversion_strength = min(0.30, 0.015 * h)  # hour 1→1.5%, hour 6→9%, hour 12→18%, hour 20→30%
+                # Near-term (h<4): zero reversion — let the model's directional
+                # signal come through.  Ramp from hour 4 onward (0.02*(h-3),
+                # cap 30%) to still damp far-horizon drift.
+                if h < 4:
+                    reversion_strength = 0.0  # preserve directional signal
+                else:
+                    reversion_strength = min(0.30, 0.02 * (h - 3))  # hour 4→2%, hour 12→18%, hour 18→30%
                 p_final_usd = p_final_usd * (1.0 - reversion_strength) + ref_usd_price * reversion_strength
 
                 # ── Per-step USD sanity check ──
@@ -415,9 +436,12 @@ class MLEnsemble:
                 prev_usd = history[-1] if history else ref_usd_price
                 if prev_usd > 0:
                     # Step caps to prevent compounding:
-                    # h=0..5 (hours 1-6): 0.8%, h=6..11 (hours 7-12): 0.5%, h=12+ (hours 13+): 0.35%
-                    if h < 6:
-                        step_pct = 0.008
+                    # h=0..3 (hours 1-4): 1.0% — near-term, model's directional
+                    #   signal is strongest; allow room for genuine hour moves.
+                    # h=4..11 (hours 5-12): 0.5%
+                    # h=12+ (hours 13+): 0.35%
+                    if h < 4:
+                        step_pct = 0.010
                     elif h < 12:
                         step_pct = 0.005
                     else:

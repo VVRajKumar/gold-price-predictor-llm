@@ -239,7 +239,11 @@ class BaseAgent(ABC):
         try:
             result = json.loads(text)
             if isinstance(result, dict):
-                return result
+                # Merge defaults under the parsed result so that any fields
+                # the LLM omitted still get agent-specific default values.
+                merged = dict(defaults)
+                merged.update(result)
+                return merged
         except (json.JSONDecodeError, ValueError, TypeError):
             pass
 

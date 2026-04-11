@@ -86,6 +86,16 @@ def validate_agent_report(report_dict: dict[str, Any], agent_name: str) -> dict[
     # ── Impact Score ──
     impact = _safe_float(report_dict.get("impact_score"), 0.5)
     impact = _clamp(impact, 0.0, 1.0)
+    # Floor: directional outlook with meaningful confidence should have
+    # a minimum impact score so the agent actually influences the forecast.
+    if outlook in ("bullish", "bearish") and confidence >= 0.3:
+        min_impact = round(confidence * 0.4, 3)
+        if impact < min_impact:
+            corrections.append(
+                f"impact_score {impact:.2f} too low for {outlook} outlook "
+                f"(conf={confidence:.2f}) → raised to {min_impact:.2f}"
+            )
+            impact = min_impact
     report_dict["impact_score"] = round(impact, 3)
 
     # ── Prediction Bias ──

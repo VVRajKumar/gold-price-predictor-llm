@@ -77,13 +77,22 @@ def is_market_open(dt: datetime | None = None) -> bool:
 
     Uses MCX Gold hours in IST:
       - Saturday (5) and Sunday (6): always closed.
-      - Monday–Friday: open from 09:00 to 23:30 IST.
+      - Monday before 09:00 IST: closed (extends the weekend flatline).
+      - Monday 09:00 – Friday 23:30 IST: open.
     The caller can still force a prediction via the manual "Generate" button.
+
+    This is the logical inverse of :func:`is_market_closed_ist` for the hours
+    both functions cover (weekends + Monday pre-market).
     """
     if dt is None:
         dt = now_ist()
-    # Monday=0 … Friday=4, Saturday=5, Sunday=6
-    return dt.weekday() < 5
+    # Saturday / Sunday — always closed
+    if dt.weekday() >= 5:
+        return False
+    # Monday before MCX opens at 09:00 IST — still part of the weekend close
+    if dt.weekday() == 0 and dt.hour < MCX_MARKET_OPEN_HOUR:
+        return False
+    return True
 
 
 def is_market_closed_ist(dt: datetime) -> bool:

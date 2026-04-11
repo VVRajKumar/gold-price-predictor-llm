@@ -474,6 +474,7 @@ if plan.daily_predictions:
     gold_recent = gold_df.copy() if not gold_df.empty else pd.DataFrame()
 
     fig = go.Figure()
+    close_series = pd.Series(dtype=float)  # initialize empty; filled below if data exists
 
     # Historical prices (already in INR/10g from the OHLC section)
     if not gold_recent.empty:
@@ -541,16 +542,31 @@ if plan.daily_predictions:
             marker=dict(size=10, symbol="circle"),
         ))
 
-    # Weekend prediction line — green dotted (market-closed hours)
-    # Include the last active-market point as a bridge so the dotted
-    # line connects seamlessly to the solid weekday line.
+    # Weekend prediction line — green dotted, merged with actual price.
+    # Market is closed on weekends so the predicted price is Friday's
+    # closing price, which is the same as the actual price.  We use the
+    # extended close_series (yellow line) values so the two lines overlap.
     if not weekend_preds.empty:
         wk_x = list(weekend_preds["date"])
-        wk_y = list(weekend_preds["predicted_price"])
+        # Use actual (Friday close) prices instead of predicted prices
+        # so the green dotted line merges with the yellow actual line.
+        if not close_series.empty:
+            wk_y = []
+            for ts, pred_price in zip(weekend_preds["date"], weekend_preds["predicted_price"]):
+                val = close_series.asof(ts)
+                wk_y.append(float(val) if pd.notna(val) else float(pred_price))
+        else:
+            wk_y = list(weekend_preds["predicted_price"])
         if not active_preds.empty:
             bridge = active_preds.iloc[-1]
             wk_x = [bridge["date"]] + wk_x
-            wk_y = [bridge["predicted_price"]] + wk_y
+            # Bridge point also uses actual price if available
+            bridge_ts = bridge["date"]
+            bridge_val = close_series.asof(bridge_ts) if not close_series.empty else None
+            if pd.notna(bridge_val):
+                wk_y = [float(bridge_val)] + wk_y
+            else:
+                wk_y = [bridge["predicted_price"]] + wk_y
         fig.add_trace(go.Scatter(
             x=wk_x, y=wk_y,
             mode="lines", name="Predicted (Market Closed)",
@@ -1119,10 +1135,11 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                     marker=dict(size=7, symbol="diamond"),
             ))
 
-        # Weekend predicted line — dotted green (merged with actual)
+        # Weekend predicted line — dotted green, merged with actual price.
+        # Market is closed so the prediction equals Friday's close (= actual).
         if not _acc_weekend.empty:
             fig_acc.add_trace(go.Scatter(
-                    x=_acc_weekend["date"], y=_acc_weekend["predicted"],
+                    x=_acc_weekend["date"], y=_acc_weekend["actual"],
                     mode="lines+markers", name="Predicted (Market Closed)",
                     line=dict(color="#00d4aa", width=2, dash="dot"),
                     marker=dict(size=5, symbol="diamond"),

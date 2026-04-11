@@ -117,6 +117,82 @@ def _text_to_bullets(text: str) -> str:
 
     return "\n".join(f"• {s.strip()}" for s in sentences)
 
+
+# Known section headings emitted by the narrator LLM
+_SECTION_HEADING_PATTERN = re.compile(
+    r"(🔍\s*What'?s Happening:?|📊\s*Why It Matters:?|👀\s*What to Watch:?)",
+    re.IGNORECASE,
+)
+
+
+def _format_executive_summary_html(raw_text: str) -> str:
+    """Render the executive summary with bold section headings and tidy bullets.
+
+    The narrator LLM produces text structured as:
+        🔍 What's Happening: sentence. sentence.
+        📊 Why It Matters: sentence. sentence.
+        👀 What to Watch: sentence. sentence.
+
+    This function splits on those headings, renders each heading as a large
+    bold line (no bullet), and turns the body sentences into separate bullet
+    lines beneath it.
+    """
+    if not raw_text or not raw_text.strip():
+        return ""
+
+    text = raw_text.strip()
+
+    # Split the text around known section headings
+    parts = _SECTION_HEADING_PATTERN.split(text)
+    # parts alternates: [pre-text, heading1, body1, heading2, body2, ...]
+
+    # If no section headings detected, fall back to simple bullet rendering
+    if len(parts) <= 1:
+        bullets = _text_to_bullets(text)
+        esc = _html_mod.escape(bullets)
+        lines = esc.split("\n")
+        li = "".join(
+            f'<li style="margin:6px 0;line-height:1.7;">{l.lstrip("• ").strip()}</li>'
+            for l in lines if l.strip()
+        )
+        return f'<ul style="margin:0;padding-left:20px;">{li}</ul>'
+
+    html_parts: list[str] = []
+
+    # Handle any text before the first heading (rare but possible)
+    preamble = parts[0].strip()
+    if preamble:
+        esc = _html_mod.escape(preamble)
+        html_parts.append(f'<p style="margin:0 0 12px 0;line-height:1.7;">{esc}</p>')
+
+    # Process heading + body pairs
+    idx = 1
+    while idx < len(parts):
+        heading = parts[idx].strip().rstrip(":")
+        body = parts[idx + 1].strip() if idx + 1 < len(parts) else ""
+        idx += 2
+
+        # Heading – big, bold, no bullet
+        esc_heading = _html_mod.escape(heading)
+        html_parts.append(
+            f'<div style="font-size:17px;font-weight:700;margin:{16 if html_parts else 0}px 0 8px 0;">'
+            f'{esc_heading}</div>'
+        )
+
+        # Body – split into sentences, render as bullet list
+        if body:
+            sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', body)
+            sentences = [s.strip() for s in sentences if s.strip() and len(s.strip()) > 5]
+            if sentences:
+                li = "".join(
+                    f'<li style="margin:4px 0;line-height:1.7;">'
+                    f'{_html_mod.escape(s.rstrip(".") + ".")}</li>'
+                    for s in sentences
+                )
+                html_parts.append(f'<ul style="margin:0 0 4px 0;padding-left:22px;">{li}</ul>')
+
+    return "\n".join(html_parts)
+
 # ── Page config ──────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Indian Gold Price Predictor – Agentic AI",
@@ -439,19 +515,13 @@ with st.expander("📋 Executive Summary", expanded=True):
     if _summary and (_summary.strip().startswith("{") or _summary.strip().startswith("[")):
         st.code(_summary, language="json")
     elif _summary:
-        # Convert to bullet points and render with styled card
-        _bullets = _text_to_bullets(_summary)
-        _esc = _html_mod.escape(_bullets)
-        _bullet_lines = _esc.split("\n")
-        _li_items = "".join(
-            f'<li style="margin:6px 0;line-height:1.7;">{line.lstrip("• ").strip()}</li>'
-            for line in _bullet_lines if line.strip()
-        )
+        # Render with structured section headings (big/bold) and bullet points
+        _inner_html = _format_executive_summary_html(_summary)
         st.markdown(f"""
         <div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);
             border-radius:12px;padding:24px 28px;margin:8px 0;
             border:1px solid #2d3748;line-height:1.7;font-size:15px;">
-            <ul style="margin:0;padding-left:20px;">{_li_items}</ul>
+            {_inner_html}
         </div>
         """, unsafe_allow_html=True)
     else:

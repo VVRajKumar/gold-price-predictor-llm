@@ -93,13 +93,33 @@ def validate_agent_report(report_dict: dict[str, Any], agent_name: str) -> dict[
     bias = _clamp(bias, -1.0, 1.0)
     report_dict["prediction_bias"] = round(bias, 3)
 
-    # ── Bias-Outlook coherence ──
-    if outlook == "bullish" and bias < -0.3:
-        corrections.append(f"bias {bias:+.2f} contradicts bullish outlook → clamped to 0.0")
-        report_dict["prediction_bias"] = 0.0
-    elif outlook == "bearish" and bias > 0.3:
-        corrections.append(f"bias {bias:+.2f} contradicts bearish outlook → clamped to 0.0")
-        report_dict["prediction_bias"] = 0.0
+    # ── Bias-Outlook alignment ──
+    # When the outlook is directional but bias is missing / near-zero,
+    # infer a meaningful bias from the confidence so that the agent's
+    # opinion actually influences the ML ensemble.
+    _BIAS_NEAR_ZERO = 0.05  # treat |bias| <= this as "LLM didn't provide a real value"
+    if outlook == "bullish" and bias < _BIAS_NEAR_ZERO:
+        inferred = round(confidence * 0.6, 3)
+        if bias < -0.3:
+            corrections.append(
+                f"bias {bias:+.2f} contradicts bullish outlook → inferred +{inferred:.2f}"
+            )
+        else:
+            corrections.append(
+                f"bias {bias:+.2f} too low for bullish outlook → inferred +{inferred:.2f}"
+            )
+        report_dict["prediction_bias"] = inferred
+    elif outlook == "bearish" and bias > -_BIAS_NEAR_ZERO:
+        inferred = round(-confidence * 0.6, 3)
+        if bias > 0.3:
+            corrections.append(
+                f"bias {bias:+.2f} contradicts bearish outlook → inferred {inferred:+.2f}"
+            )
+        else:
+            corrections.append(
+                f"bias {bias:+.2f} too high for bearish outlook → inferred {inferred:+.2f}"
+            )
+        report_dict["prediction_bias"] = inferred
 
     if corrections:
         logger.warning(f"[guardrail:{agent_name}] Corrections: {'; '.join(corrections)}")

@@ -586,18 +586,20 @@ if plan.daily_predictions:
     _display_df = pred_df[["date", "predicted_price", "low_range", "high_range", "confidence", "key_driver"]].copy()
     # Update market-closed hours with Friday's actual closing price so the
     # table matches the chart (green dotted line merged with yellow actual).
-    if not close_series.empty and pred_df["_is_closed"].any():
-        for idx in _display_df.index:
-            if pred_df.loc[idx, "_is_closed"]:
-                ts = pred_df.loc[idx, "date"]
-                actual_val = close_series.asof(ts)
-                if pd.notna(actual_val):
-                    fcp = float(actual_val)
-                    _display_df.loc[idx, "predicted_price"] = round(fcp, 2)
-                    _display_df.loc[idx, "low_range"] = round(fcp * 0.998, 2)
-                    _display_df.loc[idx, "high_range"] = round(fcp * 1.002, 2)
-                    _display_df.loc[idx, "confidence"] = 0.95
-                    _display_df.loc[idx, "key_driver"] = "Market closed (weekend) — price held flat"
+    _closed_mask = pred_df["_is_closed"].values
+    if not close_series.empty and _closed_mask.any():
+        _friday_prices = pred_df.loc[_closed_mask, "date"].apply(
+            lambda ts: close_series.asof(ts)
+        ).astype(float)
+        _valid = _friday_prices.notna()
+        if _valid.any():
+            _fcp = _friday_prices[_valid].round(2)
+            _display_df.loc[_fcp.index, "predicted_price"] = _fcp
+            # ±0.2% band — matches orchestrator weekend flatline
+            _display_df.loc[_fcp.index, "low_range"] = (_fcp * 0.998).round(2)
+            _display_df.loc[_fcp.index, "high_range"] = (_fcp * 1.002).round(2)
+            _display_df.loc[_fcp.index, "confidence"] = 0.95
+            _display_df.loc[_fcp.index, "key_driver"] = "Market closed (weekend) — price held flat"
     _display_df["key_driver"] = _display_df["key_driver"].apply(lambda x: _clean_text(str(x)) if x else x)
     st.dataframe(
         _display_df

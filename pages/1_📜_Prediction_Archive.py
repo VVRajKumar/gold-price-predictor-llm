@@ -246,10 +246,11 @@ if not _weekday_df.empty:
         marker=dict(size=5, symbol="diamond"),
     ))
 
-# Weekend predicted line — dotted green (merged with actual)
+# Weekend predicted line — dotted green, merged with actual price.
+# Market is closed so the prediction equals Friday's close (= actual).
 if not _weekend_df.empty:
     fig.add_trace(go.Scatter(
-        x=_weekend_df["date"], y=_weekend_df["predicted"],
+        x=_weekend_df["date"], y=_weekend_df["actual"],
         mode="lines+markers", name="Predicted (Market Closed)",
         line=dict(color="#00d4aa", width=2, dash="dot"),
         marker=dict(size=4, symbol="diamond"),

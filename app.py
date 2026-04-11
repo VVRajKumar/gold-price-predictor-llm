@@ -584,6 +584,20 @@ if plan.daily_predictions:
 
     # Daily breakdown table
     _display_df = pred_df[["date", "predicted_price", "low_range", "high_range", "confidence", "key_driver"]].copy()
+    # Update market-closed hours with Friday's actual closing price so the
+    # table matches the chart (green dotted line merged with yellow actual).
+    if not close_series.empty and pred_df["_is_closed"].any():
+        for idx in _display_df.index:
+            if pred_df.loc[idx, "_is_closed"]:
+                ts = pred_df.loc[idx, "date"]
+                actual_val = close_series.asof(ts)
+                if pd.notna(actual_val):
+                    fcp = float(actual_val)
+                    _display_df.loc[idx, "predicted_price"] = round(fcp, 2)
+                    _display_df.loc[idx, "low_range"] = round(fcp * 0.998, 2)
+                    _display_df.loc[idx, "high_range"] = round(fcp * 1.002, 2)
+                    _display_df.loc[idx, "confidence"] = 0.95
+                    _display_df.loc[idx, "key_driver"] = "Market closed (weekend) — price held flat"
     _display_df["key_driver"] = _display_df["key_driver"].apply(lambda x: _clean_text(str(x)) if x else x)
     st.dataframe(
         _display_df
@@ -1135,8 +1149,18 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                     marker=dict(size=7, symbol="diamond"),
             ))
 
+        # Actual line — solid yellow (drawn before weekend dotted green
+        # so the green dotted line renders on top and stays visible).
+        fig_acc.add_trace(go.Scatter(
+                x=acc_df["date"], y=acc_df["actual"],
+                mode="lines+markers", name="Actual",
+                line=dict(color="#ffd93d", width=2),
+                marker=dict(size=7),
+        ))
+
         # Weekend predicted line — dotted green, merged with actual price.
         # Market is closed so the prediction equals Friday's close (= actual).
+        # Drawn AFTER the yellow actual line so it stays visible on top.
         if not _acc_weekend.empty:
             fig_acc.add_trace(go.Scatter(
                     x=_acc_weekend["date"], y=_acc_weekend["actual"],
@@ -1144,14 +1168,6 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                     line=dict(color="#00d4aa", width=2, dash="dot"),
                     marker=dict(size=5, symbol="diamond"),
             ))
-
-        # Actual line — solid yellow
-        fig_acc.add_trace(go.Scatter(
-                x=acc_df["date"], y=acc_df["actual"],
-                mode="lines+markers", name="Actual",
-                line=dict(color="#ffd93d", width=2),
-                marker=dict(size=7),
-        ))
 
         # Clean up temp column
         acc_df = acc_df.drop(columns=["_is_closed"], errors="ignore")

@@ -342,6 +342,18 @@ class Orchestrator:
                     usd_per_oz = float(close.iloc[-1])
                     current_price = round(usd_per_oz * usdinr / 31.1035 * 10, 2)
 
+        # Validate that we have a sane INR/10g gold price after all attempts.
+        # Typical range ~₹50,000–₹250,000 per 10g as of 2024-2026.
+        if (
+            not isinstance(current_price, (int, float))
+            or not math.isfinite(current_price)
+            or current_price <= 0
+        ):
+            raise ValueError(
+                f"Cannot obtain a valid gold price (got {current_price!r}). "
+                "Both MCX and COMEX fallback failed."
+            )
+
         logger.info(f"Current Indian gold price: \u20b9{current_price:,.2f} per 10g")
 
         # 2. Run all agents (intelligence gathering, NOT price prediction)
@@ -458,8 +470,6 @@ class Orchestrator:
             for dp, dp_dt in zip(daily, dp_dates):
                 if not is_market_closed_ist(dp_dt):
                     last_market_price = dp.predicted_price
-                else:
-                    break  # first closed hour found
             # Second pass: flatline all market-closed hours
             for dp, dp_dt in zip(daily, dp_dates):
                 if is_market_closed_ist(dp_dt):

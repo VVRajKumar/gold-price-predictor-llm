@@ -191,6 +191,13 @@ class PredictionEngine:
     def generate(self) -> PredictionPlan:
         """Run the full ML-first prediction pipeline (blocks until done)."""
         with self._lock:
+            if not is_market_open():
+                logger.info("Market closed (weekend) — skipping generation")
+                if self._current_plan is not None:
+                    return self._current_plan
+                raise RuntimeError(
+                    "Cannot generate prediction: market is closed and no cached plan exists"
+                )
             logger.info("PredictionEngine: generating new ML-first prediction …")
             plan = self._orchestrator.generate_prediction()
 

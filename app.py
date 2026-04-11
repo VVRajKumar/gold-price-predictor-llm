@@ -198,10 +198,13 @@ with st.sidebar:
     st.divider()
 
     if st.button("🔄 Generate New Prediction", width="stretch", type="primary"):
-        with st.spinner("Running 8 specialist agents … this takes 1-2 minutes"):
-            plan = engine.generate()
-        st.success("Prediction updated!")
-        st.rerun()
+        if not is_market_open():
+            st.warning("📅 Gold market is closed today (weekend). New predictions will resume on Monday.")
+        else:
+            with st.spinner("Running 8 specialist agents … this takes 1-2 minutes"):
+                plan = engine.generate()
+            st.success("Prediction updated!")
+            st.rerun()
 
     st.divider()
     st.markdown("### Agent Roster")

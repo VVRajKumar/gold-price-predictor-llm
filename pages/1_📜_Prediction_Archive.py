@@ -246,8 +246,18 @@ if not _weekday_df.empty:
         marker=dict(size=5, symbol="diamond"),
     ))
 
+# Actual line — solid yellow (drawn before weekend dotted green
+# so the green dotted line renders on top and stays visible).
+fig.add_trace(go.Scatter(
+    x=filtered_df["date"], y=filtered_df["actual"],
+    mode="lines+markers", name="Actual",
+    line=dict(color="#ffd93d", width=2),
+    marker=dict(size=5),
+))
+
 # Weekend predicted line — dotted green, merged with actual price.
 # Market is closed so the prediction equals Friday's close (= actual).
+# Drawn AFTER the yellow actual line so it stays visible on top.
 if not _weekend_df.empty:
     fig.add_trace(go.Scatter(
         x=_weekend_df["date"], y=_weekend_df["actual"],
@@ -255,14 +265,6 @@ if not _weekend_df.empty:
         line=dict(color="#00d4aa", width=2, dash="dot"),
         marker=dict(size=4, symbol="diamond"),
     ))
-
-# Actual line — solid yellow
-fig.add_trace(go.Scatter(
-    x=filtered_df["date"], y=filtered_df["actual"],
-    mode="lines+markers", name="Actual",
-    line=dict(color="#ffd93d", width=2),
-    marker=dict(size=5),
-))
 
 # Clean up temp column
 filtered_df = filtered_df.drop(columns=["_is_closed"], errors="ignore")

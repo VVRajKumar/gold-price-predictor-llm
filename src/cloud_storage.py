@@ -35,7 +35,7 @@ from .config import CACHE_DIR
 
 # ── Configuration ───────────────────────────────────────────────────
 
-_TRACKED_FILES = ("stored_plans.json", "accuracy_log.json", "latest_prediction.json", "residual_corrections.json")
+_TRACKED_FILES = ("stored_plans.json", "accuracy_log.json", "latest_prediction.json", "residual_corrections.json", "prediction_archive.json")
 
 _API_BASE = "https://api.github.com/gists"
 _TIMEOUT = 15  # seconds

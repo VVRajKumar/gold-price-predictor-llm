@@ -34,7 +34,7 @@ from .agents.technical_agent import TechnicalAnalysisAgent
 from .agents.historical_pattern_agent import HistoricalPatternAgent
 from .data_fetchers.market_data import MarketDataFetcher
 from .guardrails import validate_prediction_plan, adjust_confidence_from_track_record
-from .time_utils import iso_now_ist, now_ist, current_slot_ist, SLOT_HOURS
+from .time_utils import iso_now_ist, now_ist, current_slot_ist, SLOT_HOURS, is_market_closed_ist
 from .ml_ensemble import MLEnsemble
 from .signal_extractor import extract_signals
 from .narrator import LLMNarrator, compute_ml_confidence
@@ -444,24 +444,23 @@ class Orchestrator:
                 ))
 
         # ── Weekend flatline ────────────────────────────────────────
-        # If any predicted hours fall on Saturday or Sunday (IST weekday 5/6),
-        # flatline those hours at the last Friday market price with tight bands.
-        # Gold markets (COMEX/MCX) are closed on weekends, so predictions beyond
-        # Friday are meaningless — just hold the last known price.
-        # Note: dp.date is already in IST (derived from current_slot_ist above).
+        # If any predicted hours fall outside MCX trading hours (IST),
+        # flatline those hours at the last active market price with tight bands.
+        # MCX Gold is closed on Saturday/Sunday IST and before 09:00 on Monday.
+        # All times are IST — no other timezone is used.
         if daily:
             last_market_price = current_price  # default to anchor
-            # First pass: find the last weekday price
+            # First pass: find the last price during active market hours
             for dp in daily:
-                dp_weekday = datetime.strptime(dp.date, "%Y-%m-%d %H:%M").weekday()
-                if dp_weekday < 5:  # Monday=0 … Friday=4
+                dp_dt = datetime.strptime(dp.date, "%Y-%m-%d %H:%M")
+                if not is_market_closed_ist(dp_dt):
                     last_market_price = dp.predicted_price
                 else:
-                    break  # first weekend hour found
-            # Second pass: flatline weekend hours
+                    break  # first closed hour found
+            # Second pass: flatline all market-closed hours
             for dp in daily:
-                dp_weekday = datetime.strptime(dp.date, "%Y-%m-%d %H:%M").weekday()
-                if dp_weekday >= 5:  # Saturday=5, Sunday=6
+                dp_dt = datetime.strptime(dp.date, "%Y-%m-%d %H:%M")
+                if is_market_closed_ist(dp_dt):
                     dp.predicted_price = round(last_market_price, 2)
                     dp.low_range = round(last_market_price * 0.998, 2)
                     dp.high_range = round(last_market_price * 1.002, 2)

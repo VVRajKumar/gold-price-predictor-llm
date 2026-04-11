@@ -31,7 +31,7 @@ if "src" in sys.modules:
 try:
     from src.prediction_engine import PredictionEngine
     from src.data_fetchers.market_data import MarketDataFetcher
-    from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open
+    from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score
 except (KeyError, ImportError, AttributeError):
     # On Streamlit Cloud hot-reload the module cache can be in an inconsistent
@@ -41,7 +41,7 @@ except (KeyError, ImportError, AttributeError):
         del sys.modules[_k]
     from src.prediction_engine import PredictionEngine
     from src.data_fetchers.market_data import MarketDataFetcher
-    from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open
+    from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score
 
 # ── Display-time name helpers ────────────────────────────────────────
@@ -464,10 +464,12 @@ if plan.daily_predictions:
     pred_df = pd.DataFrame([dp.model_dump() for dp in plan.daily_predictions])
     pred_df["date"] = pd.to_datetime(pred_df["date"])
 
-    # Detect weekend (market-closed) hours in predictions
-    pred_df["_is_weekend"] = pred_df["date"].dt.weekday >= 5  # Sat=5, Sun=6
-    _has_weekend_hours = pred_df["_is_weekend"].any()
-    _all_weekend = pred_df["_is_weekend"].all()
+    # Detect market-closed hours using IST market hours helper
+    pred_df["_is_closed"] = pred_df["date"].apply(
+        lambda dt: is_market_closed_ist(dt.to_pydatetime())
+    )
+    _has_closed_hours = pred_df["_is_closed"].any()
+    _all_closed = pred_df["_is_closed"].all()
 
     # Reuse the already-converted INR data from the OHLC chart above
     # (avoids a second fetch+convert which can double-convert on Cloud)
@@ -492,60 +494,65 @@ if plan.daily_predictions:
             )
             close_series = close_series.reindex(daily_idx).ffill()
 
+    # ── Merge weekend flatline into the actual price line ────────
+    # When predictions include market-closed hours (weekend), those
+    # flatline prices are appended to the actual price series so the
+    # chart shows one seamless yellow line through the weekend.
+    closed_preds = pred_df[pred_df["_is_closed"]]
+    if not closed_preds.empty and not gold_recent.empty and not close_series.empty:
+        # Build a series from the market-closed prediction hours
+        flat_series = pd.Series(
+            closed_preds["predicted_price"].values,
+            index=closed_preds["date"].values,
+        )
+        # Extend actual prices with the flatline points
+        close_series = pd.concat([close_series, flat_series])
+        close_series = close_series[~close_series.index.duplicated(keep="first")]
+        close_series = close_series.sort_index()
+
+    # Plot the (extended) actual price line
+    if not gold_recent.empty and not close_series.empty:
         fig.add_trace(go.Scatter(
             x=close_series.index, y=close_series.values,
             mode="lines", name="Actual",
             line=dict(color="#ffd93d", width=2),
         ))
 
-    if _all_weekend:
-        # All prediction hours are on the weekend — show prediction as
-        # a continuation of the actual price line (same yellow color).
-        fig.add_trace(go.Scatter(
-            x=pred_df["date"], y=pred_df["predicted_price"],
-            mode="lines", name="Market Closed (Flat)",
-            line=dict(color="#ffd93d", width=2, dash="dot"),
-        ))
+    if _all_closed:
+        # All prediction hours are market-closed — already merged into
+        # the actual line above, nothing more to draw.
+        pass
     else:
-        # Split predictions into weekday (active) and weekend (flat) segments
-        weekday_preds = pred_df[~pred_df["_is_weekend"]]
-        weekend_preds = pred_df[pred_df["_is_weekend"]]
+        # Split predictions into active market and closed segments
+        active_preds = pred_df[~pred_df["_is_closed"]]
 
-        # Prediction band (only for weekday active predictions)
-        if not weekday_preds.empty:
+        # Prediction band (only for active market hours)
+        if not active_preds.empty:
             fig.add_trace(go.Scatter(
-                x=weekday_preds["date"], y=weekday_preds["high_range"],
+                x=active_preds["date"], y=active_preds["high_range"],
                 mode="lines", name="Upper Band",
                 line=dict(width=0), showlegend=False,
             ))
             fig.add_trace(go.Scatter(
-                x=weekday_preds["date"], y=weekday_preds["low_range"],
+                x=active_preds["date"], y=active_preds["low_range"],
                 mode="lines", name="Prediction Range",
                 fill="tonexty", fillcolor="rgba(0,212,170,0.15)",
                 line=dict(width=0),
             ))
 
-        # Active prediction line (weekday hours)
-        if not weekday_preds.empty:
+        # Active prediction line (market-open hours only)
+        if not active_preds.empty:
             fig.add_trace(go.Scatter(
-                x=weekday_preds["date"], y=weekday_preds["predicted_price"],
+                x=active_preds["date"], y=active_preds["predicted_price"],
                 mode="lines+markers", name="Predicted",
                 line=dict(color="#00d4aa", width=3),
                 marker=dict(size=10, symbol="circle"),
             ))
 
-        # Weekend flatline — shown as dotted yellow continuation of actual
-        if not weekend_preds.empty:
-            fig.add_trace(go.Scatter(
-                x=weekend_preds["date"], y=weekend_preds["predicted_price"],
-                mode="lines", name="Market Closed (Flat)",
-                line=dict(color="#ffd93d", width=2, dash="dot"),
-            ))
-
     fig.update_layout(
         template="plotly_dark", height=500,
         yaxis_title="Price (₹/10g)",
-        xaxis_title="Time",
+        xaxis_title="Time (IST)",
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
         hovermode="x unified",
     )

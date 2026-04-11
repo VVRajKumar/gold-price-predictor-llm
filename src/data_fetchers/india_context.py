@@ -91,10 +91,11 @@ def _fetch_india_10y_yield() -> dict[str, Any]:
         import yfinance as yf
         import pandas as pd
 
-        df = yf.download("^IRX", period="30d", progress=False)
+        # IN10Y=RR is the India 10-Year Government Bond yield on Yahoo Finance
+        df = yf.download("IN10Y=RR", period="30d", progress=False)
         if df.empty:
-            # Fallback: try India 10Y via alternate ticker
-            df = yf.download("IN10Y=RR", period="30d", progress=False)
+            # Fallback: try alternate India bond ticker
+            df = yf.download("^IRX", period="30d", progress=False)
 
         if not df.empty:
             if isinstance(df.columns, pd.MultiIndex):

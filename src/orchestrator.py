@@ -466,7 +466,10 @@ class Orchestrator:
             dp_dates = [
                 datetime.strptime(dp.date, "%Y-%m-%d %H:%M") for dp in daily
             ]
-            # First pass: find the last price during active market hours
+            # First pass: find the last price during active market hours.
+            # We scan the entire list (no early break) because predictions
+            # may resume on Monday after a weekend gap, and we need the
+            # last open-market price regardless of ordering.
             for dp, dp_dt in zip(daily, dp_dates):
                 if not is_market_closed_ist(dp_dt):
                     last_market_price = dp.predicted_price

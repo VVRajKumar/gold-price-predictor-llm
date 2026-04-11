@@ -547,7 +547,14 @@ class Orchestrator:
                 pass
 
         # Run all agents for fresh intelligence (news, geopolitics, etc.)
-        reports = self.run_all_agents()
+        # Wrapped in try/except to handle stale Streamlit Cloud cache where
+        # agent classes or their dependencies may reference garbage-collected
+        # objects (AttributeError on hot-reload).
+        try:
+            reports = self.run_all_agents()
+        except (AttributeError, TypeError) as e:
+            logger.error(f"Weekend analysis: agent run failed (stale cache?): {e}")
+            reports = []
         logger.info(f"Weekend analysis: received {len(reports)} agent reports")
 
         # Build agent report dict
@@ -565,10 +572,16 @@ class Orchestrator:
         }
 
         # LLM narrator writes weekend-specific prose (Monday outlook)
-        narrative = self._narrator.narrate_weekend(
-            agent_reports=agent_report_dict,
-            current_price=current_price,
-        )
+        # Defensive: if narrator is stale (Streamlit Cloud hot-reload), fall back
+        # to defaults so the weekend analysis still returns a valid plan.
+        try:
+            narrative = self._narrator.narrate_weekend(
+                agent_reports=agent_report_dict,
+                current_price=current_price,
+            )
+        except (AttributeError, TypeError) as e:
+            logger.error(f"Weekend narrator failed (stale cache?): {e}")
+            narrative = LLMNarrator._weekend_defaults()
 
         # Build or update the plan
         if existing_plan is not None:

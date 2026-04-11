@@ -241,7 +241,9 @@ accuracy_tracker = engine.get_accuracy_tracker()
 
 # Streamlit can sometimes keep a stale cached engine object across hot reloads.
 # If weekly API is missing or market fetcher lacks INR helpers, rebuild once.
-if not hasattr(engine, "ensure_hourly_prediction") or not hasattr(market, "convert_usd_to_inr"):
+if (not hasattr(engine, "ensure_hourly_prediction")
+        or not hasattr(engine, "generate_weekend_analysis")
+        or not hasattr(market, "convert_usd_to_inr")):
     st.cache_resource.clear()
     engine = get_engine()
     market = get_market()

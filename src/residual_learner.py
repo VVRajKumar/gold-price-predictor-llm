@@ -64,11 +64,11 @@ class ResidualLearner:
             "sample_count": self._sample_count,
         }
         try:
-            content = json.dumps(data, indent=2, default=str)
-            _CORRECTION_CACHE.write_text(content, encoding="utf-8")
-            # Sync to cloud (Gist) so corrections survive Cloud restarts
+            # Sync to cloud (Gist) so corrections survive Cloud restarts.
+            # Pass the dict (not a JSON string) to persist() to avoid
+            # double-serialization — persist() calls json.dumps() internally.
             from . import cloud_storage
-            cloud_storage.persist("residual_corrections.json", content)
+            cloud_storage.persist("residual_corrections.json", data)
         except Exception as e:
             logger.warning(f"Could not save residual correction cache: {e}")
 

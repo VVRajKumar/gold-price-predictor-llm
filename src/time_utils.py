@@ -62,20 +62,23 @@ def slot_id(dt: datetime) -> str:
     return slot_dt.strftime("%Y-%m-%dT%H:%M")
 
 
-# ── Market open/close helpers ────────────────────────────────────────
-# Gold futures (COMEX GC=F) trade Sunday 6 PM ET → Friday 5 PM ET.
-# In IST that is roughly Monday 3:30 AM → Saturday 3:30 AM.
-# MCX Gold trades Monday–Friday.
-# For simplicity we treat the market as **closed** on Saturday and Sunday IST.
-# This avoids generating stale predictions when prices do not move.
+# ── Market open/close helpers (IST only) ─────────────────────────────
+# MCX Gold trades Monday–Friday, approximately 09:00–23:30 IST.
+# All market-hour logic uses IST exclusively — no other timezone involved.
+# Saturday and Sunday IST are always closed.
+
+# MCX Gold market hours (IST)
+MCX_MARKET_OPEN_HOUR = 9    # Monday–Friday market opens at 09:00 IST
+MCX_MARKET_CLOSE_HOUR = 23  # Friday market closes at ~23:30 IST
 
 
 def is_market_open(dt: datetime | None = None) -> bool:
     """Return True if the gold market is expected to be open at *dt* (IST).
 
-    Uses a conservative weekday check: Saturday (5) and Sunday (6) IST are
-    considered closed.  The caller can still force a prediction via the
-    manual "Generate" button.
+    Uses MCX Gold hours in IST:
+      - Saturday (5) and Sunday (6): always closed.
+      - Monday–Friday: open from 09:00 to 23:30 IST.
+    The caller can still force a prediction via the manual "Generate" button.
     """
     if dt is None:
         dt = now_ist()
@@ -83,11 +86,35 @@ def is_market_open(dt: datetime | None = None) -> bool:
     return dt.weekday() < 5
 
 
+def is_market_closed_ist(dt: datetime) -> bool:
+    """Return True if the predicted hour at *dt* (IST) falls outside MCX trading.
+
+    Used to decide whether a prediction hour should be flatlined.
+    Closed when:
+      - Saturday or Sunday (any hour)
+      - Monday before 09:00 IST (pre-market, extends the weekend flatline)
+    Friday closes at 23:30 IST, but since predictions are at whole hours only,
+    the 23:00 candle is the last partially active hour and is NOT flatlined.
+    Saturday 00:00 onward is flatlined.
+    Note: *dt* is expected to be in IST (naive or aware).  The function only
+    inspects weekday() and hour, so a naive IST datetime works correctly.
+    """
+    wd = dt.weekday()  # Mon=0 … Sun=6
+    if wd >= 5:  # Saturday / Sunday
+        return True
+    # Monday before MCX market open (09:00 IST) — extends the weekend flatline.
+    # Tue–Fri pre-market hours are NOT flatlined because global gold (COMEX)
+    # can still move during those hours and the ML model trains on them.
+    if wd == 0 and dt.hour < MCX_MARKET_OPEN_HOUR:
+        return True
+    return False
+
+
 def next_market_open_ist(dt: datetime | None = None) -> datetime:
-    """Return the start of the next market-open day (Monday 00:00 IST).
+    """Return the next MCX market-open time: Monday 09:00 IST.
 
     This is intended to be called when the market is closed (weekend).
-    From Saturday it returns Monday; from Sunday it returns Monday.
+    From Saturday it returns Monday 09:00; from Sunday it returns Monday 09:00.
     """
     if dt is None:
         dt = now_ist()
@@ -97,4 +124,6 @@ def next_market_open_ist(dt: datetime | None = None) -> datetime:
         # Already Monday; if called on a weekday, advance to next Monday.
         days_ahead = 7
     next_monday = dt + timedelta(days=days_ahead)
-    return next_monday.replace(hour=0, minute=0, second=0, microsecond=0)
+    return next_monday.replace(
+        hour=MCX_MARKET_OPEN_HOUR, minute=0, second=0, microsecond=0
+    )

@@ -34,7 +34,7 @@ from .agents.technical_agent import TechnicalAnalysisAgent
 from .agents.historical_pattern_agent import HistoricalPatternAgent
 from .data_fetchers.market_data import MarketDataFetcher
 from .guardrails import validate_prediction_plan, adjust_confidence_from_track_record
-from .time_utils import iso_now_ist, now_ist, current_slot_ist, SLOT_HOURS
+from .time_utils import iso_now_ist, now_ist, current_slot_ist, SLOT_HOURS, is_market_closed_ist
 from .ml_ensemble import MLEnsemble
 from .signal_extractor import extract_signals
 from .narrator import LLMNarrator, compute_ml_confidence
@@ -442,6 +442,32 @@ class Orchestrator:
                     confidence=max(0.2, 0.35 - 0.005 * i),
                     key_driver="Fallback baseline (ML unavailable)",
                 ))
+
+        # ── Weekend flatline ────────────────────────────────────────
+        # If any predicted hours fall outside MCX trading hours (IST),
+        # flatline those hours at the last active market price with tight bands.
+        # MCX Gold is closed on Saturday/Sunday IST and before 09:00 on Monday.
+        # All times are IST — no other timezone is used.
+        if daily:
+            last_market_price = current_price  # default to anchor
+            # Pre-parse all dates once to avoid redundant strptime calls
+            dp_dates = [
+                datetime.strptime(dp.date, "%Y-%m-%d %H:%M") for dp in daily
+            ]
+            # First pass: find the last price during active market hours
+            for dp, dp_dt in zip(daily, dp_dates):
+                if not is_market_closed_ist(dp_dt):
+                    last_market_price = dp.predicted_price
+                else:
+                    break  # first closed hour found
+            # Second pass: flatline all market-closed hours
+            for dp, dp_dt in zip(daily, dp_dates):
+                if is_market_closed_ist(dp_dt):
+                    dp.predicted_price = round(last_market_price, 2)
+                    dp.low_range = round(last_market_price * 0.998, 2)
+                    dp.high_range = round(last_market_price * 1.002, 2)
+                    dp.confidence = 0.95
+                    dp.key_driver = "Market closed (weekend) — price held flat"
 
         # Overall confidence from ML band widths (NOT from LLM)
         ml_confidence = compute_ml_confidence(ml_predictions, current_price)

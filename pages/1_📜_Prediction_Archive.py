@@ -28,13 +28,13 @@ if "src" in sys.modules:
 
 try:
     from src.prediction_engine import PredictionEngine
-    from src.time_utils import now_ist, parse_iso_to_ist
+    from src.time_utils import now_ist, parse_iso_to_ist, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score, _DIR_NEUTRAL_PCT
 except (KeyError, ImportError, AttributeError):
     for _k in [k for k in list(sys.modules) if k == "src" or k.startswith("src.")]:
         del sys.modules[_k]
     from src.prediction_engine import PredictionEngine
-    from src.time_utils import now_ist, parse_iso_to_ist
+    from src.time_utils import now_ist, parse_iso_to_ist, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score, _DIR_NEUTRAL_PCT
 
 # ── Page config ──────────────────────────────────────────────────────
@@ -216,6 +216,13 @@ st.subheader("📈 Predicted vs Actual – Full History")
 
 fig = go.Figure()
 
+# Detect market-closed hours for weekday/weekend visual split
+filtered_df["_is_closed"] = filtered_df["date"].apply(
+    lambda dt: is_market_closed_ist(dt.to_pydatetime())
+)
+_weekday_df = filtered_df[~filtered_df["_is_closed"]]
+_weekend_df = filtered_df[filtered_df["_is_closed"]]
+
 # Prediction band
 if "high_range" in filtered_df.columns and "low_range" in filtered_df.columns:
     fig.add_trace(go.Scatter(
@@ -230,21 +237,34 @@ if "high_range" in filtered_df.columns and "low_range" in filtered_df.columns:
         line=dict(width=0),
     ))
 
-# Predicted line
-fig.add_trace(go.Scatter(
-    x=filtered_df["date"], y=filtered_df["predicted"],
-    mode="lines+markers", name="Predicted",
-    line=dict(color="#00d4aa", width=2, dash="dash"),
-    marker=dict(size=5, symbol="diamond"),
-))
+# Weekday predicted line — solid green
+if not _weekday_df.empty:
+    fig.add_trace(go.Scatter(
+        x=_weekday_df["date"], y=_weekday_df["predicted"],
+        mode="lines+markers", name="Predicted",
+        line=dict(color="#00d4aa", width=2),
+        marker=dict(size=5, symbol="diamond"),
+    ))
 
-# Actual line
+# Weekend predicted line — dotted green (merged with actual)
+if not _weekend_df.empty:
+    fig.add_trace(go.Scatter(
+        x=_weekend_df["date"], y=_weekend_df["predicted"],
+        mode="lines+markers", name="Predicted (Market Closed)",
+        line=dict(color="#00d4aa", width=2, dash="dot"),
+        marker=dict(size=4, symbol="diamond"),
+    ))
+
+# Actual line — solid yellow
 fig.add_trace(go.Scatter(
     x=filtered_df["date"], y=filtered_df["actual"],
     mode="lines+markers", name="Actual",
     line=dict(color="#ffd93d", width=2),
     marker=dict(size=5),
 ))
+
+# Clean up temp column
+filtered_df = filtered_df.drop(columns=["_is_closed"], errors="ignore")
 
 # Highlight band misses
 if "within_band" in filtered_df.columns:

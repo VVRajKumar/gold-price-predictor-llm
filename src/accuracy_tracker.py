@@ -25,6 +25,7 @@ from . import cloud_storage
 
 _ACCURACY_PATH = CACHE_DIR / "accuracy_log.json"
 _PLANS_STORE_PATH = CACHE_DIR / "stored_plans.json"
+_ARCHIVE_PATH = CACHE_DIR / "prediction_archive.json"
 
 # Only evaluate/store plans generated on or after this cutoff (hourly scorecard start)
 _HOURLY_SCORECARD_START = datetime(2026, 4, 4, 0, 0, 0)
@@ -46,6 +47,7 @@ class AccuracyTracker:
         self._market = MarketDataFetcher()
         self._log: list[dict] = self._load_log()
         self._stored_plans: list[dict] = self._load_stored_plans()
+        self._archive: list[dict] = self._load_archive()
         self._last_checked: Optional[str] = None
         self._auto_running = False
         self._purge_stale_entries()
@@ -186,6 +188,65 @@ class AccuracyTracker:
 
     def _save_stored_plans(self):
         cloud_storage.persist("stored_plans.json", self._stored_plans)
+
+    # ── Prediction archive (unlimited historical log) ────────────────
+
+    def _load_archive(self) -> list[dict]:
+        if _ARCHIVE_PATH.exists():
+            try:
+                return json.loads(_ARCHIVE_PATH.read_text(encoding="utf-8"))
+            except Exception:
+                return []
+        data = cloud_storage.load("prediction_archive.json")
+        return data if isinstance(data, list) else []
+
+    def _save_archive(self):
+        cloud_storage.persist("prediction_archive.json", self._archive)
+
+    def _archive_evaluation(self, result: dict):
+        """Append evaluated hourly results to the permanent archive.
+
+        Unlike the rolling accuracy log (capped at _MAX_LOG_ENTRIES), the
+        archive keeps **all** historical evaluated hours forever so the
+        Prediction Archive page can display long-term performance.
+        Deduplication is by (plan_generated_at, date) pair.
+        """
+        gen_at = result.get("plan_generated_at", "")
+        existing_keys: set[tuple[str, str]] = set()
+        for entry in self._archive:
+            existing_keys.add((entry.get("plan_generated_at", ""), entry.get("date", "")))
+
+        added = 0
+        for d in result.get("daily_results", []):
+            key = (gen_at, d.get("date", ""))
+            if key not in existing_keys:
+                self._archive.append({
+                    "plan_generated_at": gen_at,
+                    "evaluated_at": result.get("evaluated_at", ""),
+                    "current_price_at_prediction": result.get("current_price_at_prediction", 0),
+                    **d,
+                })
+                existing_keys.add(key)
+                added += 1
+            else:
+                # Update existing entry with latest evaluation
+                for i, entry in enumerate(self._archive):
+                    if (entry.get("plan_generated_at", ""), entry.get("date", "")) == key:
+                        self._archive[i] = {
+                            "plan_generated_at": gen_at,
+                            "evaluated_at": result.get("evaluated_at", ""),
+                            "current_price_at_prediction": result.get("current_price_at_prediction", 0),
+                            **d,
+                        }
+                        break
+
+        if added:
+            self._save_archive()
+            logger.debug(f"Archived {added} new hourly results (total: {len(self._archive)})")
+
+    def get_prediction_archive(self) -> list[dict]:
+        """Return the full prediction archive for the Archive page."""
+        return self._archive
 
     # ── Store a plan for future evaluation ───────────────────────────
 
@@ -405,6 +466,10 @@ class AccuracyTracker:
         if len(self._log) > self._MAX_LOG_ENTRIES:
             self._log = self._log[-self._MAX_LOG_ENTRIES:]
         self._save_log()
+
+        # Also persist to the permanent prediction archive (no cap)
+        self._archive_evaluation(result)
+
         return result
 
     def _get_actual_price(self, close_series: pd.Series, target_date) -> Optional[float]:

@@ -191,6 +191,9 @@ with st.sidebar:
         st.markdown(f"- {a}")
 
     st.divider()
+    st.markdown("📜 **[Prediction Archive →](./📜_Prediction_Archive)**")
+    st.caption("Full historical log of all predictions")
+    st.divider()
     st.caption(f"v1.0 · Updated {now_ist().strftime('%H:%M')}")
 
 

@@ -120,7 +120,7 @@ def _text_to_bullets(text: str) -> str:
 
 # Known section headings emitted by the narrator LLM
 _SECTION_HEADING_PATTERN = re.compile(
-    r"(🔍\s*What'?s Happening:?|📊\s*Why It Matters:?|👀\s*What to Watch:?)",
+    r"(🔍\s*What['\u2018\u2019]?s Happening:?|📊\s*Why It Matters:?|👀\s*What to Watch:?)",
     re.IGNORECASE,
 )
 

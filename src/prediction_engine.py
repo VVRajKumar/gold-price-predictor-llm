@@ -196,7 +196,8 @@ class PredictionEngine:
                 if self._current_plan is not None:
                     return self._current_plan
                 raise RuntimeError(
-                    "Cannot generate prediction: market is closed and no cached plan exists"
+                    "Cannot generate prediction: market is closed and no cached plan exists. "
+                    "A prediction will be generated automatically when the market reopens on Monday."
                 )
             logger.info("PredictionEngine: generating new ML-first prediction …")
             plan = self._orchestrator.generate_prediction()

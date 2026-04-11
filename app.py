@@ -468,8 +468,6 @@ if plan.daily_predictions:
     pred_df["_is_closed"] = pred_df["date"].apply(
         lambda dt: is_market_closed_ist(dt.to_pydatetime())
     )
-    _has_closed_hours = pred_df["_is_closed"].any()
-    _all_closed = pred_df["_is_closed"].all()
 
     # Reuse the already-converted INR data from the OHLC chart above
     # (avoids a second fetch+convert which can double-convert on Cloud)
@@ -494,23 +492,21 @@ if plan.daily_predictions:
             )
             close_series = close_series.reindex(daily_idx).ffill()
 
-    # ── Merge weekend flatline into the actual price line ────────
-    # When predictions include market-closed hours (weekend), those
-    # flatline prices are appended to the actual price series so the
-    # chart shows one seamless yellow line through the weekend.
+    # ── Extend actual price as yellow flatline through weekend ────
+    # When predictions include market-closed hours (weekend), extend
+    # the actual price line as a flat yellow line through those hours.
     closed_preds = pred_df[pred_df["_is_closed"]]
     if not closed_preds.empty and not gold_recent.empty and not close_series.empty:
-        # Build a series from the market-closed prediction hours
+        last_actual = close_series.iloc[-1]
         flat_series = pd.Series(
-            closed_preds["predicted_price"].values,
+            [last_actual] * len(closed_preds),
             index=closed_preds["date"].values,
         )
-        # Extend actual prices with the flatline points
         close_series = pd.concat([close_series, flat_series])
         close_series = close_series[~close_series.index.duplicated(keep="first")]
         close_series = close_series.sort_index()
 
-    # Plot the (extended) actual price line
+    # Plot the (extended) actual price line — solid yellow
     if not gold_recent.empty and not close_series.empty:
         fig.add_trace(go.Scatter(
             x=close_series.index, y=close_series.values,
@@ -518,36 +514,40 @@ if plan.daily_predictions:
             line=dict(color="#ffd93d", width=2),
         ))
 
-    if _all_closed:
-        # All prediction hours are market-closed — already merged into
-        # the actual line above, nothing more to draw.
-        pass
-    else:
-        # Split predictions into active market and closed segments
-        active_preds = pred_df[~pred_df["_is_closed"]]
+    # Split predictions into active market and closed (weekend) segments
+    active_preds = pred_df[~pred_df["_is_closed"]]
+    weekend_preds = pred_df[pred_df["_is_closed"]]
 
-        # Prediction band (only for active market hours)
-        if not active_preds.empty:
-            fig.add_trace(go.Scatter(
-                x=active_preds["date"], y=active_preds["high_range"],
-                mode="lines", name="Upper Band",
-                line=dict(width=0), showlegend=False,
-            ))
-            fig.add_trace(go.Scatter(
-                x=active_preds["date"], y=active_preds["low_range"],
-                mode="lines", name="Prediction Range",
-                fill="tonexty", fillcolor="rgba(0,212,170,0.15)",
-                line=dict(width=0),
-            ))
+    # Prediction band (only for active market hours)
+    if not active_preds.empty:
+        fig.add_trace(go.Scatter(
+            x=active_preds["date"], y=active_preds["high_range"],
+            mode="lines", name="Upper Band",
+            line=dict(width=0), showlegend=False,
+        ))
+        fig.add_trace(go.Scatter(
+            x=active_preds["date"], y=active_preds["low_range"],
+            mode="lines", name="Prediction Range",
+            fill="tonexty", fillcolor="rgba(0,212,170,0.15)",
+            line=dict(width=0),
+        ))
 
-        # Active prediction line (market-open hours only)
-        if not active_preds.empty:
-            fig.add_trace(go.Scatter(
-                x=active_preds["date"], y=active_preds["predicted_price"],
-                mode="lines+markers", name="Predicted",
-                line=dict(color="#00d4aa", width=3),
-                marker=dict(size=10, symbol="circle"),
-            ))
+    # Active prediction line — solid green (market-open hours)
+    if not active_preds.empty:
+        fig.add_trace(go.Scatter(
+            x=active_preds["date"], y=active_preds["predicted_price"],
+            mode="lines+markers", name="Predicted",
+            line=dict(color="#00d4aa", width=3),
+            marker=dict(size=10, symbol="circle"),
+        ))
+
+    # Weekend prediction line — green dotted (market-closed hours)
+    if not weekend_preds.empty:
+        fig.add_trace(go.Scatter(
+            x=weekend_preds["date"], y=weekend_preds["predicted_price"],
+            mode="lines", name="Predicted (Market Closed)",
+            line=dict(color="#00d4aa", width=2, dash="dot"),
+        ))
 
     fig.update_layout(
         template="plotly_dark", height=500,

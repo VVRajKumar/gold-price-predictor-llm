@@ -1328,19 +1328,18 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         _cutoff_72h = pd.Timestamp(now_ist().replace(tzinfo=None)) - pd.Timedelta(hours=72)
         acc_df = acc_df[acc_df["date"] >= _cutoff_72h].copy()
 
+        # Exclude market-closed hours (weekends + Monday pre-market) from
+        # accuracy chart — consistent with the table and metrics filtering.
+        acc_df = acc_df[~acc_df["date"].apply(
+            lambda dt: is_market_closed_ist(dt.to_pydatetime())
+        )].copy()
+
         # Forward-fill NaN gaps so lines stay connected
         for _col in ("predicted", "actual", "high_range", "low_range"):
             if _col in acc_df.columns:
                 acc_df[_col] = acc_df[_col].ffill()
 
         fig_acc = go.Figure()
-
-        # Detect market-closed hours for weekday/weekend visual split
-        acc_df["_is_closed"] = acc_df["date"].apply(
-            lambda dt: is_market_closed_ist(dt.to_pydatetime())
-        )
-        _acc_weekday = acc_df[~acc_df["_is_closed"]]
-        _acc_weekend = acc_df[acc_df["_is_closed"]]
 
         # Prediction band
         fig_acc.add_trace(go.Scatter(
@@ -1357,18 +1356,16 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                 connectgaps=True,
         ))
 
-        # Weekday predicted line — solid green
-        if not _acc_weekday.empty:
-            fig_acc.add_trace(go.Scatter(
-                    x=_acc_weekday["date"], y=_acc_weekday["predicted"],
-                    mode="lines+markers", name="Predicted",
-                    line=dict(color="#00d4aa", width=2),
-                    marker=dict(size=7, symbol="diamond"),
-                    connectgaps=True,
-            ))
+        # Predicted line — solid green
+        fig_acc.add_trace(go.Scatter(
+                x=acc_df["date"], y=acc_df["predicted"],
+                mode="lines+markers", name="Predicted",
+                line=dict(color="#00d4aa", width=2),
+                marker=dict(size=7, symbol="diamond"),
+                connectgaps=True,
+        ))
 
-        # Actual line — solid yellow (drawn before weekend dotted green
-        # so the green dotted line renders on top and stays visible).
+        # Actual line — solid yellow
         fig_acc.add_trace(go.Scatter(
                 x=acc_df["date"], y=acc_df["actual"],
                 mode="lines+markers", name="Actual",
@@ -1376,35 +1373,6 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                 marker=dict(size=7),
                 connectgaps=True,
         ))
-
-        # Weekend predicted line — dotted green, merged with actual price.
-        # Market is closed so the prediction equals Friday's close (= actual).
-        # Drawn AFTER the yellow actual line so it stays visible on top.
-        # Bridge from the last weekday point so the lines are not disjointed.
-        if not _acc_weekend.empty:
-            _wk_x = list(_acc_weekend["date"])
-            _wk_y = list(_acc_weekend["actual"])
-            # Bridge: prepend last weekday point to connect the segments
-            if not _acc_weekday.empty:
-                _bridge_row = _acc_weekday.iloc[-1]
-                _wk_x = [_bridge_row["date"]] + _wk_x
-                _wk_y = [_bridge_row["actual"]] + _wk_y
-            # Bridge: append first weekday point AFTER the weekend to reconnect
-            _post_weekend = _acc_weekday[_acc_weekday["date"] > _acc_weekend["date"].max()]
-            if not _post_weekend.empty:
-                _post_row = _post_weekend.iloc[0]
-                _wk_x = _wk_x + [_post_row["date"]]
-                _wk_y = _wk_y + [_post_row["actual"]]
-            fig_acc.add_trace(go.Scatter(
-                    x=_wk_x, y=_wk_y,
-                    mode="lines+markers", name="Predicted (Market Closed)",
-                    line=dict(color="#00d4aa", width=2, dash="dot"),
-                    marker=dict(size=5, symbol="diamond"),
-                    connectgaps=True,
-            ))
-
-        # Clean up temp column
-        acc_df = acc_df.drop(columns=["_is_closed"], errors="ignore")
 
         # Color markers for within/outside band
         outside = acc_df[~acc_df["within_band"]]
@@ -1432,7 +1400,6 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                 title="Predicted vs Actual Indian Gold Price (₹/10g)",
                 template="plotly_dark", height=450,
                 yaxis_title="Price (₹/10g)", xaxis_title="Time",
-                xaxis=dict(rangebreaks=[dict(bounds=["sat", "mon"])]),
                 yaxis=dict(range=_y_range) if _y_range else {},
                 legend=dict(orientation="h", yanchor="bottom", y=1.02),
                 hovermode="x unified",
@@ -1441,11 +1408,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
 
         # ── Hourly Accuracy Table ────────────────────────────────
         with st.expander("📋 Hourly Accuracy Breakdown", expanded=False):
-            # Exclude market-closed hours (weekends + Monday pre-market)
-            _table_df = acc_df[~acc_df["date"].apply(
-                lambda dt: is_market_closed_ist(dt.to_pydatetime())
-            )].copy()
-            display_df = _table_df[["date", "predicted", "actual", "low_range",
+            display_df = acc_df[["date", "predicted", "actual", "low_range",
                                  "high_range", "error", "pct_error", "within_band"]].copy()
             # Sort chronologically (oldest → newest) so the table reads
             # in natural time order instead of an arbitrary insertion order.

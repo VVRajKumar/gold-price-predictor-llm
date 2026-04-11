@@ -288,13 +288,6 @@ for _col in ("predicted", "actual", "high_range", "low_range"):
 
 fig = go.Figure()
 
-# Detect market-closed hours for weekday/weekend visual split
-filtered_df["_is_closed"] = filtered_df["date"].apply(
-    lambda dt: is_market_closed_ist(dt.to_pydatetime())
-)
-_weekday_df = filtered_df[~filtered_df["_is_closed"]]
-_weekend_df = filtered_df[filtered_df["_is_closed"]]
-
 # Prediction band
 if "high_range" in filtered_df.columns and "low_range" in filtered_df.columns:
     fig.add_trace(go.Scatter(
@@ -311,18 +304,16 @@ if "high_range" in filtered_df.columns and "low_range" in filtered_df.columns:
         connectgaps=True,
     ))
 
-# Weekday predicted line — solid green
-if not _weekday_df.empty:
-    fig.add_trace(go.Scatter(
-        x=_weekday_df["date"], y=_weekday_df["predicted"],
-        mode="lines+markers", name="Predicted",
-        line=dict(color="#00d4aa", width=2),
-        marker=dict(size=5, symbol="diamond"),
-        connectgaps=True,
-    ))
+# Predicted line — solid green
+fig.add_trace(go.Scatter(
+    x=filtered_df["date"], y=filtered_df["predicted"],
+    mode="lines+markers", name="Predicted",
+    line=dict(color="#00d4aa", width=2),
+    marker=dict(size=5, symbol="diamond"),
+    connectgaps=True,
+))
 
-# Actual line — solid yellow (drawn before weekend dotted green
-# so the green dotted line renders on top and stays visible).
+# Actual line — solid yellow
 fig.add_trace(go.Scatter(
     x=filtered_df["date"], y=filtered_df["actual"],
     mode="lines+markers", name="Actual",
@@ -330,35 +321,6 @@ fig.add_trace(go.Scatter(
     marker=dict(size=5),
     connectgaps=True,
 ))
-
-# Weekend predicted line — dotted green, merged with actual price.
-# Market is closed so the prediction equals Friday's close (= actual).
-# Drawn AFTER the yellow actual line so it stays visible on top.
-# Bridge from the last weekday point so the lines are not disjointed.
-if not _weekend_df.empty:
-    _wk_x = list(_weekend_df["date"])
-    _wk_y = list(_weekend_df["actual"])
-    # Bridge: prepend last weekday point to connect the segments
-    if not _weekday_df.empty:
-        _bridge_row = _weekday_df.iloc[-1]
-        _wk_x = [_bridge_row["date"]] + _wk_x
-        _wk_y = [_bridge_row["actual"]] + _wk_y
-    # Bridge: append first weekday point AFTER the weekend to reconnect
-    _post_weekend = _weekday_df[_weekday_df["date"] > _weekend_df["date"].max()]
-    if not _post_weekend.empty:
-        _post_row = _post_weekend.iloc[0]
-        _wk_x = _wk_x + [_post_row["date"]]
-        _wk_y = _wk_y + [_post_row["actual"]]
-    fig.add_trace(go.Scatter(
-        x=_wk_x, y=_wk_y,
-        mode="lines+markers", name="Predicted (Market Closed)",
-        line=dict(color="#00d4aa", width=2, dash="dot"),
-        marker=dict(size=4, symbol="diamond"),
-        connectgaps=True,
-    ))
-
-# Clean up temp column
-filtered_df = filtered_df.drop(columns=["_is_closed"], errors="ignore")
 
 # Highlight band misses
 if "within_band" in filtered_df.columns:
@@ -385,7 +347,6 @@ fig.update_layout(
     height=550,
     yaxis_title="Price (₹/10g)",
     xaxis_title="Time (IST)",
-    xaxis=dict(rangebreaks=[dict(bounds=["sat", "mon"])]),
     yaxis=dict(range=_y_range) if _y_range else {},
     legend=dict(orientation="h", yanchor="bottom", y=1.02),
     hovermode="x unified",

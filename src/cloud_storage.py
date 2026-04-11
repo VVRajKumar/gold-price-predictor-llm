@@ -6,12 +6,15 @@ On Streamlit Cloud the filesystem is ephemeral: every deploy / sleep wipes
 prediction_archive) to a cloud backend so they survive across restarts.
 
 **Priority order:**
-  1. AWS S3  – preferred (no file-size limit).
+  1. AWS S3  – preferred (no file-size limit).  Uses boto3's default credential
+     chain (IAM role, instance profile, ~/.aws/credentials) — no explicit
+     access keys needed.  Only ``AWS_S3_BUCKET_NAME`` (and optionally
+     ``AWS_S3_REGION`` / ``AWS_S3_PREFIX``) are read from Streamlit secrets.
   2. GitHub Gist – fallback when S3 is unavailable or fails.
 
 Setup:
-  • S3:  Add AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_S3_BUCKET_NAME,
-         AWS_S3_REGION, AWS_S3_PREFIX to Streamlit secrets (or .env).
+  • S3:  Add AWS_S3_BUCKET_NAME (and optionally AWS_S3_REGION, AWS_S3_PREFIX)
+         to Streamlit secrets.  Credentials come from IAM / default chain.
   • Gist: Add GITHUB_GIST_TOKEN, GITHUB_GIST_ID to Streamlit secrets (or .env).
 
 When neither backend is configured the module silently becomes a no-op,
@@ -70,7 +73,12 @@ _prefix: str = ""
 
 
 def _init_s3():
-    """Lazily initialise the boto3 S3 client and bucket config."""
+    """Lazily initialise the boto3 S3 client and bucket config.
+
+    Uses boto3's default credential chain (IAM role, instance profile,
+    ~/.aws/credentials, etc.) — no explicit access keys are read.
+    Only the bucket name, region, and prefix are configured via secrets.
+    """
     global _s3_client, _bucket, _prefix
     if _s3_client is not None:
         return
@@ -80,23 +88,13 @@ def _init_s3():
         _s3_client = False
         return
 
-    aws_key = _get_secret("AWS_ACCESS_KEY_ID")
-    aws_secret = _get_secret("AWS_SECRET_ACCESS_KEY")
     region = _get_secret("AWS_S3_REGION", "ap-south-2")
     _prefix = _get_secret("AWS_S3_PREFIX", "gold-predictor/")
     _prefix = (_prefix.rstrip("/") + "/") if _prefix else ""
 
     try:
         import boto3
-        if aws_key and aws_secret:
-            _s3_client = boto3.client(
-                "s3",
-                aws_access_key_id=aws_key,
-                aws_secret_access_key=aws_secret,
-                region_name=region,
-            )
-        else:
-            _s3_client = boto3.client("s3", region_name=region)
+        _s3_client = boto3.client("s3", region_name=region)
         logger.info(f"[cloud_storage] S3 client initialised (bucket={_bucket}, prefix={_prefix})")
     except Exception as e:
         logger.warning(f"[cloud_storage] Failed to initialise S3 client: {e}")

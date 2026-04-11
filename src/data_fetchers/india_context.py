@@ -101,6 +101,9 @@ def _fetch_india_10y_yield() -> dict[str, Any]:
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.droplevel(1)
             close = df["Close"].squeeze()
+            # .squeeze() returns a scalar when DataFrame has exactly 1 row
+            if isinstance(close, (int, float)):
+                close = pd.Series([close], index=df.index)
             if hasattr(close, "iloc") and len(close) > 0:
                 current = float(close.iloc[-1])
                 prev = float(close.iloc[-min(5, len(close))]) if len(close) > 1 else current

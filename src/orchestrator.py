@@ -394,9 +394,11 @@ class Orchestrator:
         if ml_trained:
             shap_explanation = self._ml_ensemble.get_shap_explanation(agent_signals)
             if shap_explanation:
+                fi = shap_explanation.get('feature_importance') or []
+                top_feature = fi[0]['feature'] if fi else "unknown"
                 logger.info(
-                    f"SHAP: {shap_explanation['total_features']} features, "
-                    f"top driver: {shap_explanation['feature_importance'][0]['feature']}"
+                    f"SHAP: {shap_explanation.get('total_features', 0)} features, "
+                    f"top driver: {top_feature}"
                 )
 
         # 7. LLM narrator writes prose (NO price generation)

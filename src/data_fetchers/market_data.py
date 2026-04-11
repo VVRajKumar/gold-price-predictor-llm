@@ -29,6 +29,21 @@ _MAX_RETRIES = 3
 _INITIAL_BACKOFF = 2  # seconds
 
 
+def _safe_col(df: pd.DataFrame, col: str) -> pd.Series:
+    """Extract a column as a Series even when the DataFrame has one row.
+
+    ``df[col].squeeze()`` returns a scalar for single-row DataFrames,
+    which breaks downstream ``.iloc`` / ``.dropna()`` calls.  This helper
+    always returns a proper ``pd.Series``.
+    """
+    s = df[col].squeeze()
+    if isinstance(s, (int, float)):
+        return pd.Series([s], index=df.index)
+    if isinstance(s, pd.DataFrame):
+        return s.iloc[:, 0]
+    return s
+
+
 def _yf_download_with_retry(
     ticker: str,
     start: str,
@@ -162,8 +177,8 @@ class MarketDataFetcher:
         """Return latest USD/INR exchange rate, fallback to 85.5 if unavailable."""
         df = self.fetch_ticker(USDINR_TICKER, period_days=7)
         if not df.empty:
-            close = df["Close"].squeeze()
-            if hasattr(close, "iloc") and len(close) > 0:
+            close = _safe_col(df, "Close")
+            if len(close) > 0:
                 rate = float(close.iloc[-1])
                 logger.info(f"USD/INR rate: {rate:.2f}")
                 return rate
@@ -181,9 +196,7 @@ class MarketDataFetcher:
         df = self.fetch_ticker(USDINR_TICKER, period_days=period_days, interval=interval)
         if df.empty:
             return pd.Series(dtype=float)
-        close = df["Close"].squeeze()
-        if isinstance(close, pd.DataFrame):
-            close = close.iloc[:, 0]
+        close = _safe_col(df, "Close")
         return pd.to_numeric(close, errors="coerce").dropna()
 
     # ------------------------------------------------------------------ #
@@ -276,8 +289,8 @@ class MarketDataFetcher:
         # Primary: MCX Gold (already INR-denominated)
         mcx_df = self.fetch_ticker(MCX_GOLD_TICKER, period_days=period_days)
         if not mcx_df.empty:
-            close = mcx_df["Close"].squeeze()
-            if hasattr(close, "iloc") and len(close) > 0:
+            close = _safe_col(mcx_df, "Close")
+            if len(close) > 0:
                 price = float(close.iloc[-1])
                 # MCX gold is in INR per 10g; sanity check (should be > 10,000)
                 if price > 10_000:
@@ -290,8 +303,8 @@ class MarketDataFetcher:
         df = self.fetch_ticker(GOLD_TICKER, period_days=period_days)
         if df.empty:
             return 0.0
-        close = df["Close"].squeeze()
-        if hasattr(close, "iloc") and len(close) > 0:
+        close = _safe_col(df, "Close")
+        if len(close) > 0:
             usd_per_oz = float(close.iloc[-1])
             # 1 troy oz = 31.1035 grams → per 10g
             inr_per_10g = (usd_per_oz / 31.1035) * 10 * usd_rate
@@ -309,11 +322,11 @@ class MarketDataFetcher:
         # Try MCX first (native INR/10g – no conversion needed)
         mcx_df = self.fetch_ticker(MCX_GOLD_TICKER, period_days)
         if not mcx_df.empty:
-            close = pd.to_numeric(mcx_df["Close"].squeeze(), errors="coerce").dropna()
+            close = pd.to_numeric(_safe_col(mcx_df, "Close"), errors="coerce").dropna()
             if not close.empty and float(close.iloc[-1]) > 10_000:
-                high = pd.to_numeric(mcx_df["High"].squeeze(), errors="coerce").dropna()
-                low = pd.to_numeric(mcx_df["Low"].squeeze(), errors="coerce").dropna()
-                volume = pd.to_numeric(mcx_df["Volume"].squeeze(), errors="coerce").dropna() if "Volume" in mcx_df else pd.Series(dtype=float)
+                high = pd.to_numeric(_safe_col(mcx_df, "High"), errors="coerce").dropna()
+                low = pd.to_numeric(_safe_col(mcx_df, "Low"), errors="coerce").dropna()
+                volume = pd.to_numeric(_safe_col(mcx_df, "Volume"), errors="coerce").dropna() if "Volume" in mcx_df else pd.Series(dtype=float)
 
                 current = float(close.iloc[-1])
                 prev = float(close.iloc[-2]) if len(close) > 1 else current
@@ -340,10 +353,10 @@ class MarketDataFetcher:
         if df.empty:
             return {"error": "No gold data available"}
 
-        close = pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna()
-        high = pd.to_numeric(df["High"].squeeze(), errors="coerce").dropna()
-        low = pd.to_numeric(df["Low"].squeeze(), errors="coerce").dropna()
-        volume = pd.to_numeric(df["Volume"].squeeze(), errors="coerce").dropna() if "Volume" in df else pd.Series(dtype=float)
+        close = pd.to_numeric(_safe_col(df, "Close"), errors="coerce").dropna()
+        high = pd.to_numeric(_safe_col(df, "High"), errors="coerce").dropna()
+        low = pd.to_numeric(_safe_col(df, "Low"), errors="coerce").dropna()
+        volume = pd.to_numeric(_safe_col(df, "Volume"), errors="coerce").dropna() if "Volume" in df else pd.Series(dtype=float)
 
         if close.empty:
             logger.warning("Gold data returned but Close column has no valid values")
@@ -398,7 +411,7 @@ class MarketDataFetcher:
         if interval == "1d":
             mcx_df = self.fetch_ticker(MCX_GOLD_TICKER, period_days=period_days, interval=interval)
             if not mcx_df.empty:
-                close = pd.to_numeric(mcx_df["Close"].squeeze(), errors="coerce").dropna()
+                close = pd.to_numeric(_safe_col(mcx_df, "Close"), errors="coerce").dropna()
                 if not close.empty and float(close.iloc[-1]) > 10_000:
                     logger.info(f"Using MCX gold data ({len(mcx_df)} rows)")
                     return mcx_df, "MCX (GOLD.NS)"
@@ -422,12 +435,12 @@ class MarketDataFetcher:
         if gold_close is None or gold_close.empty:
             return {}
 
-        gold_returns = gold_close["Close"].squeeze().pct_change().dropna()
+        gold_returns = _safe_col(gold_close, "Close").pct_change().dropna()
         correlations = {}
         for name, df in all_data.items():
             if name in ("gold", "gold_mcx") or df.empty:
                 continue
-            other_returns = df["Close"].squeeze().pct_change().dropna()
+            other_returns = _safe_col(df, "Close").pct_change().dropna()
             # Align indices
             common = gold_returns.index.intersection(other_returns.index)
             if len(common) < 10:

@@ -19,6 +19,20 @@ _MAX_RETRIES = 3
 _INITIAL_BACKOFF = 2  # seconds
 
 
+def _safe_col(df: pd.DataFrame, col: str) -> pd.Series:
+    """Extract a column as a Series even when the DataFrame has one row.
+
+    ``df[col].squeeze()`` returns a scalar for single-row DataFrames,
+    which breaks downstream ``.iloc`` / ``.dropna()`` calls.
+    """
+    s = df[col].squeeze()
+    if isinstance(s, (int, float)):
+        return pd.Series([s], index=df.index)
+    if isinstance(s, pd.DataFrame):
+        return s.iloc[:, 0]
+    return s
+
+
 def _yf_download_safe(
     ticker: str,
     start: str,
@@ -154,8 +168,8 @@ class ETFDataFetcher:
                 if df.empty or len(df) < 2:
                     continue
 
-                close = df["Close"].squeeze()
-                volume = df["Volume"].squeeze() if "Volume" in df else pd.Series(dtype=float)
+                close = _safe_col(df, "Close")
+                volume = _safe_col(df, "Volume") if "Volume" in df else pd.Series(dtype=float)
 
                 avg_recent_vol = _safe_float(volume.tail(5).mean()) if len(volume) > 0 else 0.0
                 avg_older_vol = _safe_float(volume.tail(20).head(15).mean()) if len(volume) > 15 else 0.0
@@ -226,7 +240,7 @@ class ETFDataFetcher:
                 if df.empty or len(df) < 2:
                     continue
 
-                close = df["Close"].squeeze()
+                close = _safe_col(df, "Close")
                 close_last = _safe_float(close.iloc[-1])
                 close_first = _safe_float(close.iloc[0])
 

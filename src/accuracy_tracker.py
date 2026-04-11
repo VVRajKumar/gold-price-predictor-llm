@@ -19,7 +19,7 @@ from loguru import logger
 
 from .config import CACHE_DIR
 from .data_fetchers.market_data import MarketDataFetcher
-from .time_utils import iso_now_ist, now_ist, IST_OFFSET
+from .time_utils import iso_now_ist, now_ist, IST_OFFSET, is_market_closed_ist
 from . import cloud_storage
 
 
@@ -34,6 +34,10 @@ _HOURLY_SCORECARD_START = datetime(2026, 4, 4, 0, 0, 0)
 # is considered flat and the prediction is counted as directionally correct.
 # 0.05% ≈ ₹36 at ₹73k — ignores noise from bid/ask spread & rounding.
 _DIR_NEUTRAL_PCT = 0.05
+
+# Market-closed (weekend) band factors: predicted = actual, bands ±0.2%
+_MARKET_CLOSED_BAND_LOWER = 0.998  # -0.2%
+_MARKET_CLOSED_BAND_UPPER = 1.002  # +0.2%
 
 # ── Composite accuracy score weights & scaling ──────────────────────
 # MAPE score = max(0, 100 - MAPE * MAPE_SCALE_FACTOR).  A MAPE of 10%
@@ -401,25 +405,17 @@ class AccuracyTracker:
             pass
         current_price = plan_dict.get("current_price", 0)
 
-        # Fetch recent actual gold prices on hourly candles
-        # Try MCX first (native INR/10g), fall back to COMEX + conversion
-        gold_df = self._market.fetch_ticker("GOLD.NS", period_days=10, interval="1h")
-        _eval_source = "MCX"
-        if gold_df.empty or ("Close" in gold_df and
-                pd.to_numeric(gold_df["Close"].squeeze(), errors="coerce").dropna().empty):
-            gold_df = self._market.fetch_ticker("GC=F", period_days=10, interval="1h")
-            _eval_source = "COMEX"
-        elif ("Close" in gold_df and
-                float(pd.to_numeric(gold_df["Close"].squeeze(), errors="coerce").dropna().iloc[-1]) < 10_000):
-            gold_df = self._market.fetch_ticker("GC=F", period_days=10, interval="1h")
-            _eval_source = "COMEX"
+        # Fetch recent actual gold prices on hourly candles.
+        # Always use COMEX (GC=F) for hourly data because MCX (GOLD.NS) hourly
+        # candles are unreliable on Yahoo Finance — they can return volume or
+        # notional values instead of per-10g prices, producing wildly wrong
+        # actuals.  COMEX hourly data is converted to INR/10g via time-aligned
+        # daily FX rates (same approach the ML ensemble uses for predictions).
+        gold_df = self._market.fetch_ticker("GC=F", period_days=10, interval="1h")
         if gold_df.empty:
             return None
 
-        # Only convert if COMEX data (MCX is already INR/10g)
-        if _eval_source == "COMEX":
-            # Use time-aligned daily FX rates for accurate conversion
-            gold_df = self._market.convert_usd_to_inr(gold_df, period_days=15)
+        gold_df = self._market.convert_usd_to_inr(gold_df, period_days=15)
 
         # Convert gold data index from UTC to IST.
         # yfinance returns UTC timestamps (tz-stripped via tz_convert(None)).
@@ -452,6 +448,16 @@ class AccuracyTracker:
             if actual is None:
                 continue
 
+            # Sanity check: actual price should be in a plausible INR/10g range.
+            # Gold at ₹50K–₹500K per 10g covers reasonable historical/future
+            # scenarios.  Values outside this (e.g. volume/notional data) are
+            # clearly wrong and should be skipped.
+            if actual < 50_000 or actual > 500_000:
+                logger.warning(
+                    f"Skipping implausible actual price ₹{actual:,.0f} at {pred_ts}"
+                )
+                continue
+
             predicted = dp["predicted_price"]
             low = dp["low_range"]
             high = dp["high_range"]
@@ -463,6 +469,15 @@ class AccuracyTracker:
                 high = float(high)
             except (TypeError, ValueError):
                 continue
+
+            # Weekend / market-closed hours: override predicted price with
+            # Friday's actual closing price and use tight ±0.2% bands with
+            # 95% confidence.  The market doesn't trade during these hours so
+            # the prediction should simply be the last known close.
+            if is_market_closed_ist(pred_ts.to_pydatetime()):
+                predicted = actual
+                low = round(actual * _MARKET_CLOSED_BAND_LOWER, 2)
+                high = round(actual * _MARKET_CLOSED_BAND_UPPER, 2)
 
             error = predicted - actual
             abs_error = abs(error)

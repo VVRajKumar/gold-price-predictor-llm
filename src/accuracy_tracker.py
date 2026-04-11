@@ -39,6 +39,13 @@ _DIR_NEUTRAL_PCT = 0.05
 _MARKET_CLOSED_BAND_LOWER = 0.998  # -0.2%
 _MARKET_CLOSED_BAND_UPPER = 1.002  # +0.2%
 
+# Plausible INR/10g price range for sanity-checking fetched actual prices.
+# Gold at ₹50K–₹500K per 10g covers reasonable historical/future scenarios.
+# Values outside this range (e.g. volume/notional data or double-conversion
+# artifacts) are clearly wrong and should be rejected.
+_MIN_PLAUSIBLE_PRICE = 50_000
+_MAX_PLAUSIBLE_PRICE = 500_000
+
 # ── Composite accuracy score weights & scaling ──────────────────────
 # MAPE score = max(0, 100 - MAPE * MAPE_SCALE_FACTOR).  A MAPE of 10%
 # maps to a score of 0; 0% maps to 100.
@@ -67,7 +74,7 @@ def compute_accuracy_score(mape: float, band_hit: float, direction: float) -> fl
 # Bump this version string whenever guardrail parameters change.
 # Triggers a one-time rebase that retroactively widens bands on all stored
 # plans so accuracy metrics reflect the new parameters immediately.
-_GUARDRAIL_VERSION = "v5_ist_timezone_fix_20260411"
+_GUARDRAIL_VERSION = "v6_purge_corrupt_actuals_20260411"
 
 
 class AccuracyTracker:
@@ -75,11 +82,18 @@ class AccuracyTracker:
 
     def __init__(self):
         self._market = MarketDataFetcher()
+        self._archive_was_cleaned = False
+        self._log_was_cleaned = False
         self._log: list[dict] = self._load_log()
         self._stored_plans: list[dict] = self._load_stored_plans()
         self._archive: list[dict] = self._load_archive()
         self._last_checked: Optional[str] = None
         self._auto_running = False
+        # Persist cleaned data back to cloud so corrupted entries are removed
+        if self._log_was_cleaned:
+            self._save_log()
+        if self._archive_was_cleaned:
+            self._save_archive()
         self._purge_stale_entries()
         # Backfill archive BEFORE rebase so that data from the accuracy log
         # (e.g. April 4-6 evaluations) is copied to the permanent archive
@@ -223,6 +237,10 @@ class AccuracyTracker:
             for d in evaluation.get("daily_results", []):
                 key = (gen_at, d.get("date", ""))
                 if key not in existing_keys:
+                    # Skip entries with implausible actual prices
+                    actual = d.get("actual")
+                    if not isinstance(actual, (int, float)) or actual < _MIN_PLAUSIBLE_PRICE or actual > _MAX_PLAUSIBLE_PRICE:
+                        continue
                     entry_data = {
                         "plan_generated_at": gen_at,
                         "evaluated_at": evaluation.get("evaluated_at", ""),
@@ -247,12 +265,44 @@ class AccuracyTracker:
     def _load_log(self) -> list[dict]:
         if _ACCURACY_PATH.exists():
             try:
-                return json.loads(_ACCURACY_PATH.read_text(encoding="utf-8"))
+                raw = json.loads(_ACCURACY_PATH.read_text(encoding="utf-8"))
             except Exception:
                 return []
-        # Fallback: try restoring from cloud
-        data = cloud_storage.load("accuracy_log.json")
-        return data if isinstance(data, list) else []
+        else:
+            # Fallback: try restoring from cloud
+            raw = cloud_storage.load("accuracy_log.json")
+            raw = raw if isinstance(raw, list) else []
+
+        if not isinstance(raw, list):
+            return []
+
+        # Clean entries with implausible actual prices from daily_results
+        cleaned = []
+        removed_total = 0
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            daily = entry.get("daily_results", [])
+            valid_daily = [
+                d for d in daily
+                if isinstance(d.get("actual"), (int, float))
+                and _MIN_PLAUSIBLE_PRICE <= d["actual"] <= _MAX_PLAUSIBLE_PRICE
+            ]
+            removed = len(daily) - len(valid_daily)
+            removed_total += removed
+            if valid_daily:
+                entry = dict(entry)  # shallow copy to avoid mutating original
+                entry["daily_results"] = valid_daily
+                entry["days_evaluated"] = len(valid_daily)
+                cleaned.append(entry)
+
+        if removed_total > 0:
+            logger.info(
+                f"Log cleanup: removed {removed_total} daily_results entries "
+                f"with invalid actual prices"
+            )
+            self._log_was_cleaned = True
+        return cleaned
 
     def _save_log(self):
         cloud_storage.persist("accuracy_log.json", self._log)
@@ -275,11 +325,26 @@ class AccuracyTracker:
     def _load_archive(self) -> list[dict]:
         if _ARCHIVE_PATH.exists():
             try:
-                return json.loads(_ARCHIVE_PATH.read_text(encoding="utf-8"))
+                raw = json.loads(_ARCHIVE_PATH.read_text(encoding="utf-8"))
             except Exception:
                 return []
-        data = cloud_storage.load("prediction_archive.json")
-        return data if isinstance(data, list) else []
+        else:
+            raw = cloud_storage.load("prediction_archive.json")
+            raw = raw if isinstance(raw, list) else []
+
+        # Purge entries with missing or implausible actual prices
+        cleaned = [
+            e for e in raw
+            if isinstance(e.get("actual"), (int, float))
+            and _MIN_PLAUSIBLE_PRICE <= e["actual"] <= _MAX_PLAUSIBLE_PRICE
+        ]
+        if len(cleaned) < len(raw):
+            logger.info(
+                f"Archive cleanup: removed {len(raw) - len(cleaned)} entries "
+                f"with invalid actual prices"
+            )
+            self._archive_was_cleaned = True
+        return cleaned
 
     def _save_archive(self):
         cloud_storage.persist("prediction_archive.json", self._archive)
@@ -300,6 +365,10 @@ class AccuracyTracker:
         added = 0
         updated = 0
         for d in result.get("daily_results", []):
+            # Skip entries with implausible actual prices
+            actual = d.get("actual")
+            if not isinstance(actual, (int, float)) or actual < _MIN_PLAUSIBLE_PRICE or actual > _MAX_PLAUSIBLE_PRICE:
+                continue
             key = (gen_at, d.get("date", ""))
             entry_data = {
                 "plan_generated_at": gen_at,
@@ -449,10 +518,9 @@ class AccuracyTracker:
                 continue
 
             # Sanity check: actual price should be in a plausible INR/10g range.
-            # Gold at ₹50K–₹500K per 10g covers reasonable historical/future
-            # scenarios.  Values outside this (e.g. volume/notional data) are
-            # clearly wrong and should be skipped.
-            if actual < 50_000 or actual > 500_000:
+            # Values outside this (e.g. volume/notional data) are clearly wrong
+            # and should be skipped.
+            if actual < _MIN_PLAUSIBLE_PRICE or actual > _MAX_PLAUSIBLE_PRICE:
                 logger.warning(
                     f"Skipping implausible actual price ₹{actual:,.0f} at {pred_ts}"
                 )

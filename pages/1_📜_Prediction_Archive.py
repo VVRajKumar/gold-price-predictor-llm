@@ -144,6 +144,11 @@ df["date"] = pd.to_datetime(df["date"], errors="coerce")
 df = df.dropna(subset=["date"])
 df = df.sort_values("date")
 
+# Safety: drop rows with implausible actual prices
+if "actual" in df.columns:
+    df["actual"] = pd.to_numeric(df["actual"], errors="coerce")
+    df = df[df["actual"].between(50_000, 500_000)]
+
 # Deduplicate: for same hour, keep the entry from the most recently generated plan
 if "plan_generated_at" in df.columns:
     df["_gen_at"] = pd.to_datetime(df["plan_generated_at"], errors="coerce")
@@ -242,6 +247,20 @@ st.subheader(_heading_map.get(time_filter, "📈 Predicted vs Actual – Full Hi
 for _col in ("predicted", "actual", "high_range", "low_range"):
     if _col in filtered_df.columns:
         filtered_df[_col] = filtered_df[_col].ffill()
+
+# Recalculate error/pct_error/within_band after ffill to keep metrics consistent
+if {"predicted", "actual", "low_range", "high_range"}.issubset(filtered_df.columns):
+    filtered_df["error"] = filtered_df["predicted"] - filtered_df["actual"]
+    filtered_df["pct_error"] = (
+        filtered_df["error"].abs() / filtered_df["actual"] * 100
+    ).where(filtered_df["actual"] != 0, 0)
+    filtered_df["within_band"] = (
+        (filtered_df["actual"] >= filtered_df["low_range"])
+        & (filtered_df["actual"] <= filtered_df["high_range"])
+    )
+
+# Drop any rows that still have NaN actual after ffill (leading NaN edge case)
+filtered_df = filtered_df.dropna(subset=["actual"])
 
 fig = go.Figure()
 

@@ -1274,10 +1274,27 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         _cutoff_72h = pd.Timestamp(now_ist().replace(tzinfo=None)) - pd.Timedelta(hours=72)
         acc_df = acc_df[acc_df["date"] >= _cutoff_72h].copy()
 
+        # Safety: drop rows with implausible actual prices
+        if "actual" in acc_df.columns:
+            acc_df["actual"] = pd.to_numeric(acc_df["actual"], errors="coerce")
+            acc_df = acc_df[acc_df["actual"].between(50_000, 500_000)]
+
         # Forward-fill NaN gaps so lines stay connected
         for _col in ("predicted", "actual", "high_range", "low_range"):
             if _col in acc_df.columns:
                 acc_df[_col] = acc_df[_col].ffill()
+
+        # Recalculate error columns after ffill to avoid stale/corrupt values
+        if {"predicted", "actual", "low_range", "high_range"}.issubset(acc_df.columns):
+            acc_df["error"] = acc_df["predicted"] - acc_df["actual"]
+            acc_df["pct_error"] = (
+                acc_df["error"].abs() / acc_df["actual"] * 100
+            ).where(acc_df["actual"] != 0, 0)
+            acc_df["within_band"] = (
+                (acc_df["actual"] >= acc_df["low_range"])
+                & (acc_df["actual"] <= acc_df["high_range"])
+            )
+        acc_df = acc_df.dropna(subset=["actual"])
 
         fig_acc = go.Figure()
 

@@ -282,6 +282,11 @@ with st.sidebar:
     else:
         st.button("🔄 Generate New Prediction", width="stretch", type="primary", disabled=True)
         st.info("📅 Market closed — prices held flat at Friday's close.")
+        if st.button("🔄 Refresh Weekend Analysis", width="stretch", type="secondary"):
+            with st.spinner("Running agents for fresh weekend news … this takes 1-2 minutes"):
+                plan = engine.generate_weekend_analysis()
+            st.success("Weekend analysis updated with latest news!")
+            st.rerun()
 
     st.divider()
     st.markdown("### Agent Roster")
@@ -310,16 +315,24 @@ st.caption("ML Ensemble (XGBoost + LightGBM + Ridge) · LLM for narrative only �
 if not is_market_open():
     _day_name = now_ist().strftime("%A")
     _cached_plan = engine.get_current_plan()
-    if _cached_plan is not None:
-        st.info(
-            f"📅 **Gold market is closed ({_day_name}).** "
-            f"Prices are held flat at Friday's closing level. "
-            f"Live predictions resume automatically on Monday."
-        )
-    else:
+    _next_open = "Monday 09:00 IST"
+    st.markdown(
+        f"""<div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);
+        border-radius:12px;padding:20px 24px;margin:10px 0;
+        border:2px solid #fbbf24;text-align:center;">
+        <h3 style="color:#fbbf24;margin:0 0 8px 0;">📅 Market Closed — {_day_name}</h3>
+        <p style="color:#e2e8f0;margin:0;font-size:15px;">
+        The MCX gold market is closed for the weekend. Prices are held flat at Friday's closing level.<br>
+        Trading resumes <b>{_next_open}</b>.
+        Use <b>Refresh Weekend Analysis</b> in the sidebar to get fresh news and a Monday outlook.
+        </p>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+    if _cached_plan is None:
         st.warning(
-            f"📅 **Gold market is closed ({_day_name}).** "
-            f"No prediction available yet — will auto-generate on Monday."
+            "No prediction available yet — will auto-generate on Monday. "
+            "You can click **Refresh Weekend Analysis** for a preview of Monday's outlook."
         )
 
 if view_mode == "Weekly Archive":

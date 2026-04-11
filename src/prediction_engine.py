@@ -290,6 +290,24 @@ class PredictionEngine:
         """Backward-compatible wrapper retained for existing callers."""
         return self.ensure_hourly_prediction()
 
+    def generate_weekend_analysis(self) -> "PredictionPlan":
+        """Run agents for fresh weekend news and generate Monday-focused narrative.
+
+        The market is closed, so no ML predictions are made. Agents still
+        gather live intelligence (news, geopolitics, sentiment). The LLM
+        narrator produces a weekend briefing about what to expect on Monday.
+
+        Price data from the existing cached plan is preserved.
+        """
+        with self._lock:
+            logger.info("PredictionEngine: generating weekend analysis …")
+            plan = self._orchestrator.generate_weekend_analysis(
+                existing_plan=self._current_plan,
+            )
+            self._current_plan = plan
+            self._save_plan(plan)
+            return plan
+
     def get_current_plan(self) -> Optional[PredictionPlan]:
         return self._current_plan
 

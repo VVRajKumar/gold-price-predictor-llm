@@ -522,3 +522,80 @@ class Orchestrator:
             f"ml_preds={len(ml_predictions)}, shap={'yes' if shap_explanation else 'no'}) ==="
         )
         return plan
+
+    # ------------------------------------------------------------------ #
+    def generate_weekend_analysis(self, existing_plan: "PredictionPlan | None" = None) -> PredictionPlan:
+        """Weekend-only analysis: run agents for fresh news, generate Monday-focused narrative.
+
+        No ML predictions are made (market is closed). The agents still gather
+        live intelligence (news, geopolitics, sentiment) and the LLM narrator
+        produces a weekend briefing focused on what will happen Monday.
+
+        If *existing_plan* is provided, its price data (daily_predictions,
+        current_price) is preserved; only narrative fields are updated.
+        """
+        logger.info("=== Orchestrator: starting weekend analysis ===")
+
+        # Get last known price (from cached plan or live fetch)
+        current_price = 0.0
+        if existing_plan is not None and existing_plan.current_price > 0:
+            current_price = existing_plan.current_price
+        else:
+            try:
+                current_price = self._market.get_gold_inr_price()
+            except Exception:
+                pass
+
+        # Run all agents for fresh intelligence (news, geopolitics, etc.)
+        reports = self.run_all_agents()
+        logger.info(f"Weekend analysis: received {len(reports)} agent reports")
+
+        # Build agent report dict
+        agent_report_dict = {
+            r.agent_name: {
+                "outlook": r.outlook,
+                "confidence": r.confidence,
+                "impact_score": r.impact_score,
+                "prediction_bias": r.prediction_bias,
+                "summary": _format_summary(r.summary, 700),
+                "key_factors": r.key_factors[:5],
+                "data_points": _json_safe(r.data_points),
+            }
+            for r in reports
+        }
+
+        # LLM narrator writes weekend-specific prose (Monday outlook)
+        narrative = self._narrator.narrate_weekend(
+            agent_reports=agent_report_dict,
+            current_price=current_price,
+        )
+
+        # Build or update the plan
+        if existing_plan is not None:
+            # Keep price data from the cached Friday plan
+            plan = existing_plan
+            plan.overall_outlook = narrative.get("overall_outlook", "neutral")
+            plan.executive_summary = narrative.get("executive_summary", "")
+            plan.bull_case = narrative.get("bull_case", "")
+            plan.bear_case = narrative.get("bear_case", "")
+            plan.risk_factors = narrative.get("risk_factors", [])
+            plan.agent_reports = agent_report_dict
+            plan.generated_at = iso_now_ist()
+        else:
+            # No existing plan — create a minimal weekend plan
+            plan = PredictionPlan(
+                current_price=current_price,
+                overall_outlook=narrative.get("overall_outlook", "neutral"),
+                overall_confidence=0.5,
+                executive_summary=narrative.get("executive_summary", ""),
+                daily_predictions=[],
+                risk_factors=narrative.get("risk_factors", []),
+                bull_case=narrative.get("bull_case", ""),
+                bear_case=narrative.get("bear_case", ""),
+                agent_reports=agent_report_dict,
+            )
+
+        logger.info(
+            f"=== Weekend analysis complete: {plan.overall_outlook} ==="
+        )
+        return plan

@@ -1,20 +1,24 @@
 """
-Cloud persistence layer – GitHub Gist backend.
+Cloud persistence layer – AWS S3 backend.
 
 On Streamlit Cloud the filesystem is ephemeral: every deploy / sleep wipes
-`data/cache/`.  This module syncs critical JSON files (stored_plans, accuracy_log)
-to a **private GitHub Gist** so they survive across restarts.
+`data/cache/`.  This module syncs critical JSON files (stored_plans, accuracy_log,
+prediction_archive) to an **AWS S3 bucket** so they survive across restarts.
+
+Unlike the previous Gist backend, S3 has no practical file-size limit,
+so the prediction archive can grow indefinitely.
 
 Setup (one-time):
-  1. Create a GitHub Personal Access Token with *gist* scope.
-  2. Create a private Gist containing two empty files:
-       stored_plans.json  →  []
-       accuracy_log.json  →  []
+  1. Create an S3 bucket (e.g. "gold-predictor-archive-vvrajkumar") in your preferred region.
+  2. Create an IAM user/role with s3:GetObject, s3:PutObject on that bucket.
   3. Add to Streamlit secrets (or .env):
-       GITHUB_GIST_TOKEN = "ghp_..."
-       GITHUB_GIST_ID    = "abc123..."
+       AWS_ACCESS_KEY_ID      = "AKIA..."
+       AWS_SECRET_ACCESS_KEY  = "wJal..."
+       AWS_S3_BUCKET_NAME     = "gold-predictor-archive-vvrajkumar"
+       AWS_S3_REGION          = "ap-south-2"
+       AWS_S3_PREFIX          = "gold-predictor/"   (optional, for namespacing)
 
-When the token/id are absent the module silently becomes a no-op,
+When the credentials are absent the module silently becomes a no-op,
 so local development is unaffected.
 """
 
@@ -28,102 +32,140 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-import requests
 from loguru import logger
+
+try:
+    from botocore.exceptions import ClientError as _BotoCoreClientError
+except ImportError:  # botocore not installed yet (e.g. during pip install)
+    _BotoCoreClientError = Exception  # type: ignore[assignment,misc]
 
 from .config import CACHE_DIR
 
 # ── Configuration ───────────────────────────────────────────────────
 
-_TRACKED_FILES = ("stored_plans.json", "accuracy_log.json", "latest_prediction.json", "residual_corrections.json", "prediction_archive.json")
+_TRACKED_FILES = (
+    "stored_plans.json",
+    "accuracy_log.json",
+    "latest_prediction.json",
+    "residual_corrections.json",
+    "prediction_archive.json",
+)
 
-_API_BASE = "https://api.github.com/gists"
-_TIMEOUT = 15  # seconds
+# TTL guard: skip cloud sync if last pull was within this many seconds
+_SYNC_TTL_SECONDS = 300  # 5 minutes
 
 
-def _get_secret(key: str) -> str:
+def _get_secret(key: str, default: str = "") -> str:
     val = os.getenv(key, "")
     if val:
         return val
     try:
         import streamlit as st
-        return st.secrets.get(key, "")
+        return st.secrets.get(key, default)
     except Exception:
-        return ""
+        return default
 
 
 # Lazy-init globals
-_gist_token: Optional[str] = None
-_gist_id: Optional[str] = None
+_s3_client = None
+_bucket: Optional[str] = None
+_prefix: str = ""
 _lock = threading.Lock()
-# TTL guard: skip cloud sync if last pull was within this many seconds
-_SYNC_TTL_SECONDS = 300  # 5 minutes
 _last_sync_time: float = 0.0
 # Per-file content hash cache: avoid pushing when content hasn't changed
 _file_content_hashes: dict[str, str] = {}
 
 
 def _init():
-    global _gist_token, _gist_id
-    if _gist_token is None:
-        _gist_token = _get_secret("GITHUB_GIST_TOKEN")
-        _gist_id = _get_secret("GITHUB_GIST_ID")
+    """Lazily initialise the boto3 S3 client and bucket config."""
+    global _s3_client, _bucket, _prefix
+    if _s3_client is not None:
+        return  # already initialised
+
+    _bucket = _get_secret("AWS_S3_BUCKET_NAME")
+    if not _bucket:
+        _s3_client = False  # sentinel: credentials missing
+        return
+
+    aws_key = _get_secret("AWS_ACCESS_KEY_ID")
+    aws_secret = _get_secret("AWS_SECRET_ACCESS_KEY")
+    region = _get_secret("AWS_S3_REGION", "ap-south-2")
+    _prefix = _get_secret("AWS_S3_PREFIX", "gold-predictor/")
+    _prefix = (_prefix.rstrip("/") + "/") if _prefix else ""
+
+    try:
+        import boto3
+        if aws_key and aws_secret:
+            _s3_client = boto3.client(
+                "s3",
+                aws_access_key_id=aws_key,
+                aws_secret_access_key=aws_secret,
+                region_name=region,
+            )
+        else:
+            # Fall back to default credential chain (IAM role, env, ~/.aws/credentials)
+            _s3_client = boto3.client("s3", region_name=region)
+        logger.info(f"[cloud_storage] S3 client initialised (bucket={_bucket}, prefix={_prefix})")
+    except Exception as e:
+        logger.warning(f"[cloud_storage] Failed to initialise S3 client: {e}")
+        _s3_client = False  # sentinel
 
 
 def is_available() -> bool:
-    """Return True when Gist credentials are configured."""
+    """Return True when S3 credentials are configured and client is ready."""
     _init()
-    return bool(_gist_token and _gist_id)
+    return _s3_client not in (None, False)
 
 
-# ── Low-level Gist API ─────────────────────────────────────────────
+# ── Low-level S3 API ───────────────────────────────────────────────
 
-def _headers() -> dict:
-    return {
-        "Authorization": f"Bearer {_gist_token}",
-        "Accept": "application/vnd.github+json",
-    }
+def _s3_key(filename: str) -> str:
+    """Return the full S3 object key for a tracked file."""
+    return f"{_prefix}{filename}"
 
 
-def _pull_gist() -> dict[str, str]:
-    """Download all file contents from the Gist.  Returns {filename: content}."""
-    try:
-        resp = requests.get(f"{_API_BASE}/{_gist_id}", headers=_headers(), timeout=_TIMEOUT)
-        resp.raise_for_status()
-        files = resp.json().get("files", {})
-        return {name: info.get("content", "") for name, info in files.items()}
-    except Exception as e:
-        logger.warning(f"[cloud_storage] Gist pull failed: {e}")
-        return {}
+def _pull_all() -> dict[str, str]:
+    """Download all tracked file contents from S3.  Returns {filename: content}."""
+    result: dict[str, str] = {}
+    for filename in _TRACKED_FILES:
+        try:
+            resp = _s3_client.get_object(Bucket=_bucket, Key=_s3_key(filename))
+            content = resp["Body"].read().decode("utf-8")
+            result[filename] = content
+        except _BotoCoreClientError as e:
+            if e.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+                logger.debug(f"[cloud_storage] {filename} not found in S3")
+            else:
+                logger.warning(f"[cloud_storage] S3 pull failed for {filename}: {e}")
+    return result
 
 
 def _push_file(filename: str, content: str):
-    """Update a single file in the Gist."""
+    """Upload a single file to S3."""
     try:
-        resp = requests.patch(
-            f"{_API_BASE}/{_gist_id}",
-            headers=_headers(),
-            json={"files": {filename: {"content": content}}},
-            timeout=_TIMEOUT,
+        _s3_client.put_object(
+            Bucket=_bucket,
+            Key=_s3_key(filename),
+            Body=content.encode("utf-8"),
+            ContentType="application/json",
         )
-        resp.raise_for_status()
-        logger.info(f"[cloud_storage] Pushed {filename} to Gist ({len(content)} bytes)")
+        logger.info(f"[cloud_storage] Pushed {filename} to S3 ({len(content)} bytes)")
     except Exception as e:
-        logger.warning(f"[cloud_storage] Gist push failed for {filename}: {e}")
+        logger.warning(f"[cloud_storage] S3 push failed for {filename}: {e}")
 
 
 # ── Public API ──────────────────────────────────────────────────────
 
 def sync_from_cloud():
-    """Pull tracked files from Gist → local cache (runs once on startup).
+    """Pull tracked files from S3 → local cache (runs once on startup).
 
     Only restores files that don't already exist locally, so an in-progress
     session is never overwritten.  Skips the pull entirely if it was done
-    less than 5 minutes ago (TTL guard) to avoid redundant Gist API calls.
+    less than 5 minutes ago (TTL guard) to avoid redundant S3 API calls.
     """
     global _last_sync_time
     if not is_available():
-        logger.debug("[cloud_storage] Gist credentials not configured – skipping sync")
+        logger.debug("[cloud_storage] S3 credentials not configured – skipping sync")
         return
 
     # TTL check: skip pull if synced recently
@@ -132,7 +174,7 @@ def sync_from_cloud():
         logger.debug("[cloud_storage] Sync skipped – within TTL window")
         return
 
-    remote = _pull_gist()
+    remote = _pull_all()
     _last_sync_time = time.monotonic()
     restored = 0
     for filename in _TRACKED_FILES:
@@ -144,9 +186,9 @@ def sync_from_cloud():
         if content:
             local_path.write_text(content, encoding="utf-8")
             restored += 1
-            logger.info(f"[cloud_storage] Restored {filename} from Gist ({len(content)} bytes)")
+            logger.info(f"[cloud_storage] Restored {filename} from S3 ({len(content)} bytes)")
         else:
-            logger.warning(f"[cloud_storage] {filename} not found in Gist")
+            logger.warning(f"[cloud_storage] {filename} not found in S3")
 
     if restored:
         logger.info(f"[cloud_storage] Restored {restored} file(s) from cloud")
@@ -158,11 +200,11 @@ def _is_ephemeral_env() -> bool:
 
 
 def persist(filename: str, data: Any):
-    """Write JSON to local file **and** push to Gist.
+    """Write JSON to local file **and** push to S3.
 
     On ephemeral environments (Streamlit Cloud) the push is synchronous
     so data survives app sleep.  Locally it remains a background push.
-    Skips the Gist push when the serialised content hasn't changed since
+    Skips the S3 push when the serialised content hasn't changed since
     the last push (hash-based deduplication).
     """
     content = json.dumps(data, indent=2, default=str)
@@ -175,7 +217,7 @@ def persist(filename: str, data: Any):
     # Hash-based dedup: skip push if content is identical to last push
     content_hash = hashlib.sha256(content.encode()).hexdigest()
     if _file_content_hashes.get(filename) == content_hash:
-        logger.debug(f"[cloud_storage] {filename} unchanged – skipping Gist push")
+        logger.debug(f"[cloud_storage] {filename} unchanged – skipping S3 push")
         return
     _file_content_hashes[filename] = content_hash
 
@@ -185,13 +227,13 @@ def persist(filename: str, data: Any):
     else:
         t = threading.Thread(
             target=_push_file, args=(filename, content),
-            daemon=True, name=f"gist-push-{filename}",
+            daemon=True, name=f"s3-push-{filename}",
         )
         t.start()
 
 
 def load(filename: str) -> Any:
-    """Load JSON from local file; if missing, try Gist."""
+    """Load JSON from local file; if missing, try S3."""
     local_path = CACHE_DIR / filename
     if local_path.exists():
         try:
@@ -202,12 +244,16 @@ def load(filename: str) -> Any:
     if not is_available():
         return None
 
-    remote = _pull_gist()
-    content = remote.get(filename)
-    if content:
-        local_path.write_text(content, encoding="utf-8")
-        try:
-            return json.loads(content)
-        except Exception:
-            pass
+    try:
+        resp = _s3_client.get_object(Bucket=_bucket, Key=_s3_key(filename))
+        content = resp["Body"].read().decode("utf-8")
+        if content:
+            local_path.write_text(content, encoding="utf-8")
+            try:
+                return json.loads(content)
+            except Exception:
+                pass
+    except Exception as e:
+        logger.debug(f"[cloud_storage] S3 load failed for {filename}: {e}")
+
     return None

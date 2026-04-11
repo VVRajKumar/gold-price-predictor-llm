@@ -457,30 +457,24 @@ class Orchestrator:
 
         # ── Weekend flatline ────────────────────────────────────────
         # If any predicted hours fall outside MCX trading hours (IST),
-        # flatline those hours at the last active market price with tight bands.
+        # flatline those hours at the actual current market price with tight bands.
         # MCX Gold is closed on Saturday/Sunday IST and before 09:00 on Monday.
-        # All times are IST — no other timezone is used.
+        # Using current_price (the live market price at generation time) ensures
+        # weekend predictions reflect the real closing price, not ML extrapolation.
         if daily:
-            last_market_price = current_price  # default to anchor
+            flatline_price = current_price  # use actual market closing price
             # Pre-parse all dates once to avoid redundant strptime calls
             dp_dates = [
                 datetime.strptime(dp.date, "%Y-%m-%d %H:%M") for dp in daily
             ]
-            # First pass: find the last price during active market hours.
-            # We scan the entire list (no early break) because predictions
-            # may resume on Monday after a weekend gap, and we need the
-            # last open-market price regardless of ordering.
-            for dp, dp_dt in zip(daily, dp_dates):
-                if not is_market_closed_ist(dp_dt):
-                    last_market_price = dp.predicted_price
-            # Second pass: flatline all market-closed hours
+            # Flatline all market-closed hours at the actual closing price
             for dp, dp_dt in zip(daily, dp_dates):
                 if is_market_closed_ist(dp_dt):
-                    dp.predicted_price = round(last_market_price, 2)
-                    dp.low_range = round(last_market_price * 0.998, 2)
-                    dp.high_range = round(last_market_price * 1.002, 2)
+                    dp.predicted_price = round(flatline_price, 2)
+                    dp.low_range = round(flatline_price * 0.998, 2)
+                    dp.high_range = round(flatline_price * 1.002, 2)
                     dp.confidence = 0.95
-                    dp.key_driver = "Market closed (weekend) — price held flat"
+                    dp.key_driver = "Market closed (weekend) — price held flat at closing"
 
         # Overall confidence from ML band widths (NOT from LLM)
         ml_confidence = compute_ml_confidence(ml_predictions, current_price)

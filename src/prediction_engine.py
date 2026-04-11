@@ -324,18 +324,21 @@ class PredictionEngine:
                 try:
                     now = now_ist()
 
-                    # If it's a weekend, sleep until Monday 00:00 IST
+                    # If it's a weekend / Monday pre-market, sleep until Monday 09:00 IST
                     if not is_market_open(now):
                         next_open = next_market_open_ist(now)
                         wait_seconds = max(60, (next_open - now).total_seconds() + 30)
                         logger.info(
-                            f"Auto-refresh: market closed (weekend) — sleeping until "
+                            f"Auto-refresh: market closed — sleeping until "
                             f"{next_open.strftime('%H:%M %b %d')} IST "
                             f"({wait_seconds / 3600:.1f} hours)"
                         )
                         time.sleep(wait_seconds)
                         if not self._running:
                             break
+                        # Woke at Monday market open — generate immediately
+                        logger.info("Auto-refresh: market reopened — generating prediction")
+                        self.generate()
                         continue
 
                     # Sleep until the next 6-hour slot boundary

@@ -674,7 +674,7 @@ if plan.daily_predictions:
             _display_df.loc[_fcp.index, "low_range"] = (_fcp * 0.998).round(2)
             _display_df.loc[_fcp.index, "high_range"] = (_fcp * 1.002).round(2)
             _display_df.loc[_fcp.index, "confidence"] = 0.95
-            _display_df.loc[_fcp.index, "key_driver"] = "Market closed (weekend) — price held flat"
+            _display_df.loc[_fcp.index, "key_driver"] = "Market closed (weekend) — price held flat at closing"
     _display_df["key_driver"] = _display_df["key_driver"].apply(lambda x: _clean_text(str(x)) if x else x)
     st.dataframe(
         _display_df

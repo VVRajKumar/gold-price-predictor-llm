@@ -1120,6 +1120,15 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
             acc_df = acc_df.drop_duplicates(subset="date", keep="first")
         acc_df = acc_df.sort_values("date")
 
+        # ── Limit chart to last 72 hours ─────────────────────────
+        _cutoff_72h = pd.Timestamp(now_ist().replace(tzinfo=None)) - pd.Timedelta(hours=72)
+        acc_df = acc_df[acc_df["date"] >= _cutoff_72h].copy()
+
+        # Forward-fill NaN gaps so lines stay connected
+        for _col in ("predicted", "actual", "high_range", "low_range"):
+            if _col in acc_df.columns:
+                acc_df[_col] = acc_df[_col].ffill()
+
         fig_acc = go.Figure()
 
         # Detect market-closed hours for weekday/weekend visual split
@@ -1134,12 +1143,14 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                 x=acc_df["date"], y=acc_df["high_range"],
                 mode="lines", name="Upper Band",
                 line=dict(width=0), showlegend=False,
+                connectgaps=True,
         ))
         fig_acc.add_trace(go.Scatter(
                 x=acc_df["date"], y=acc_df["low_range"],
                 mode="lines", name="Prediction Range",
                 fill="tonexty", fillcolor="rgba(0,212,170,0.12)",
                 line=dict(width=0),
+                connectgaps=True,
         ))
 
         # Weekday predicted line — solid green
@@ -1149,6 +1160,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                     mode="lines+markers", name="Predicted",
                     line=dict(color="#00d4aa", width=2),
                     marker=dict(size=7, symbol="diamond"),
+                    connectgaps=True,
             ))
 
         # Actual line — solid yellow (drawn before weekend dotted green
@@ -1158,6 +1170,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                 mode="lines+markers", name="Actual",
                 line=dict(color="#ffd93d", width=2),
                 marker=dict(size=7),
+                connectgaps=True,
         ))
 
         # Weekend predicted line — dotted green, merged with actual price.
@@ -1169,6 +1182,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
                     mode="lines+markers", name="Predicted (Market Closed)",
                     line=dict(color="#00d4aa", width=2, dash="dot"),
                     marker=dict(size=5, symbol="diamond"),
+                    connectgaps=True,
             ))
 
         # Clean up temp column

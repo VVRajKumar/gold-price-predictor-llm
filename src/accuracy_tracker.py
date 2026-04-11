@@ -217,32 +217,30 @@ class AccuracyTracker:
             existing_keys.add((entry.get("plan_generated_at", ""), entry.get("date", "")))
 
         added = 0
+        updated = 0
         for d in result.get("daily_results", []):
             key = (gen_at, d.get("date", ""))
+            entry_data = {
+                "plan_generated_at": gen_at,
+                "evaluated_at": result.get("evaluated_at", ""),
+                "current_price_at_prediction": result.get("current_price_at_prediction", 0),
+                **d,
+            }
             if key not in existing_keys:
-                self._archive.append({
-                    "plan_generated_at": gen_at,
-                    "evaluated_at": result.get("evaluated_at", ""),
-                    "current_price_at_prediction": result.get("current_price_at_prediction", 0),
-                    **d,
-                })
+                self._archive.append(entry_data)
                 existing_keys.add(key)
                 added += 1
             else:
                 # Update existing entry with latest evaluation
                 for i, entry in enumerate(self._archive):
                     if (entry.get("plan_generated_at", ""), entry.get("date", "")) == key:
-                        self._archive[i] = {
-                            "plan_generated_at": gen_at,
-                            "evaluated_at": result.get("evaluated_at", ""),
-                            "current_price_at_prediction": result.get("current_price_at_prediction", 0),
-                            **d,
-                        }
+                        self._archive[i] = entry_data
+                        updated += 1
                         break
 
-        if added:
+        if added or updated:
             self._save_archive()
-            logger.debug(f"Archived {added} new hourly results (total: {len(self._archive)})")
+            logger.debug(f"Archive: {added} new, {updated} updated (total: {len(self._archive)})")
 
     def get_prediction_archive(self) -> list[dict]:
         """Return the full prediction archive for the Archive page."""

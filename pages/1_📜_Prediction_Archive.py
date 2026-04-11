@@ -212,7 +212,20 @@ if filtered_df.empty:
     st.stop()
 
 # ── Predicted vs Actual Chart (full archive) ─────────────────────────
-st.subheader("📈 Predicted vs Actual – Full History")
+_heading_map = {
+    "All Time": "📈 Predicted vs Actual – Full History",
+    "Last 24 Hours": "📈 Predicted vs Actual – Last 24 Hours",
+    "Last 3 Days": "📈 Predicted vs Actual – Last 3 Days",
+    "Last 7 Days": "📈 Predicted vs Actual – Last 7 Days",
+    "Last 14 Days": "📈 Predicted vs Actual – Last 14 Days",
+    "Last 30 Days": "📈 Predicted vs Actual – Last 30 Days",
+}
+st.subheader(_heading_map.get(time_filter, "📈 Predicted vs Actual – Full History"))
+
+# Forward-fill NaN gaps so lines stay connected
+for _col in ("predicted", "actual", "high_range", "low_range"):
+    if _col in filtered_df.columns:
+        filtered_df[_col] = filtered_df[_col].ffill()
 
 fig = go.Figure()
 
@@ -229,12 +242,14 @@ if "high_range" in filtered_df.columns and "low_range" in filtered_df.columns:
         x=filtered_df["date"], y=filtered_df["high_range"],
         mode="lines", name="Upper Band",
         line=dict(width=0), showlegend=False,
+        connectgaps=True,
     ))
     fig.add_trace(go.Scatter(
         x=filtered_df["date"], y=filtered_df["low_range"],
         mode="lines", name="Prediction Range",
         fill="tonexty", fillcolor="rgba(0,212,170,0.10)",
         line=dict(width=0),
+        connectgaps=True,
     ))
 
 # Weekday predicted line — solid green
@@ -244,6 +259,7 @@ if not _weekday_df.empty:
         mode="lines+markers", name="Predicted",
         line=dict(color="#00d4aa", width=2),
         marker=dict(size=5, symbol="diamond"),
+        connectgaps=True,
     ))
 
 # Actual line — solid yellow (drawn before weekend dotted green
@@ -253,6 +269,7 @@ fig.add_trace(go.Scatter(
     mode="lines+markers", name="Actual",
     line=dict(color="#ffd93d", width=2),
     marker=dict(size=5),
+    connectgaps=True,
 ))
 
 # Weekend predicted line — dotted green, merged with actual price.
@@ -264,6 +281,7 @@ if not _weekend_df.empty:
         mode="lines+markers", name="Predicted (Market Closed)",
         line=dict(color="#00d4aa", width=2, dash="dot"),
         marker=dict(size=4, symbol="diamond"),
+        connectgaps=True,
     ))
 
 # Clean up temp column

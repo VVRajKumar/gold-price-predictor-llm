@@ -542,9 +542,17 @@ if plan.daily_predictions:
         ))
 
     # Weekend prediction line — green dotted (market-closed hours)
+    # Include the last active-market point as a bridge so the dotted
+    # line connects seamlessly to the solid weekday line.
     if not weekend_preds.empty:
+        wk_x = list(weekend_preds["date"])
+        wk_y = list(weekend_preds["predicted_price"])
+        if not active_preds.empty:
+            bridge = active_preds.iloc[-1]
+            wk_x = [bridge["date"]] + wk_x
+            wk_y = [bridge["predicted_price"]] + wk_y
         fig.add_trace(go.Scatter(
-            x=weekend_preds["date"], y=weekend_preds["predicted_price"],
+            x=wk_x, y=wk_y,
             mode="lines", name="Predicted (Market Closed)",
             line=dict(color="#00d4aa", width=2, dash="dot"),
         ))

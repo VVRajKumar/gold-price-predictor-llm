@@ -197,14 +197,20 @@ with st.sidebar:
 
     st.divider()
 
-    if st.button("🔄 Generate New Prediction", width="stretch", type="primary"):
-        if not is_market_open():
-            st.warning("📅 Gold market is closed today (weekend). New predictions will resume on Monday.")
-        else:
+    if is_market_open():
+        if st.button("🔄 Generate New Prediction", width="stretch", type="primary"):
             with st.spinner("Running 8 specialist agents … this takes 1-2 minutes"):
                 plan = engine.generate()
             st.success("Prediction updated!")
             st.rerun()
+    else:
+        st.button("🔄 Generate New Prediction", width="stretch", type="primary", disabled=True)
+        _cached = engine.get_current_plan()
+        if _cached is not None:
+            _gen_at = _cached.generated_at[:16].replace("T", " ")
+            st.info(f"📅 Market closed (weekend). Showing last prediction from **{_gen_at} IST**.")
+        else:
+            st.warning("📅 Market closed (weekend). No cached prediction available — will auto-generate on Monday.")
 
     st.divider()
     st.markdown("### Agent Roster")
@@ -232,12 +238,22 @@ st.caption("ML Ensemble (XGBoost + LightGBM + Ridge) · LLM for narrative only �
 # Weekend market-closed notice
 if not is_market_open():
     _day_name = now_ist().strftime("%A")
-    st.warning(
-        f"📅 **Gold market is closed today ({_day_name}).** "
-        f"COMEX and MCX gold markets do not trade on weekends. "
-        f"Prices shown are from the last trading session (Friday). "
-        f"New predictions will resume automatically on Monday."
-    )
+    _cached_plan = engine.get_current_plan()
+    if _cached_plan is not None:
+        _gen_at = _cached_plan.generated_at[:16].replace("T", " ")
+        st.warning(
+            f"📅 **Gold market is closed today ({_day_name}).** "
+            f"COMEX and MCX gold markets do not trade on weekends. "
+            f"Displaying the last prediction from **{_gen_at} IST** (Friday's session). "
+            f"New predictions will resume automatically on Monday."
+        )
+    else:
+        st.warning(
+            f"📅 **Gold market is closed today ({_day_name}).** "
+            f"COMEX and MCX gold markets do not trade on weekends. "
+            f"No cached prediction is available. "
+            f"New predictions will resume automatically on Monday."
+        )
 
 if view_mode == "Weekly Archive":
     st.subheader("🗂️ Weekly Prediction Archive")

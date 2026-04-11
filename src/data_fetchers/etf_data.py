@@ -11,26 +11,13 @@ from loguru import logger
 from cachetools import TTLCache
 
 from ..config import GOLD_ETF_TICKERS, GOLD_MINER_TICKERS, GOLD_FUND_TICKERS, HISTORICAL_LOOKBACK_DAYS
+from .market_data import _safe_col
 
 _cache = TTLCache(maxsize=64, ttl=900)
 
 # Retry settings for transient Yahoo Finance errors
 _MAX_RETRIES = 3
 _INITIAL_BACKOFF = 2  # seconds
-
-
-def _safe_col(df: pd.DataFrame, col: str) -> pd.Series:
-    """Extract a column as a Series even when the DataFrame has one row.
-
-    ``df[col].squeeze()`` returns a scalar for single-row DataFrames,
-    which breaks downstream ``.iloc`` / ``.dropna()`` calls.
-    """
-    s = df[col].squeeze()
-    if isinstance(s, (int, float)):
-        return pd.Series([s], index=df.index)
-    if isinstance(s, pd.DataFrame):
-        return s.iloc[:, 0]
-    return s
 
 
 def _yf_download_safe(

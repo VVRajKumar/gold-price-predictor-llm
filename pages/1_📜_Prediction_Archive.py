@@ -343,7 +343,7 @@ fig.update_layout(
     yaxis_title="Price (₹/10g)",
     xaxis_title="Time (IST)",
     xaxis=dict(rangebreaks=[dict(bounds=["sat", "mon"])]),
-    yaxis=dict(range=_y_range) if _y_range else {},
+    yaxis=dict(range=_y_range, tickformat=",") if _y_range else dict(tickformat=","),
     legend=dict(orientation="h", yanchor="bottom", y=1.02),
     hovermode="x unified",
 )

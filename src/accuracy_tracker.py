@@ -19,7 +19,7 @@ from loguru import logger
 
 from .config import CACHE_DIR
 from .data_fetchers.market_data import MarketDataFetcher
-from .time_utils import iso_now_ist, now_ist, IST_OFFSET
+from .time_utils import iso_now_ist, now_ist, IST_OFFSET, is_market_closed_ist
 from . import cloud_storage
 
 
@@ -34,6 +34,10 @@ _HOURLY_SCORECARD_START = datetime(2026, 4, 4, 0, 0, 0)
 # is considered flat and the prediction is counted as directionally correct.
 # 0.05% ≈ ₹36 at ₹73k — ignores noise from bid/ask spread & rounding.
 _DIR_NEUTRAL_PCT = 0.05
+
+# Market-closed (weekend) band factors: predicted = actual, bands ±0.2%
+_MARKET_CLOSED_BAND_LOWER = 0.998  # -0.2%
+_MARKET_CLOSED_BAND_UPPER = 1.002  # +0.2%
 
 # ── Composite accuracy score weights & scaling ──────────────────────
 # MAPE score = max(0, 100 - MAPE * MAPE_SCALE_FACTOR).  A MAPE of 10%
@@ -463,6 +467,15 @@ class AccuracyTracker:
                 high = float(high)
             except (TypeError, ValueError):
                 continue
+
+            # Weekend / market-closed hours: override predicted price with
+            # Friday's actual closing price and use tight ±0.2% bands with
+            # 95% confidence.  The market doesn't trade during these hours so
+            # the prediction should simply be the last known close.
+            if is_market_closed_ist(pred_ts.to_pydatetime()):
+                predicted = actual
+                low = round(actual * _MARKET_CLOSED_BAND_LOWER, 2)
+                high = round(actual * _MARKET_CLOSED_BAND_UPPER, 2)
 
             error = predicted - actual
             abs_error = abs(error)

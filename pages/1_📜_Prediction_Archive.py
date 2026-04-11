@@ -186,6 +186,15 @@ if "plan_generated_at" in df.columns:
     df = df.drop(columns=["_gen_at"])
     df = df.sort_values("date")
 
+# Exclude market-closed hours (weekends + Monday pre-market) from all
+# metrics, tables, and summaries — these predictions are trivially
+# correct (predicted == actual) and would inflate accuracy numbers.
+df = df[~df["date"].apply(lambda dt: is_market_closed_ist(dt.to_pydatetime()))].copy()
+
+if df.empty:
+    st.info("No market-hours predictions available yet.")
+    st.stop()
+
 # ── Summary Metrics ──────────────────────────────────────────────────
 st.divider()
 total_hours = len(df)
@@ -382,42 +391,6 @@ fig.update_layout(
     hovermode="x unified",
 )
 st.plotly_chart(fig, use_container_width=True)
-
-# ── Error Distribution Chart ─────────────────────────────────────────
-st.subheader("📊 Prediction Error Distribution")
-
-err_col1, err_col2 = st.columns(2)
-with err_col1:
-    fig_err = go.Figure()
-    fig_err.add_trace(go.Scatter(
-        x=filtered_df["date"], y=filtered_df["pct_error"],
-        mode="lines+markers", name="Error %",
-        line=dict(color="#ff6b6b", width=1.5),
-        marker=dict(size=4),
-    ))
-    fig_err.update_layout(
-        title="Hourly Prediction Error (%) Over Time",
-        template="plotly_dark", height=350,
-        yaxis_title="Absolute Error (%)",
-        xaxis_title="Time",
-    )
-    st.plotly_chart(fig_err, use_container_width=True)
-
-with err_col2:
-    fig_hist = go.Figure()
-    fig_hist.add_trace(go.Histogram(
-        x=filtered_df["pct_error"],
-        nbinsx=30,
-        marker_color="#00d4aa",
-        opacity=0.8,
-    ))
-    fig_hist.update_layout(
-        title="Error % Distribution",
-        template="plotly_dark", height=350,
-        xaxis_title="Absolute Error (%)",
-        yaxis_title="Count",
-    )
-    st.plotly_chart(fig_hist, use_container_width=True)
 
 # ── Daily Summary Table ──────────────────────────────────────────────
 st.subheader("📅 Daily Performance Summary")

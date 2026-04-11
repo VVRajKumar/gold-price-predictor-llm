@@ -1441,7 +1441,11 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
 
         # ── Hourly Accuracy Table ────────────────────────────────
         with st.expander("📋 Hourly Accuracy Breakdown", expanded=False):
-            display_df = acc_df[["date", "predicted", "actual", "low_range",
+            # Exclude market-closed hours (weekends + Monday pre-market)
+            _table_df = acc_df[~acc_df["date"].apply(
+                lambda dt: is_market_closed_ist(dt.to_pydatetime())
+            )].copy()
+            display_df = _table_df[["date", "predicted", "actual", "low_range",
                                  "high_range", "error", "pct_error", "within_band"]].copy()
             # Sort chronologically (oldest → newest) so the table reads
             # in natural time order instead of an arbitrary insertion order.

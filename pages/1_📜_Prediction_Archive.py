@@ -47,6 +47,28 @@ st.set_page_config(
 st.markdown("""
 <style>
     .stApp {background-color: #0e1117;}
+
+    /* ── Sidebar polish ─────────────────────────────────────────── */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0f1320 0%, #151a2e 50%, #0f1320 100%);
+    }
+    section[data-testid="stSidebar"] hr {
+        border-color: rgba(99, 110, 140, 0.2);
+        margin: 0.6rem 0;
+    }
+    section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"] {
+        border-radius: 8px;
+        padding: 6px 12px;
+        font-size: 0.88rem;
+        transition: background 0.2s;
+    }
+    section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"]:hover {
+        background: rgba(255, 217, 61, 0.08);
+    }
+    section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"][aria-current="page"] {
+        background: rgba(255, 217, 61, 0.12);
+        border-left: 3px solid #ffd93d;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -63,10 +85,17 @@ accuracy_tracker = engine.get_accuracy_tracker()
 # ── Sidebar ──────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown(
-        """<div style="text-align:center;padding:8px 0 2px 0;">
-        <span style="font-size:2.2rem;">🥇</span><br>
-        <span style="font-size:1.3rem;font-weight:700;letter-spacing:0.5px;">Gold Predictor</span><br>
-        <span style="font-size:0.8rem;color:#94a3b8;">Prediction Archive</span>
+        """<div style="text-align:center;padding:14px 0 10px 0;">
+        <div style="display:inline-flex;align-items:center;justify-content:center;
+                    width:52px;height:52px;border-radius:14px;
+                    background:linear-gradient(135deg,#ffd93d 0%,#f59e0b 100%);
+                    box-shadow:0 4px 14px rgba(255,217,61,0.25);margin-bottom:8px;">
+            <span style="font-size:1.6rem;line-height:1;">🥇</span>
+        </div><br>
+        <span style="font-size:1.25rem;font-weight:700;letter-spacing:0.3px;
+                     color:#f0f0f5;">Gold Predictor</span><br>
+        <span style="font-size:0.75rem;color:#7c8db5;letter-spacing:0.5px;">
+            Prediction Archive</span>
         </div>""",
         unsafe_allow_html=True,
     )
@@ -75,13 +104,18 @@ with st.sidebar:
 
     # ── Navigation ────────────────────────────────────────────────────
     st.markdown(
-        '<span style="font-size:0.75rem;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Navigation</span>',
+        '<div style="font-size:0.7rem;font-weight:600;color:#7c8db5;text-transform:uppercase;'
+        'letter-spacing:1.2px;margin-bottom:4px;">Navigation</div>',
         unsafe_allow_html=True,
     )
     st.page_link("app.py", label="🏠 Back to Home", icon=None)
 
     st.divider()
-    st.caption(f"v1.0 · Updated {now_ist().strftime('%H:%M')}")
+    st.markdown(
+        f'<div style="text-align:center;font-size:0.7rem;color:#4a5568;">'
+        f'v1.0 · Updated {now_ist().strftime("%H:%M")}</div>',
+        unsafe_allow_html=True,
+    )
 
 # ── Header ───────────────────────────────────────────────────────────
 st.title("📜 Prediction Archive")

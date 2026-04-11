@@ -220,6 +220,38 @@ st.markdown("""
     .agent-card.bullish-border {border-left-color: #00d4aa;}
     .agent-card.bearish-border {border-left-color: #ff6b6b;}
     .agent-card.neutral-border {border-left-color: #ffd93d;}
+
+    /* ── Sidebar polish ─────────────────────────────────────────── */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0f1320 0%, #151a2e 50%, #0f1320 100%);
+    }
+    section[data-testid="stSidebar"] hr {
+        border-color: rgba(99, 110, 140, 0.2);
+        margin: 0.6rem 0;
+    }
+    /* Sidebar nav links – cleaner look */
+    section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"] {
+        border-radius: 8px;
+        padding: 6px 12px;
+        font-size: 0.88rem;
+        transition: background 0.2s;
+    }
+    section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"]:hover {
+        background: rgba(255, 217, 61, 0.08);
+    }
+    section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"][aria-current="page"] {
+        background: rgba(255, 217, 61, 0.12);
+        border-left: 3px solid #ffd93d;
+    }
+    /* Primary button styling in sidebar */
+    section[data-testid="stSidebar"] button[kind="primary"] {
+        border-radius: 10px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+    }
+    section[data-testid="stSidebar"] button[kind="secondary"] {
+        border-radius: 10px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -268,11 +300,19 @@ def outlook_emoji(outlook: str) -> str:
 # SIDEBAR
 # ════════════════════════════════════════════════════════════════════
 with st.sidebar:
+    # ── Branding header ───────────────────────────────────────────────
     st.markdown(
-        """<div style="text-align:center;padding:8px 0 2px 0;">
-        <span style="font-size:2.2rem;">🥇</span><br>
-        <span style="font-size:1.3rem;font-weight:700;letter-spacing:0.5px;">Gold Predictor</span><br>
-        <span style="font-size:0.8rem;color:#94a3b8;">Multi-Agent AI System</span>
+        """<div style="text-align:center;padding:14px 0 10px 0;">
+        <div style="display:inline-flex;align-items:center;justify-content:center;
+                    width:52px;height:52px;border-radius:14px;
+                    background:linear-gradient(135deg,#ffd93d 0%,#f59e0b 100%);
+                    box-shadow:0 4px 14px rgba(255,217,61,0.25);margin-bottom:8px;">
+            <span style="font-size:1.6rem;line-height:1;">🥇</span>
+        </div><br>
+        <span style="font-size:1.25rem;font-weight:700;letter-spacing:0.3px;
+                     color:#f0f0f5;">Gold Predictor</span><br>
+        <span style="font-size:0.75rem;color:#7c8db5;letter-spacing:0.5px;">
+            Multi-Agent AI System</span>
         </div>""",
         unsafe_allow_html=True,
     )
@@ -281,6 +321,7 @@ with st.sidebar:
 
     st.divider()
 
+    # ── Actions ───────────────────────────────────────────────────────
     if is_market_open():
         if st.button("🔄 Generate New Prediction", width="stretch", type="primary"):
             with st.spinner("Running 8 specialist agents … this takes 1-2 minutes"):
@@ -289,7 +330,14 @@ with st.sidebar:
             st.rerun()
     else:
         st.button("🔄 Generate New Prediction", width="stretch", type="primary", disabled=True)
-        st.info("📅 Market closed — prices held flat at Friday's close.")
+        st.markdown(
+            """<div style="background:rgba(30,58,95,0.45);border-radius:10px;
+            padding:10px 14px;margin:6px 0;border-left:3px solid #3b82f6;
+            font-size:0.82rem;color:#93c5fd;line-height:1.45;">
+            📅 Market closed — prices held flat at Friday's close.
+            </div>""",
+            unsafe_allow_html=True,
+        )
         if st.button("🔄 Refresh Weekend Analysis", width="stretch", type="secondary"):
             with st.spinner("Running agents for fresh weekend news … this takes 1-2 minutes"):
                 try:
@@ -301,35 +349,41 @@ with st.sidebar:
 
     st.divider()
 
-    st.divider()
-
-    # ── Agent roster as a compact styled grid ─────────────────────────
+    # ── Agent roster ──────────────────────────────────────────────────
     st.markdown(
-        '<span style="font-size:0.75rem;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Agent Roster</span>',
+        '<div style="font-size:0.7rem;font-weight:600;color:#7c8db5;text-transform:uppercase;'
+        'letter-spacing:1.2px;margin-bottom:8px;">Agent Roster</div>',
         unsafe_allow_html=True,
     )
     _agent_list = [
-        ("🌍", "Geopolitics"),
-        ("📈", "Trend"),
-        ("💰", "ETF Flows"),
-        ("🏦", "Macro"),
-        ("🛢️", "Oil & Energy"),
-        ("😨", "Sentiment"),
-        ("📊", "Technical"),
-        ("📜", "Historical"),
+        ("#10b981", "🌍", "Geopolitics"),
+        ("#6366f1", "📈", "Trend"),
+        ("#f59e0b", "💰", "ETF Flows"),
+        ("#8b5cf6", "🏦", "Macro"),
+        ("#ef4444", "🛢️", "Oil & Energy"),
+        ("#ec4899", "😨", "Sentiment"),
+        ("#3b82f6", "📊", "Technical"),
+        ("#14b8a6", "📜", "Historical"),
     ]
-    _agent_html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;">'
-    for _emoji, _name in _agent_list:
+    _agent_html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;">'
+    for _color, _emoji, _name in _agent_list:
         _agent_html += (
-            f'<div style="background:#16213e;border-radius:8px;padding:6px 10px;'
-            f'border:1px solid #2d3748;font-size:0.82rem;text-align:center;">'
+            f'<div style="background:rgba(22,33,62,0.6);border-radius:8px;padding:7px 10px;'
+            f'border:1px solid rgba(45,55,72,0.5);font-size:0.8rem;text-align:center;'
+            f'border-top:2px solid {_color};transition:background 0.2s;">'
             f'{_emoji} {_name}</div>'
         )
     _agent_html += '</div>'
     st.markdown(_agent_html, unsafe_allow_html=True)
 
     st.divider()
-    st.caption(f"v1.0 · Updated {now_ist().strftime('%H:%M')}")
+
+    # ── Footer ────────────────────────────────────────────────────────
+    st.markdown(
+        f'<div style="text-align:center;font-size:0.7rem;color:#4a5568;">'
+        f'v1.0 · Updated {now_ist().strftime("%H:%M")}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 # ════════════════════════════════════════════════════════════════════

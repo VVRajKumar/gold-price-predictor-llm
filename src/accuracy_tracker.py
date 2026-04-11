@@ -175,7 +175,9 @@ class AccuracyTracker:
         if not self._log:
             return
 
-        # Build set of existing archive keys for fast lookup
+        # Build set of existing archive keys for fast lookup.
+        # Key = (plan_generated_at, date) uniquely identifies an hourly
+        # prediction from a specific plan generation run.
         existing_keys: set[tuple[str, str]] = set()
         for entry in self._archive:
             existing_keys.add(

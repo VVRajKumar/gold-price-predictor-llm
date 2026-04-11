@@ -29,13 +29,13 @@ if "src" in sys.modules:
 try:
     from src.prediction_engine import PredictionEngine
     from src.time_utils import now_ist, parse_iso_to_ist
-    from src.accuracy_tracker import compute_accuracy_score
+    from src.accuracy_tracker import compute_accuracy_score, _DIR_NEUTRAL_PCT
 except (KeyError, ImportError, AttributeError):
     for _k in [k for k in list(sys.modules) if k == "src" or k.startswith("src.")]:
         del sys.modules[_k]
     from src.prediction_engine import PredictionEngine
     from src.time_utils import now_ist, parse_iso_to_ist
-    from src.accuracy_tracker import compute_accuracy_score
+    from src.accuracy_tracker import compute_accuracy_score, _DIR_NEUTRAL_PCT
 
 # ── Page config ──────────────────────────────────────────────────────
 st.set_page_config(
@@ -91,10 +91,10 @@ def _compute_directional_accuracy(data: pd.DataFrame) -> float:
 
     Returns the percentage of hours where the predicted direction of
     price movement matched the actual direction.  When the actual price
-    moved less than 0.01%, the market is considered flat and counted as
-    correct regardless of prediction.
+    moved less than the neutral zone threshold, the market is considered
+    flat and counted as correct regardless of prediction.
     """
-    _NEUTRAL_PCT = 0.01
+    _NEUTRAL_PCT = _DIR_NEUTRAL_PCT
     if len(data) < 2 or "predicted" not in data.columns or "actual" not in data.columns:
         return 50.0
     sorted_df = data.sort_values("date").reset_index(drop=True)
@@ -177,7 +177,7 @@ st.caption(
     "**MAE** = Mean Absolute Error in ₹ · "
     "**Band Hit** = % of hours within predicted range · "
     "**Direction** = % of hours with correct price direction · "
-    "**Accuracy Score** = Composite (0–100) combining MAPE 40%, Band Hit 35%, Direction 25%"
+    "**Accuracy Score** = Composite (0–100) combining MAPE 35%, Band Hit 30%, Direction 35%"
 )
 
 # ── Filters ──────────────────────────────────────────────────────────

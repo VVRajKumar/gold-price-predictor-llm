@@ -274,9 +274,8 @@ if view_mode == "Weekly Archive":
 # Don't auto-generate on every page visit — just show the cached plan.
 # New predictions are created either:
 #   1. By the background auto-refresh thread (every 6-hour IST slot), or
-#   2. When the user clicks "Generate New Prediction" in the sidebar, or
-#   3. On page load — ensure_hourly_prediction() regenerates when the slot changes.
-plan = engine.ensure_hourly_prediction()
+#   2. When the user clicks "Generate New Prediction" in the sidebar.
+plan = engine.get_current_plan()
 
 # Always keep the live OHLC chart visible.
 st.subheader("🕯️ Live Indian Gold OHLC (10D) – INR/10g")

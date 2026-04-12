@@ -40,7 +40,7 @@ from loguru import logger
 from sklearn.linear_model import Ridge
 
 from .config import CACHE_DIR, PREDICTION_HOURS
-from .data_fetchers.market_data import MarketDataFetcher
+from .data_fetchers.market_data import MarketDataFetcher, _safe_col
 from .guardrails import validate_xgb_predictions, validate_price_series
 from .residual_learner import ResidualLearner
 
@@ -248,7 +248,7 @@ class MLEnsemble:
             logger.warning("ML ensemble: no training data")
             return False
 
-        close = pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna()
+        close = pd.to_numeric(_safe_col(df, "Close"), errors="coerce").dropna()
         if len(close) < _MIN_TRAIN_SAMPLES:
             logger.warning(f"ML ensemble: only {len(close)} samples (need {_MIN_TRAIN_SAMPLES})")
             return False
@@ -365,7 +365,7 @@ class MLEnsemble:
             if df.empty:
                 return []
 
-            close = pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna()
+            close = pd.to_numeric(_safe_col(df, "Close"), errors="coerce").dropna()
             if len(close) < _MIN_HISTORY:
                 return []
 

@@ -658,6 +658,10 @@ class AccuracyTracker:
                 if d_ts < cutoff:
                     continue
 
+                # Skip market-closed hours (weekends + Monday pre-market)
+                if is_market_closed_ist(d_ts):
+                    continue
+
                 # Determine which plan generated this prediction
                 gen_at = d.get("plan_generated_at", plan_gen)
 
@@ -735,12 +739,19 @@ class AccuracyTracker:
         # Count total distinct hourly predictions across the FULL log
         # (not limited to the recent_hours window) so "Unique Hours"
         # reflects all hours we have ever predicted and scored.
+        # Exclude market-closed hours (weekends + Monday pre-market).
         all_hours_set: set[str] = set()
         all_dates_set: set[datetime.date] = set()
         for ev in self._log:
             for d in ev.get("daily_results", []):
                 date_key = d.get("date", "")
                 if date_key:
+                    try:
+                        _d_ts = datetime.strptime(date_key, "%Y-%m-%d %H:%M:%S")
+                        if is_market_closed_ist(_d_ts):
+                            continue
+                    except (ValueError, TypeError):
+                        pass
                     all_hours_set.add(date_key)
                     try:
                         all_dates_set.add(datetime.strptime(date_key, "%Y-%m-%d %H:%M:%S").date())

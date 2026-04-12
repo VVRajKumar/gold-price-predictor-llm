@@ -100,8 +100,9 @@ def _fetch_india_10y_yield() -> dict[str, Any]:
         if not df.empty:
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.droplevel(1)
-            close = df["Close"].squeeze()
-            if hasattr(close, "iloc") and len(close) > 0:
+            from .market_data import _safe_col
+            close = _safe_col(df, "Close")
+            if len(close) > 0:
                 current = float(close.iloc[-1])
                 prev = float(close.iloc[-min(5, len(close))]) if len(close) > 1 else current
                 result = {

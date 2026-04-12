@@ -47,6 +47,28 @@ st.set_page_config(
 st.markdown("""
 <style>
     .stApp {background-color: #0e1117;}
+
+    /* ── Sidebar polish ─────────────────────────────────────────── */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0f1320 0%, #151a2e 50%, #0f1320 100%);
+    }
+    section[data-testid="stSidebar"] hr {
+        border-color: rgba(99, 110, 140, 0.2);
+        margin: 0.6rem 0;
+    }
+    section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"] {
+        border-radius: 8px;
+        padding: 6px 12px;
+        font-size: 0.88rem;
+        transition: background 0.2s;
+    }
+    section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"]:hover {
+        background: rgba(255, 217, 61, 0.08);
+    }
+    section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"][aria-current="page"] {
+        background: rgba(255, 217, 61, 0.12);
+        border-left: 3px solid #ffd93d;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -63,10 +85,17 @@ accuracy_tracker = engine.get_accuracy_tracker()
 # ── Sidebar ──────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown(
-        """<div style="text-align:center;padding:8px 0 2px 0;">
-        <span style="font-size:2.2rem;">🥇</span><br>
-        <span style="font-size:1.3rem;font-weight:700;letter-spacing:0.5px;">Gold Predictor</span><br>
-        <span style="font-size:0.8rem;color:#94a3b8;">Prediction Archive</span>
+        """<div style="text-align:center;padding:14px 0 10px 0;">
+        <div style="display:inline-flex;align-items:center;justify-content:center;
+                    width:52px;height:52px;border-radius:14px;
+                    background:linear-gradient(135deg,#ffd93d 0%,#f59e0b 100%);
+                    box-shadow:0 4px 14px rgba(255,217,61,0.25);margin-bottom:8px;">
+            <span style="font-size:1.6rem;line-height:1;">🥇</span>
+        </div><br>
+        <span style="font-size:1.25rem;font-weight:700;letter-spacing:0.3px;
+                     color:#f0f0f5;">Gold Predictor</span><br>
+        <span style="font-size:0.75rem;color:#7c8db5;letter-spacing:0.5px;">
+            Prediction Archive</span>
         </div>""",
         unsafe_allow_html=True,
     )
@@ -75,13 +104,18 @@ with st.sidebar:
 
     # ── Navigation ────────────────────────────────────────────────────
     st.markdown(
-        '<span style="font-size:0.75rem;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Navigation</span>',
+        '<div style="font-size:0.7rem;font-weight:600;color:#7c8db5;text-transform:uppercase;'
+        'letter-spacing:1.2px;margin-bottom:4px;">Navigation</div>',
         unsafe_allow_html=True,
     )
     st.page_link("app.py", label="🏠 Back to Home", icon=None)
 
     st.divider()
-    st.caption(f"v1.0 · Updated {now_ist().strftime('%H:%M')}")
+    st.markdown(
+        f'<div style="text-align:center;font-size:0.7rem;color:#4a5568;">'
+        f'v1.0 · Updated {now_ist().strftime("%H:%M")}</div>',
+        unsafe_allow_html=True,
+    )
 
 # ── Header ───────────────────────────────────────────────────────────
 st.title("📜 Prediction Archive")
@@ -151,6 +185,15 @@ if "plan_generated_at" in df.columns:
     df = df.drop_duplicates(subset="date", keep="first")
     df = df.drop(columns=["_gen_at"])
     df = df.sort_values("date")
+
+# Exclude market-closed hours (weekends + Monday pre-market) from all
+# metrics, tables, and summaries — these predictions are trivially
+# correct (predicted == actual) and would inflate accuracy numbers.
+df = df[~df["date"].apply(lambda dt: is_market_closed_ist(dt.to_pydatetime()))].copy()
+
+if df.empty:
+    st.info("No market-hours predictions available yet.")
+    st.stop()
 
 # ── Summary Metrics ──────────────────────────────────────────────────
 st.divider()
@@ -245,13 +288,6 @@ for _col in ("predicted", "actual", "high_range", "low_range"):
 
 fig = go.Figure()
 
-# Detect market-closed hours for weekday/weekend visual split
-filtered_df["_is_closed"] = filtered_df["date"].apply(
-    lambda dt: is_market_closed_ist(dt.to_pydatetime())
-)
-_weekday_df = filtered_df[~filtered_df["_is_closed"]]
-_weekend_df = filtered_df[filtered_df["_is_closed"]]
-
 # Prediction band
 if "high_range" in filtered_df.columns and "low_range" in filtered_df.columns:
     fig.add_trace(go.Scatter(
@@ -268,18 +304,16 @@ if "high_range" in filtered_df.columns and "low_range" in filtered_df.columns:
         connectgaps=True,
     ))
 
-# Weekday predicted line — solid green
-if not _weekday_df.empty:
-    fig.add_trace(go.Scatter(
-        x=_weekday_df["date"], y=_weekday_df["predicted"],
-        mode="lines+markers", name="Predicted",
-        line=dict(color="#00d4aa", width=2),
-        marker=dict(size=5, symbol="diamond"),
-        connectgaps=True,
-    ))
+# Predicted line — solid green
+fig.add_trace(go.Scatter(
+    x=filtered_df["date"], y=filtered_df["predicted"],
+    mode="lines+markers", name="Predicted",
+    line=dict(color="#00d4aa", width=2),
+    marker=dict(size=5, symbol="diamond"),
+    connectgaps=True,
+))
 
-# Actual line — solid yellow (drawn before weekend dotted green
-# so the green dotted line renders on top and stays visible).
+# Actual line — solid yellow
 fig.add_trace(go.Scatter(
     x=filtered_df["date"], y=filtered_df["actual"],
     mode="lines+markers", name="Actual",
@@ -287,35 +321,6 @@ fig.add_trace(go.Scatter(
     marker=dict(size=5),
     connectgaps=True,
 ))
-
-# Weekend predicted line — dotted green, merged with actual price.
-# Market is closed so the prediction equals Friday's close (= actual).
-# Drawn AFTER the yellow actual line so it stays visible on top.
-# Bridge from the last weekday point so the lines are not disjointed.
-if not _weekend_df.empty:
-    _wk_x = list(_weekend_df["date"])
-    _wk_y = list(_weekend_df["actual"])
-    # Bridge: prepend last weekday point to connect the segments
-    if not _weekday_df.empty:
-        _bridge_row = _weekday_df.iloc[-1]
-        _wk_x = [_bridge_row["date"]] + _wk_x
-        _wk_y = [_bridge_row["actual"]] + _wk_y
-    # Bridge: append first weekday point AFTER the weekend to reconnect
-    _post_weekend = _weekday_df[_weekday_df["date"] > _weekend_df["date"].max()]
-    if not _post_weekend.empty:
-        _post_row = _post_weekend.iloc[0]
-        _wk_x = _wk_x + [_post_row["date"]]
-        _wk_y = _wk_y + [_post_row["actual"]]
-    fig.add_trace(go.Scatter(
-        x=_wk_x, y=_wk_y,
-        mode="lines+markers", name="Predicted (Market Closed)",
-        line=dict(color="#00d4aa", width=2, dash="dot"),
-        marker=dict(size=4, symbol="diamond"),
-        connectgaps=True,
-    ))
-
-# Clean up temp column
-filtered_df = filtered_df.drop(columns=["_is_closed"], errors="ignore")
 
 # Highlight band misses
 if "within_band" in filtered_df.columns:
@@ -342,48 +347,11 @@ fig.update_layout(
     height=550,
     yaxis_title="Price (₹/10g)",
     xaxis_title="Time (IST)",
-    xaxis=dict(rangebreaks=[dict(bounds=["sat", "mon"])]),
     yaxis=dict(range=_y_range) if _y_range else {},
     legend=dict(orientation="h", yanchor="bottom", y=1.02),
     hovermode="x unified",
 )
 st.plotly_chart(fig, use_container_width=True)
-
-# ── Error Distribution Chart ─────────────────────────────────────────
-st.subheader("📊 Prediction Error Distribution")
-
-err_col1, err_col2 = st.columns(2)
-with err_col1:
-    fig_err = go.Figure()
-    fig_err.add_trace(go.Scatter(
-        x=filtered_df["date"], y=filtered_df["pct_error"],
-        mode="lines+markers", name="Error %",
-        line=dict(color="#ff6b6b", width=1.5),
-        marker=dict(size=4),
-    ))
-    fig_err.update_layout(
-        title="Hourly Prediction Error (%) Over Time",
-        template="plotly_dark", height=350,
-        yaxis_title="Absolute Error (%)",
-        xaxis_title="Time",
-    )
-    st.plotly_chart(fig_err, use_container_width=True)
-
-with err_col2:
-    fig_hist = go.Figure()
-    fig_hist.add_trace(go.Histogram(
-        x=filtered_df["pct_error"],
-        nbinsx=30,
-        marker_color="#00d4aa",
-        opacity=0.8,
-    ))
-    fig_hist.update_layout(
-        title="Error % Distribution",
-        template="plotly_dark", height=350,
-        xaxis_title="Absolute Error (%)",
-        yaxis_title="Count",
-    )
-    st.plotly_chart(fig_hist, use_container_width=True)
 
 # ── Daily Summary Table ──────────────────────────────────────────────
 st.subheader("📅 Daily Performance Summary")

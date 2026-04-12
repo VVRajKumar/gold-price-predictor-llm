@@ -11,6 +11,7 @@ from loguru import logger
 from cachetools import TTLCache
 
 from ..config import GOLD_ETF_TICKERS, GOLD_MINER_TICKERS, GOLD_FUND_TICKERS, HISTORICAL_LOOKBACK_DAYS
+from .market_data import _safe_col
 
 _cache = TTLCache(maxsize=64, ttl=900)
 
@@ -154,8 +155,8 @@ class ETFDataFetcher:
                 if df.empty or len(df) < 2:
                     continue
 
-                close = df["Close"].squeeze()
-                volume = df["Volume"].squeeze() if "Volume" in df else pd.Series(dtype=float)
+                close = _safe_col(df, "Close")
+                volume = _safe_col(df, "Volume") if "Volume" in df else pd.Series(dtype=float)
 
                 avg_recent_vol = _safe_float(volume.tail(5).mean()) if len(volume) > 0 else 0.0
                 avg_older_vol = _safe_float(volume.tail(20).head(15).mean()) if len(volume) > 15 else 0.0
@@ -226,7 +227,7 @@ class ETFDataFetcher:
                 if df.empty or len(df) < 2:
                     continue
 
-                close = df["Close"].squeeze()
+                close = _safe_col(df, "Close")
                 close_last = _safe_float(close.iloc[-1])
                 close_first = _safe_float(close.iloc[0])
 

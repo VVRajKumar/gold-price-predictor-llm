@@ -253,20 +253,30 @@ st.markdown("""
         border-radius: 10px;
     }
 
-    /* ── Rename "app" sidebar nav label to "Gold Dashboard" ──── */
-    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:first-child a span {
-        font-size: 0;
-    }
-    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:first-child a span::after {
-        content: "Gold Dashboard";
-        font-size: 0.88rem;
-        visibility: visible;
+    /* ── Hide entire auto-generated Streamlit multi-page nav ── */
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] {
+        display: none !important;
     }
 
     /* ── Hide yellow nav separator in sidebar ────────────────── */
     section[data-testid="stSidebar"] [data-testid="stSidebarNavSeparator"],
     section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] ~ hr {
         display: none !important;
+    }
+
+    /* ── Style page_link to match Dashboard button (add border) ── */
+    section[data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"] {
+        border: 1px solid rgba(250, 250, 250, 0.2);
+        border-radius: 0.5rem;
+        padding: 0.5rem 1rem;
+        display: flex;
+        align-items: center;
+        width: 100%;
+        transition: border-color 0.2s, background 0.2s;
+    }
+    section[data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"]:hover {
+        border-color: rgba(255, 217, 61, 0.4);
+        background: rgba(255, 217, 61, 0.06);
     }
 
     /* ── Responsive metric columns ───────────────────────────── */

@@ -70,14 +70,9 @@ st.markdown("""
         border-left: 3px solid #ffd93d;
     }
 
-    /* ── Rename "app" sidebar nav label to "Gold Dashboard" ──── */
-    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:first-child a span {
-        font-size: 0;
-    }
-    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:first-child a span::after {
-        content: "Gold Dashboard";
-        font-size: 0.88rem;
-        visibility: visible;
+    /* ── Hide entire auto-generated Streamlit multi-page nav ── */
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] {
+        display: none !important;
     }
 
     /* ── Hide yellow nav separator in sidebar ────────────────── */

@@ -69,6 +69,33 @@ st.markdown("""
         background: rgba(255, 217, 61, 0.12);
         border-left: 3px solid #ffd93d;
     }
+
+    /* ── Rename "app" sidebar nav label to "Gold Dashboard" ──── */
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:first-child a span {
+        font-size: 0;
+    }
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:first-child a span::after {
+        content: "Gold Dashboard";
+        font-size: 0.88rem;
+        visibility: visible;
+    }
+
+    /* ── Responsive metric columns ───────────────────────────── */
+    @media (max-width: 1200px) {
+        [data-testid="stHorizontalBlock"] {
+            flex-wrap: wrap !important;
+        }
+        [data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+            min-width: calc(33.33% - 1rem) !important;
+            flex: 1 1 calc(33.33% - 1rem) !important;
+        }
+    }
+    @media (max-width: 768px) {
+        [data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+            min-width: calc(50% - 1rem) !important;
+            flex: 1 1 calc(50% - 1rem) !important;
+        }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -99,16 +126,6 @@ with st.sidebar:
         </div>""",
         unsafe_allow_html=True,
     )
-
-    st.divider()
-
-    # ── Navigation ────────────────────────────────────────────────────
-    st.markdown(
-        '<div style="font-size:0.7rem;font-weight:600;color:#7c8db5;text-transform:uppercase;'
-        'letter-spacing:1.2px;margin-bottom:4px;">Navigation</div>',
-        unsafe_allow_html=True,
-    )
-    st.page_link("app.py", label="🏠 Back to Home", icon=None)
 
     st.divider()
     st.markdown(

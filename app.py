@@ -263,6 +263,12 @@ st.markdown("""
         visibility: visible;
     }
 
+    /* ── Hide yellow nav separator in sidebar ────────────────── */
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavSeparator"],
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] ~ hr {
+        display: none !important;
+    }
+
     /* ── Responsive metric columns ───────────────────────────── */
     @media (max-width: 1200px) {
         [data-testid="stHorizontalBlock"] {
@@ -277,6 +283,32 @@ st.markdown("""
         [data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
             min-width: calc(50% - 1rem) !important;
             flex: 1 1 calc(50% - 1rem) !important;
+        }
+        /* Shrink metric font sizes on tablets */
+        [data-testid="stMetricValue"] {
+            font-size: 1.3rem !important;
+        }
+        [data-testid="stMetricLabel"] {
+            font-size: 0.75rem !important;
+        }
+    }
+    @media (max-width: 480px) {
+        /* Phone: stack metrics into single column & shrink text */
+        [data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+            min-width: 100% !important;
+            flex: 1 1 100% !important;
+        }
+        [data-testid="stMetricValue"] {
+            font-size: 1.1rem !important;
+        }
+        [data-testid="stMetricLabel"] {
+            font-size: 0.7rem !important;
+        }
+        /* Prevent long values from being truncated */
+        [data-testid="stMetricValue"] > div {
+            white-space: normal !important;
+            word-break: break-word !important;
+            overflow-wrap: break-word !important;
         }
     }
 </style>
@@ -642,6 +674,13 @@ if _quick_agg and _quick_agg["total_predictions_evaluated"] > 0:
         </div>""",
         unsafe_allow_html=True,
     )
+
+# ── Navigation Bar ───────────────────────────────────────────────────
+_nav1, _nav2 = st.columns(2)
+with _nav1:
+    st.page_link("app.py", label="🏠 Dashboard", icon="📊")
+with _nav2:
+    st.page_link("pages/1_📜_Prediction_Archive.py", label="📜 Prediction Archive", icon="📜")
 
 st.divider()
 

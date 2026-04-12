@@ -80,6 +80,12 @@ st.markdown("""
         visibility: visible;
     }
 
+    /* ── Hide yellow nav separator in sidebar ────────────────── */
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavSeparator"],
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] ~ hr {
+        display: none !important;
+    }
+
     /* ── Responsive metric columns ───────────────────────────── */
     @media (max-width: 1200px) {
         [data-testid="stHorizontalBlock"] {
@@ -94,6 +100,32 @@ st.markdown("""
         [data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
             min-width: calc(50% - 1rem) !important;
             flex: 1 1 calc(50% - 1rem) !important;
+        }
+        /* Shrink metric font sizes on tablets */
+        [data-testid="stMetricValue"] {
+            font-size: 1.3rem !important;
+        }
+        [data-testid="stMetricLabel"] {
+            font-size: 0.75rem !important;
+        }
+    }
+    @media (max-width: 480px) {
+        /* Phone: stack metrics into single column & shrink text */
+        [data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+            min-width: 100% !important;
+            flex: 1 1 100% !important;
+        }
+        [data-testid="stMetricValue"] {
+            font-size: 1.1rem !important;
+        }
+        [data-testid="stMetricLabel"] {
+            font-size: 0.7rem !important;
+        }
+        /* Prevent long values from being truncated */
+        [data-testid="stMetricValue"] > div {
+            white-space: normal !important;
+            word-break: break-word !important;
+            overflow-wrap: break-word !important;
         }
     }
 </style>
@@ -135,6 +167,13 @@ with st.sidebar:
     )
 
 # ── Header ───────────────────────────────────────────────────────────
+# ── Navigation Bar ───────────────────────────────────────────────────
+_nav1, _nav2 = st.columns(2)
+with _nav1:
+    st.page_link("app.py", label="🏠 Dashboard", icon="📊")
+with _nav2:
+    st.page_link("pages/1_📜_Prediction_Archive.py", label="📜 Prediction Archive", icon="📜")
+
 st.title("📜 Prediction Archive")
 st.caption(
     "Complete historical log of all predicted vs actual Indian gold prices (₹/10g). "
@@ -226,7 +265,7 @@ avg_error = df["error"].abs().mean() if "error" in df.columns else 0
 dir_accuracy = _compute_directional_accuracy(df)
 overall_score = compute_accuracy_score(avg_mape, band_hit, dir_accuracy)
 
-m1, m2, m3, m4, m5, m6, m7, m8 = st.columns(8)
+m1, m2, m3, m4 = st.columns(4)
 with m1:
     st.metric("📊 Total Hours", f"{total_hours}")
 with m2:
@@ -235,18 +274,20 @@ with m3:
     mape_icon = "🟢" if avg_mape < 2 else ("🟡" if avg_mape < 5 else "🔴")
     st.metric(f"{mape_icon} Avg MAPE", f"{avg_mape:.2f}%")
 with m4:
-    st.metric("📏 Avg MAE", f"₹{avg_error:,.2f}")
+    st.metric("📏 Avg MAE", f"₹{avg_error:,.0f}")
+
+m5, m6, m7, m8 = st.columns(4)
 with m5:
     hit_icon = "🟢" if band_hit >= 80 else ("🟡" if band_hit >= 60 else "🔴")
-    st.metric(f"{hit_icon} Band Hit Rate", f"{band_hit:.1f}%")
+    st.metric(f"{hit_icon} Band Hit", f"{band_hit:.1f}%")
 with m6:
     dir_icon = "🟢" if dir_accuracy >= 80 else ("🟡" if dir_accuracy >= 60 else "🔴")
     st.metric(f"{dir_icon} Direction", f"{dir_accuracy:.1f}%")
 with m7:
     score_icon = "🟢" if overall_score >= 75 else ("🟡" if overall_score >= 50 else "🔴")
-    st.metric(f"{score_icon} Accuracy Score", f"{overall_score:.1f}")
+    st.metric(f"{score_icon} Score", f"{overall_score:.1f}")
 with m8:
-    st.metric("🗓️ Date Range", f"{date_range_start.strftime('%b %d')} – {date_range_end.strftime('%b %d')}")
+    st.metric("🗓️ Range", f"{date_range_start.strftime('%b %d')} – {date_range_end.strftime('%b %d')}")
 
 st.caption(
     "**MAPE** = Mean Absolute Percentage Error · "

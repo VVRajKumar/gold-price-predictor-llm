@@ -252,6 +252,33 @@ st.markdown("""
     section[data-testid="stSidebar"] button[kind="secondary"] {
         border-radius: 10px;
     }
+
+    /* ── Rename "app" sidebar nav label to "Gold Dashboard" ──── */
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:first-child a span {
+        font-size: 0;
+    }
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:first-child a span::after {
+        content: "Gold Dashboard";
+        font-size: 0.88rem;
+        visibility: visible;
+    }
+
+    /* ── Responsive metric columns ───────────────────────────── */
+    @media (max-width: 1200px) {
+        [data-testid="stHorizontalBlock"] {
+            flex-wrap: wrap !important;
+        }
+        [data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+            min-width: calc(33.33% - 1rem) !important;
+            flex: 1 1 calc(33.33% - 1rem) !important;
+        }
+    }
+    @media (max-width: 768px) {
+        [data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+            min-width: calc(50% - 1rem) !important;
+            flex: 1 1 calc(50% - 1rem) !important;
+        }
+    }
 </style>
 """, unsafe_allow_html=True)
 

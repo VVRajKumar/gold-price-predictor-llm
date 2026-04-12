@@ -381,7 +381,8 @@ with st.sidebar:
     st.divider()
 
     # ── Navigation ───────────────────────────────────────────────────
-    st.page_link("app.py", label="🏠 Dashboard", icon="📊")
+    if st.button("📊 Dashboard", use_container_width=True):
+        st.rerun()
     st.page_link("pages/1_📜_Prediction_Archive.py", label="📜 Prediction Archive", icon="📜")
 
     st.divider()

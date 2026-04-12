@@ -160,6 +160,12 @@ with st.sidebar:
     )
 
     st.divider()
+
+    # ── Navigation ───────────────────────────────────────────────────
+    if st.button("📊 Dashboard", use_container_width=True):
+        st.switch_page("app.py")
+
+    st.divider()
     st.markdown(
         f'<div style="text-align:center;font-size:0.7rem;color:#4a5568;">'
         f'v1.0 · Updated {now_ist().strftime("%H:%M")}</div>',
@@ -167,13 +173,6 @@ with st.sidebar:
     )
 
 # ── Header ───────────────────────────────────────────────────────────
-# ── Navigation Bar ───────────────────────────────────────────────────
-_nav1, _nav2 = st.columns(2)
-with _nav1:
-    st.page_link("app.py", label="🏠 Dashboard", icon="📊")
-with _nav2:
-    st.page_link("pages/1_📜_Prediction_Archive.py", label="📜 Prediction Archive", icon="📜")
-
 st.title("📜 Prediction Archive")
 st.caption(
     "Complete historical log of all predicted vs actual Indian gold prices (₹/10g). "

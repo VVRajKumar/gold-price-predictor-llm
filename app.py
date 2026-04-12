@@ -380,6 +380,13 @@ with st.sidebar:
 
     st.divider()
 
+    # ── Navigation ───────────────────────────────────────────────────
+    if st.button("📊 Dashboard", use_container_width=True):
+        st.rerun()
+    st.page_link("pages/1_📜_Prediction_Archive.py", label="📜 Prediction Archive", icon="📜")
+
+    st.divider()
+
     # ── Actions ───────────────────────────────────────────────────────
     if is_market_open():
         if st.button("🔄 Generate New Prediction", width="stretch", type="primary"):
@@ -674,15 +681,6 @@ if _quick_agg and _quick_agg["total_predictions_evaluated"] > 0:
         </div>""",
         unsafe_allow_html=True,
     )
-
-# ── Navigation Bar ───────────────────────────────────────────────────
-_nav1, _nav2 = st.columns(2)
-with _nav1:
-    st.page_link("app.py", label="🏠 Dashboard", icon="📊")
-with _nav2:
-    st.page_link("pages/1_📜_Prediction_Archive.py", label="📜 Prediction Archive", icon="📜")
-
-st.divider()
 
 # ── Executive Summary ────────────────────────────────────────────────
 with st.expander("📋 Executive Summary", expanded=True):

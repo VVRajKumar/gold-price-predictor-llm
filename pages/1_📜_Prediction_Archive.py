@@ -236,6 +236,11 @@ if "plan_generated_at" in df.columns:
     df = df.drop(columns=["_gen_at"])
     df = df.sort_values("date")
 
+# Filter out corrupted predictions (USD-scale leak) — same guard as main dashboard
+for _price_col in ("predicted", "actual"):
+    if _price_col in df.columns:
+        df = df[df[_price_col] >= 30_000].copy()
+
 # Exclude market-closed hours (weekends + Monday pre-market) from
 # metrics, tables, and summaries — these predictions are trivially
 # correct (predicted == actual) and would inflate accuracy numbers.
@@ -342,17 +347,16 @@ _heading_map = {
 }
 st.subheader(_heading_map.get(time_filter, "📈 Predicted vs Actual – Full History"))
 
-# Split into active market hours and weekend/closed hours for charting
+# Prepare chart data: active hours for band/metrics, full df for main traces
 _chart_df = filtered_df_all.copy()
 _chart_active = _chart_df[~_chart_df["_is_closed"]].copy()
-_chart_weekend = _chart_df[_chart_df["_is_closed"]].copy()
 
 # Forward-fill NaN gaps so lines stay connected
 for _col in ("predicted", "actual", "high_range", "low_range"):
+    if _col in _chart_df.columns:
+        _chart_df[_col] = _chart_df[_col].ffill()
     if _col in _chart_active.columns:
         _chart_active[_col] = _chart_active[_col].ffill()
-    if _col in _chart_weekend.columns:
-        _chart_weekend[_col] = _chart_weekend[_col].ffill()
 
 fig = go.Figure()
 
@@ -372,7 +376,17 @@ if not _chart_active.empty and "high_range" in _chart_active.columns and "low_ra
         connectgaps=True,
     ))
 
-# Predicted line — solid green (active market hours)
+# Actual line — single yellow trace through ALL hours (one continuous line)
+if not _chart_df.empty:
+    fig.add_trace(go.Scatter(
+        x=_chart_df["date"], y=_chart_df["actual"],
+        mode="lines+markers", name="Actual",
+        line=dict(color="#ffd93d", width=2),
+        marker=dict(size=5),
+        connectgaps=True,
+    ))
+
+# Predicted line — solid green for active market hours
 if not _chart_active.empty:
     fig.add_trace(go.Scatter(
         x=_chart_active["date"], y=_chart_active["predicted"],
@@ -382,41 +396,47 @@ if not _chart_active.empty:
         connectgaps=True,
     ))
 
-# Actual line — solid yellow (active market hours)
-if not _chart_active.empty:
-    fig.add_trace(go.Scatter(
-        x=_chart_active["date"], y=_chart_active["actual"],
-        mode="lines+markers", name="Actual",
-        line=dict(color="#ffd93d", width=2),
-        marker=dict(size=5),
-        connectgaps=True,
-    ))
-
-# Weekend hours: yellow actual + green dotted predicted overlaid
-if not _chart_weekend.empty:
-    wk_x = list(_chart_weekend["date"])
-    wk_actual = list(_chart_weekend["actual"])
-    wk_pred = list(_chart_weekend["predicted"])
-    # Bridge from last active hour so lines stay connected
-    if not _chart_active.empty:
-        bridge = _chart_active.iloc[-1]
-        wk_x = [bridge["date"]] + wk_x
-        wk_actual = [bridge["actual"]] + wk_actual
-        wk_pred = [bridge["predicted"]] + wk_pred
-
-    # Yellow actual flatline through weekend
-    fig.add_trace(go.Scatter(
-        x=wk_x, y=wk_actual,
-        mode="lines", name="Actual (Weekend)",
-        line=dict(color="#ffd93d", width=2),
-        showlegend=False,
-    ))
-    # Green dotted predicted on top
-    fig.add_trace(go.Scatter(
-        x=wk_x, y=wk_pred,
-        mode="lines", name="Predicted (Market Closed)",
-        line=dict(color="#00d4aa", width=2, dash="dot"),
-    ))
+# Weekend overlay: dotted green on predicted line during market-closed hours.
+# For each contiguous weekend group, add bridge points from adjacent active
+# hours so the line stays visually connected.
+_is_closed_arr = _chart_df["_is_closed"].values
+if _is_closed_arr.any():
+    _dates_arr = _chart_df["date"].values
+    _pred_arr = _chart_df["predicted"].values
+    _overlay_x: list = []
+    _overlay_y: list = []
+    _n = len(_chart_df)
+    _i = 0
+    while _i < _n:
+        if _is_closed_arr[_i]:
+            # Bridge from the last active hour before this group
+            if _i > 0 and not _is_closed_arr[_i - 1]:
+                _overlay_x.append(_dates_arr[_i - 1])
+                _overlay_y.append(float(_pred_arr[_i - 1]))
+            # All weekend hours in this contiguous group
+            while _i < _n and _is_closed_arr[_i]:
+                _overlay_x.append(_dates_arr[_i])
+                _overlay_y.append(float(_pred_arr[_i]))
+                _i += 1
+            # Bridge to the first active hour after this group
+            if _i < _n and not _is_closed_arr[_i]:
+                _overlay_x.append(_dates_arr[_i])
+                _overlay_y.append(float(_pred_arr[_i]))
+            # None break between separate weekend groups
+            _overlay_x.append(None)
+            _overlay_y.append(None)
+        else:
+            _i += 1
+    # Remove trailing None
+    if _overlay_x and _overlay_x[-1] is None:
+        _overlay_x.pop()
+        _overlay_y.pop()
+    if _overlay_x:
+        fig.add_trace(go.Scatter(
+            x=_overlay_x, y=_overlay_y,
+            mode="lines", name="Predicted (Market Closed)",
+            line=dict(color="#00d4aa", width=2, dash="dot"),
+        ))
 
 # Highlight band misses (active hours only)
 if not _chart_active.empty and "within_band" in _chart_active.columns:

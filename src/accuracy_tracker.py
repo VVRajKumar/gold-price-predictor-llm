@@ -128,11 +128,13 @@ class AccuracyTracker:
             logger.info(f"Purged {before_plans - len(self._stored_plans)} blacklisted stored plans")
             self._save_stored_plans()
 
-        # Also purge blacklisted entries from the permanent archive
+        # Also purge blacklisted entries and corrupted prices from the permanent archive
         before_archive = len(self._archive)
         self._archive = [
             e for e in self._archive
             if not _is_blacklisted_plan(e.get("plan_generated_at", ""))
+            and not (isinstance(e.get("predicted", 0), (int, float)) and 0 < e.get("predicted", 0) < 30_000)
+            and not (isinstance(e.get("actual", 0), (int, float)) and 0 < e.get("actual", 0) < 30_000)
         ]
         if len(self._archive) < before_archive:
             logger.info(f"Purged {before_archive - len(self._archive)} blacklisted archive entries")
@@ -345,6 +347,12 @@ class AccuracyTracker:
         added = 0
         updated = 0
         for d in result.get("daily_results", []):
+            # Skip individual corrupted results (USD-scale prices)
+            _pred = d.get("predicted", 0)
+            _act = d.get("actual", 0)
+            if (isinstance(_pred, (int, float)) and _pred < 30_000) or \
+               (isinstance(_act, (int, float)) and _act < 30_000):
+                continue
             key = (gen_at, d.get("date", ""))
             entry_data = {
                 "plan_generated_at": gen_at,
@@ -720,6 +728,13 @@ class AccuracyTracker:
                 if is_market_closed_ist(d_ts):
                     continue
 
+                # Skip corrupted entries with USD-scale prices
+                _pred_val = d.get("predicted", 0)
+                _act_val = d.get("actual", 0)
+                if (isinstance(_pred_val, (int, float)) and _pred_val < 30_000) or \
+                   (isinstance(_act_val, (int, float)) and _act_val < 30_000):
+                    continue
+
                 # Determine which plan generated this prediction
                 gen_at = d.get("plan_generated_at", plan_gen)
 
@@ -810,6 +825,12 @@ class AccuracyTracker:
                             continue
                     except (ValueError, TypeError):
                         pass
+                    # Skip corrupted entries with USD-scale prices
+                    _p = d.get("predicted", 0)
+                    _a = d.get("actual", 0)
+                    if (isinstance(_p, (int, float)) and _p < 30_000) or \
+                       (isinstance(_a, (int, float)) and _a < 30_000):
+                        continue
                     all_hours_set.add(date_key)
                     try:
                         all_dates_set.add(datetime.strptime(date_key, "%Y-%m-%d %H:%M:%S").date())

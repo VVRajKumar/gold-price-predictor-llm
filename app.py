@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
+import numpy as np
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
@@ -45,6 +46,48 @@ except (KeyError, ImportError, AttributeError):
     from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score, _DATA_CUTOFF
     from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
+
+# ── Chart gap-breaker helper ─────────────────────────────────────────
+# When plotting only market-open hours, Plotly draws a straight line from
+# Friday's last hour to Monday's first hour.  This helper inserts ``None``
+# values at those gaps so the line visually breaks across weekends.
+
+_MAX_CONTIGUOUS_GAP_HOURS = 6  # gaps wider than this get a break
+
+
+def _break_at_gaps(dates, *value_cols):
+    """Insert ``None`` gap-breakers when consecutive timestamps differ by
+    more than ``_MAX_CONTIGUOUS_GAP_HOURS``.
+
+    Parameters
+    ----------
+    dates : pd.Series or array-like of datetime
+        Sorted timestamps.
+    *value_cols : pd.Series or array-like
+        One or more value columns aligned with *dates*.
+
+    Returns
+    -------
+    tuple of lists: (x_out, y1_out, y2_out, …)
+    """
+    dates_list = list(dates)
+    val_lists = [list(v) for v in value_cols]
+    x_out: list = []
+    y_outs: list[list] = [[] for _ in val_lists]
+
+    for i in range(len(dates_list)):
+        if i > 0:
+            gap = (dates_list[i] - dates_list[i - 1]).total_seconds() / 3600
+            if gap > _MAX_CONTIGUOUS_GAP_HOURS:
+                x_out.append(None)
+                for y in y_outs:
+                    y.append(None)
+        x_out.append(dates_list[i])
+        for j, vl in enumerate(val_lists):
+            y_outs[j].append(vl[i])
+
+    return (x_out, *y_outs)
+
 
 # ── Display-time name helpers ────────────────────────────────────────
 # Chart-friendly names (short labels for SHAP bar chart / table headers)
@@ -774,24 +817,28 @@ if plan.daily_predictions:
     # Split predictions into active market and closed (weekend) segments
     active_preds = pred_df[~pred_df["_is_closed"]]
 
-    # Prediction band (only for active market hours)
+    # Prediction band (only for active market hours) — with weekend gap breaks
     if not active_preds.empty:
+        _bx, _bhi, _blo = _break_at_gaps(
+            active_preds["date"], active_preds["high_range"], active_preds["low_range"],
+        )
         fig.add_trace(go.Scatter(
-            x=active_preds["date"], y=active_preds["high_range"],
+            x=_bx, y=_bhi,
             mode="lines", name="Upper Band",
             line=dict(width=0), showlegend=False,
         ))
         fig.add_trace(go.Scatter(
-            x=active_preds["date"], y=active_preds["low_range"],
+            x=_bx, y=_blo,
             mode="lines", name="Prediction Range",
             fill="tonexty", fillcolor="rgba(0,212,170,0.15)",
             line=dict(width=0),
         ))
 
-    # Active prediction line — solid green (market-open hours)
+    # Active prediction line — solid green (market-open hours), with weekend gap breaks
     if not active_preds.empty:
+        _px, _py = _break_at_gaps(active_preds["date"], active_preds["predicted_price"])
         fig.add_trace(go.Scatter(
-            x=active_preds["date"], y=active_preds["predicted_price"],
+            x=_px, y=_py,
             mode="lines+markers", name="Predicted",
             line=dict(color="#00d4aa", width=3),
             marker=dict(size=10, symbol="circle"),
@@ -1454,40 +1501,41 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
 
         fig_acc = go.Figure()
 
-        # Prediction band (active market hours only)
+        # Prediction band (active market hours only) — with weekend gap breaks
         if not acc_active.empty:
+            _bx, _bhi, _blo = _break_at_gaps(
+                acc_active["date"], acc_active["high_range"], acc_active["low_range"],
+            )
             fig_acc.add_trace(go.Scatter(
-                    x=acc_active["date"], y=acc_active["high_range"],
+                    x=_bx, y=_bhi,
                     mode="lines", name="Upper Band",
                     line=dict(width=0), showlegend=False,
-                    connectgaps=True,
             ))
             fig_acc.add_trace(go.Scatter(
-                    x=acc_active["date"], y=acc_active["low_range"],
+                    x=_bx, y=_blo,
                     mode="lines", name="Prediction Range",
                     fill="tonexty", fillcolor="rgba(0,212,170,0.12)",
                     line=dict(width=0),
-                    connectgaps=True,
             ))
 
-        # Actual line — single yellow trace through ALL hours (one continuous line)
+        # Actual line — single yellow trace through ALL hours, with weekend gap breaks
         if not acc_df.empty:
+            _ax, _ay = _break_at_gaps(acc_df["date"], acc_df["actual"])
             fig_acc.add_trace(go.Scatter(
-                    x=acc_df["date"], y=acc_df["actual"],
+                    x=_ax, y=_ay,
                     mode="lines+markers", name="Actual",
                     line=dict(color="#ffd93d", width=2),
                     marker=dict(size=7),
-                    connectgaps=True,
             ))
 
-        # Predicted line — solid green for active market hours
+        # Predicted line — solid green for active market hours, with weekend gap breaks
         if not acc_active.empty:
+            _px, _py = _break_at_gaps(acc_active["date"], acc_active["predicted"])
             fig_acc.add_trace(go.Scatter(
-                    x=acc_active["date"], y=acc_active["predicted"],
+                    x=_px, y=_py,
                     mode="lines+markers", name="Predicted",
                     line=dict(color="#00d4aa", width=2),
                     marker=dict(size=7, symbol="diamond"),
-                    connectgaps=True,
             ))
 
         # Weekend overlay: dotted green on predicted line during market-closed

@@ -39,6 +39,31 @@ except (KeyError, ImportError, AttributeError):
     from src.accuracy_tracker import compute_accuracy_score, _DIR_NEUTRAL_PCT, _DATA_CUTOFF
     from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
 
+# ── Chart gap-breaker helper ─────────────────────────────────────────
+_MAX_CONTIGUOUS_GAP_HOURS = 6
+
+
+def _break_at_gaps(dates, *value_cols):
+    """Insert ``None`` gap-breakers when consecutive timestamps differ by
+    more than ``_MAX_CONTIGUOUS_GAP_HOURS`` so chart lines don't draw
+    misleading diagonals across weekend closures."""
+    dates_list = list(dates)
+    val_lists = [list(v) for v in value_cols]
+    x_out: list = []
+    y_outs: list[list] = [[] for _ in val_lists]
+    for i in range(len(dates_list)):
+        if i > 0:
+            gap = (dates_list[i] - dates_list[i - 1]).total_seconds() / 3600
+            if gap > _MAX_CONTIGUOUS_GAP_HOURS:
+                x_out.append(None)
+                for y in y_outs:
+                    y.append(None)
+        x_out.append(dates_list[i])
+        for j, vl in enumerate(val_lists):
+            y_outs[j].append(vl[i])
+    return (x_out, *y_outs)
+
+
 # ── Page config ──────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Prediction Archive – Gold Price Predictor",
@@ -365,40 +390,41 @@ for _col in ("predicted", "actual", "high_range", "low_range"):
 
 fig = go.Figure()
 
-# Prediction band (active market hours only)
+# Prediction band (active market hours only) — with weekend gap breaks
 if not _chart_active.empty and "high_range" in _chart_active.columns and "low_range" in _chart_active.columns:
+    _bx, _bhi, _blo = _break_at_gaps(
+        _chart_active["date"], _chart_active["high_range"], _chart_active["low_range"],
+    )
     fig.add_trace(go.Scatter(
-        x=_chart_active["date"], y=_chart_active["high_range"],
+        x=_bx, y=_bhi,
         mode="lines", name="Upper Band",
         line=dict(width=0), showlegend=False,
-        connectgaps=True,
     ))
     fig.add_trace(go.Scatter(
-        x=_chart_active["date"], y=_chart_active["low_range"],
+        x=_bx, y=_blo,
         mode="lines", name="Prediction Range",
         fill="tonexty", fillcolor="rgba(0,212,170,0.10)",
         line=dict(width=0),
-        connectgaps=True,
     ))
 
-# Actual line — single yellow trace through ALL hours (one continuous line)
+# Actual line — single yellow trace through ALL hours, with weekend gap breaks
 if not _chart_df.empty:
+    _ax, _ay = _break_at_gaps(_chart_df["date"], _chart_df["actual"])
     fig.add_trace(go.Scatter(
-        x=_chart_df["date"], y=_chart_df["actual"],
+        x=_ax, y=_ay,
         mode="lines+markers", name="Actual",
         line=dict(color="#ffd93d", width=2),
         marker=dict(size=5),
-        connectgaps=True,
     ))
 
-# Predicted line — solid green for active market hours
+# Predicted line — solid green for active market hours, with weekend gap breaks
 if not _chart_active.empty:
+    _px, _py = _break_at_gaps(_chart_active["date"], _chart_active["predicted"])
     fig.add_trace(go.Scatter(
-        x=_chart_active["date"], y=_chart_active["predicted"],
+        x=_px, y=_py,
         mode="lines+markers", name="Predicted",
         line=dict(color="#00d4aa", width=2),
         marker=dict(size=5, symbol="diamond"),
-        connectgaps=True,
     ))
 
 # Weekend overlay: dotted green on predicted line during market-closed hours.

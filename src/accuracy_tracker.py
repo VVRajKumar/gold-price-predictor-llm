@@ -30,6 +30,23 @@ _ARCHIVE_PATH = CACHE_DIR / "prediction_archive.json"
 # Only evaluate/store plans generated on or after this cutoff (hourly scorecard start)
 _HOURLY_SCORECARD_START = datetime(2026, 4, 4, 0, 0, 0)
 
+# Blacklisted plan timestamps: these plans had corrupted data (e.g. USD-scale
+# prices instead of INR) and must be excluded from all accuracy tracking.
+# Timestamps are matched by prefix (ignoring timezone suffix) so both
+# "2026-04-13T09:00:00" and "2026-04-13T09:00:00+05:30" are caught.
+_BLACKLISTED_PLAN_PREFIXES = frozenset([
+    "2026-04-13T09:00:00",  # USD-scale prediction (~₹3,878 vs actual ~₹142k)
+])
+
+
+def _is_blacklisted_plan(generated_at: str) -> bool:
+    """Return True if a plan timestamp matches a known-bad prediction."""
+    if not generated_at:
+        return False
+    # Normalize space-separated format to ISO T-separated
+    normalized = str(generated_at).replace(" ", "T")
+    return any(normalized.startswith(prefix) for prefix in _BLACKLISTED_PLAN_PREFIXES)
+
 # Directional neutral zone: if actual moved less than this %, the market
 # is considered flat and the prediction is counted as directionally correct.
 # 0.05% ≈ ₹36 at ₹73k — ignores noise from bid/ask spread & rounding.
@@ -90,19 +107,41 @@ class AccuracyTracker:
     # ── Purge pre-INR / pre-cutoff entries ───────────────────────────
 
     def _purge_stale_entries(self):
-        """Remove accuracy log entries from before the INR migration cutoff
-        or with predictions in USD scale (< ₹30,000)."""
-        before = len(self._log)
+        """Remove accuracy log entries from before the INR migration cutoff,
+        with predictions in USD scale (< ₹30,000), or from blacklisted plans."""
+        before_log = len(self._log)
         self._log = [
             e for e in self._log
             if self._is_valid_entry(e)
         ]
-        if len(self._log) < before:
-            logger.info(f"Purged {before - len(self._log)} stale accuracy entries")
+        if len(self._log) < before_log:
+            logger.info(f"Purged {before_log - len(self._log)} stale accuracy log entries")
             self._save_log()
+
+        # Also purge blacklisted plans from stored plans
+        before_plans = len(self._stored_plans)
+        self._stored_plans = [
+            p for p in self._stored_plans
+            if not _is_blacklisted_plan(p.get("generated_at", ""))
+        ]
+        if len(self._stored_plans) < before_plans:
+            logger.info(f"Purged {before_plans - len(self._stored_plans)} blacklisted stored plans")
+            self._save_stored_plans()
+
+        # Also purge blacklisted entries from the permanent archive
+        before_archive = len(self._archive)
+        self._archive = [
+            e for e in self._archive
+            if not _is_blacklisted_plan(e.get("plan_generated_at", ""))
+        ]
+        if len(self._archive) < before_archive:
+            logger.info(f"Purged {before_archive - len(self._archive)} blacklisted archive entries")
+            self._save_archive()
 
     def _is_valid_entry(self, entry: dict) -> bool:
         gen = entry.get("plan_generated_at", "")
+        if _is_blacklisted_plan(gen):
+            return False
         try:
             gen_dt = datetime.fromisoformat(str(gen))
             if gen_dt.replace(tzinfo=None) < _HOURLY_SCORECARD_START:
@@ -293,6 +332,8 @@ class AccuracyTracker:
         Deduplication is by (plan_generated_at, date) pair.
         """
         gen_at = result.get("plan_generated_at", "")
+        if _is_blacklisted_plan(gen_at):
+            return
         existing_keys: set[tuple[str, str]] = set()
         for entry in self._archive:
             existing_keys.add((entry.get("plan_generated_at", ""), entry.get("date", "")))
@@ -337,6 +378,10 @@ class AccuracyTracker:
     def store_plan(self, plan_dict: dict):
         """Persist a prediction plan so it can be re-evaluated later as days pass."""
         gen_at = plan_dict.get("generated_at", "")
+        # Skip blacklisted plans (known corrupted data)
+        if _is_blacklisted_plan(gen_at):
+            logger.info(f"Skipping blacklisted plan {gen_at}")
+            return
         # Skip plans generated before the hourly scorecard cutoff
         try:
             gen_dt = datetime.fromisoformat(str(gen_at))
@@ -396,6 +441,9 @@ class AccuracyTracker:
             return None
 
         generated_at = plan_dict.get("generated_at", "")
+        # Skip blacklisted plans (known corrupted data)
+        if _is_blacklisted_plan(generated_at):
+            return None
         # Skip evaluation for plans generated before the hourly scorecard cutoff
         try:
             gen_dt = datetime.fromisoformat(str(generated_at))

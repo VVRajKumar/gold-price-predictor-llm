@@ -130,7 +130,14 @@ class PredictionEngine:
             try:
                 data = json.loads(self._cache_path.read_text(encoding="utf-8"))
                 plan = PredictionPlan(**data)
-                if not np.isfinite(plan.current_price) or plan.current_price <= 0:
+
+                # Reject blacklisted plans (known corrupted data)
+                from .accuracy_tracker import _is_blacklisted_plan
+                if _is_blacklisted_plan(plan.generated_at):
+                    logger.warning(
+                        f"Cached plan {plan.generated_at} is blacklisted (corrupted); discarding"
+                    )
+                elif not np.isfinite(plan.current_price) or plan.current_price <= 0:
                     logger.warning("Ignoring cached prediction plan with invalid current_price")
                 elif plan.current_price < 30_000:
                     # Price is clearly not in INR/10g scale (likely stale USD-era cache)

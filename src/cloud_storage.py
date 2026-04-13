@@ -328,8 +328,10 @@ def persist(filename: str, data: Any):
         pushed = False
         if _s3_available():
             pushed = _s3_push_file(filename, content)
-        if not pushed and _gist_available():
-            logger.info(f"[cloud_storage] S3 push failed/unavailable for {filename}, falling back to Gist")
+        # Always push to Gist too (when available) to keep it in sync.
+        # Previously Gist was only updated on S3 failure, which left stale
+        # data in the Gist that could be pulled on subsequent cold starts.
+        if _gist_available():
             _gist_push_file(filename, content)
 
     if _is_ephemeral_env():

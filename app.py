@@ -33,6 +33,7 @@ try:
     from src.data_fetchers.market_data import MarketDataFetcher
     from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score
+    from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
 except (KeyError, ImportError, AttributeError):
     # On Streamlit Cloud hot-reload the module cache can be in an inconsistent
     # state after the cleanup above.  Purge all stale src.* modules and retry.
@@ -43,6 +44,7 @@ except (KeyError, ImportError, AttributeError):
     from src.data_fetchers.market_data import MarketDataFetcher
     from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score
+    from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
 
 # ── Display-time name helpers ────────────────────────────────────────
 # Chart-friendly names (short labels for SHAP bar chart / table headers)
@@ -621,7 +623,7 @@ if plan is None:
 # ── Top Metrics Row ──────────────────────────────────────────────────
 import math as _math
 _live_fx = market.get_usdinr_rate()
-_valid_price = _math.isfinite(plan.current_price) and plan.current_price >= 30_000
+_valid_price = _math.isfinite(plan.current_price) and plan.current_price >= _MIN_VALID_PRICE
 _is_weekend = not is_market_open()
 c1, c2, c3, c4, c5, c6 = st.columns(6)
 with c1:
@@ -804,19 +806,16 @@ if plan.daily_predictions:
     _is_closed_arr = pred_df["_is_closed"].values
     if _is_closed_arr.any():
         _dates_arr = pred_df["date"].values
-        # Compute adjusted predicted values: Friday close for weekends,
-        # actual close for active bridge points.
-        _adj_pred = []
-        for idx, row in pred_df.iterrows():
-            ts = row["date"]
-            if row["_is_closed"] and not close_series.empty:
-                val = close_series.asof(ts)
-                _adj_pred.append(float(val) if pd.notna(val) else float(row["predicted_price"]))
-            elif not close_series.empty:
-                val = close_series.asof(ts)
-                _adj_pred.append(float(val) if pd.notna(val) else float(row["predicted_price"]))
-            else:
-                _adj_pred.append(float(row["predicted_price"]))
+        # Compute adjusted predicted values: use close_series (Friday close)
+        # for both weekend and bridge points so the dotted line merges with
+        # the yellow actual line.
+        if not close_series.empty:
+            _adj_pred = []
+            for ts, pp in zip(pred_df["date"], pred_df["predicted_price"]):
+                v = close_series.asof(ts)
+                _adj_pred.append(float(v) if pd.notna(v) else float(pp))
+        else:
+            _adj_pred = [float(pp) for pp in pred_df["predicted_price"]]
 
         _overlay_x: list = []
         _overlay_y: list = []
@@ -1429,7 +1428,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         # not INR/10g scale) to prevent corrupted data from ruining charts.
         for _price_col in ("predicted", "actual"):
             if _price_col in acc_df.columns:
-                acc_df = acc_df[acc_df[_price_col] >= 30_000].copy()
+                acc_df = acc_df[acc_df[_price_col] >= _MIN_VALID_PRICE].copy()
 
         # ── Limit chart to last 72 hours ─────────────────────────
         _cutoff_72h = pd.Timestamp(now_ist().replace(tzinfo=None)) - pd.Timedelta(hours=72)

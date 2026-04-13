@@ -30,12 +30,14 @@ try:
     from src.prediction_engine import PredictionEngine
     from src.time_utils import now_ist, parse_iso_to_ist, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score, _DIR_NEUTRAL_PCT
+    from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
 except (KeyError, ImportError, AttributeError):
     for _k in [k for k in list(sys.modules) if k == "src" or k.startswith("src.")]:
         del sys.modules[_k]
     from src.prediction_engine import PredictionEngine
     from src.time_utils import now_ist, parse_iso_to_ist, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score, _DIR_NEUTRAL_PCT
+    from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
 
 # ── Page config ──────────────────────────────────────────────────────
 st.set_page_config(
@@ -239,7 +241,7 @@ if "plan_generated_at" in df.columns:
 # Filter out corrupted predictions (USD-scale leak) — same guard as main dashboard
 for _price_col in ("predicted", "actual"):
     if _price_col in df.columns:
-        df = df[df[_price_col] >= 30_000].copy()
+        df = df[df[_price_col] >= _MIN_VALID_PRICE].copy()
 
 # Exclude market-closed hours (weekends + Monday pre-market) from
 # metrics, tables, and summaries — these predictions are trivially

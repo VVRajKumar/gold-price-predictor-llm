@@ -20,6 +20,7 @@ from loguru import logger
 from .config import CACHE_DIR
 from .data_fetchers.market_data import MarketDataFetcher
 from .time_utils import iso_now_ist, now_ist, IST_OFFSET, is_market_closed_ist
+from .guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
 from . import cloud_storage
 
 
@@ -133,8 +134,8 @@ class AccuracyTracker:
         self._archive = [
             e for e in self._archive
             if not _is_blacklisted_plan(e.get("plan_generated_at", ""))
-            and not (isinstance(e.get("predicted", 0), (int, float)) and 0 < e.get("predicted", 0) < 30_000)
-            and not (isinstance(e.get("actual", 0), (int, float)) and 0 < e.get("actual", 0) < 30_000)
+            and not (isinstance(e.get("predicted", 0), (int, float)) and 0 < e.get("predicted", 0) < _MIN_VALID_PRICE)
+            and not (isinstance(e.get("actual", 0), (int, float)) and 0 < e.get("actual", 0) < _MIN_VALID_PRICE)
         ]
         if len(self._archive) < before_archive:
             logger.info(f"Purged {before_archive - len(self._archive)} blacklisted archive entries")
@@ -152,11 +153,11 @@ class AccuracyTracker:
             return False
         # Reject entries with USD-scale current_price (anchor price was wrong)
         cp = entry.get("current_price_at_prediction", 0)
-        if isinstance(cp, (int, float)) and 0 < cp < 30_000:
+        if isinstance(cp, (int, float)) and 0 < cp < _MIN_VALID_PRICE:
             return False
         # Also reject entries with USD-scale predictions
         for d in entry.get("daily_results", []):
-            if d.get("predicted", 0) < 30_000:
+            if d.get("predicted", 0) < _MIN_VALID_PRICE:
                 return False
         return True
 
@@ -350,8 +351,8 @@ class AccuracyTracker:
             # Skip individual corrupted results (USD-scale prices)
             _pred = d.get("predicted", 0)
             _act = d.get("actual", 0)
-            if (isinstance(_pred, (int, float)) and _pred < 30_000) or \
-               (isinstance(_act, (int, float)) and _act < 30_000):
+            if (isinstance(_pred, (int, float)) and _pred < _MIN_VALID_PRICE) or \
+               (isinstance(_act, (int, float)) and _act < _MIN_VALID_PRICE):
                 continue
             key = (gen_at, d.get("date", ""))
             entry_data = {
@@ -731,8 +732,8 @@ class AccuracyTracker:
                 # Skip corrupted entries with USD-scale prices
                 _pred_val = d.get("predicted", 0)
                 _act_val = d.get("actual", 0)
-                if (isinstance(_pred_val, (int, float)) and _pred_val < 30_000) or \
-                   (isinstance(_act_val, (int, float)) and _act_val < 30_000):
+                if (isinstance(_pred_val, (int, float)) and _pred_val < _MIN_VALID_PRICE) or \
+                   (isinstance(_act_val, (int, float)) and _act_val < _MIN_VALID_PRICE):
                     continue
 
                 # Determine which plan generated this prediction
@@ -828,8 +829,8 @@ class AccuracyTracker:
                     # Skip corrupted entries with USD-scale prices
                     _p = d.get("predicted", 0)
                     _a = d.get("actual", 0)
-                    if (isinstance(_p, (int, float)) and _p < 30_000) or \
-                       (isinstance(_a, (int, float)) and _a < 30_000):
+                    if (isinstance(_p, (int, float)) and _p < _MIN_VALID_PRICE) or \
+                       (isinstance(_a, (int, float)) and _a < _MIN_VALID_PRICE):
                         continue
                     all_hours_set.add(date_key)
                     try:

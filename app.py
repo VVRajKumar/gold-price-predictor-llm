@@ -1409,60 +1409,96 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         _cutoff_72h = pd.Timestamp(now_ist().replace(tzinfo=None)) - pd.Timedelta(hours=72)
         acc_df = acc_df[acc_df["date"] >= _cutoff_72h].copy()
 
-        # Exclude market-closed hours (weekends + Monday pre-market) from
-        # accuracy chart — consistent with the table and metrics filtering.
-        acc_df = acc_df[~acc_df["date"].apply(
+        # Tag market-closed hours (weekends + Monday pre-market) but
+        # keep them for charting so the weekend lines are visible.
+        acc_df["_is_closed"] = acc_df["date"].apply(
             lambda dt: is_market_closed_ist(dt.to_pydatetime())
-        )].copy()
+        )
+        # Split into active and weekend subsets
+        acc_active = acc_df[~acc_df["_is_closed"]].copy()
+        acc_weekend = acc_df[acc_df["_is_closed"]].copy()
 
         # Forward-fill NaN gaps so lines stay connected
         for _col in ("predicted", "actual", "high_range", "low_range"):
-            if _col in acc_df.columns:
-                acc_df[_col] = acc_df[_col].ffill()
+            if _col in acc_active.columns:
+                acc_active[_col] = acc_active[_col].ffill()
+            if _col in acc_weekend.columns:
+                acc_weekend[_col] = acc_weekend[_col].ffill()
 
         fig_acc = go.Figure()
 
-        # Prediction band
-        fig_acc.add_trace(go.Scatter(
-                x=acc_df["date"], y=acc_df["high_range"],
-                mode="lines", name="Upper Band",
-                line=dict(width=0), showlegend=False,
-                connectgaps=True,
-        ))
-        fig_acc.add_trace(go.Scatter(
-                x=acc_df["date"], y=acc_df["low_range"],
-                mode="lines", name="Prediction Range",
-                fill="tonexty", fillcolor="rgba(0,212,170,0.12)",
-                line=dict(width=0),
-                connectgaps=True,
-        ))
-
-        # Predicted line — solid green
-        fig_acc.add_trace(go.Scatter(
-                x=acc_df["date"], y=acc_df["predicted"],
-                mode="lines+markers", name="Predicted",
-                line=dict(color="#00d4aa", width=2),
-                marker=dict(size=7, symbol="diamond"),
-                connectgaps=True,
-        ))
-
-        # Actual line — solid yellow
-        fig_acc.add_trace(go.Scatter(
-                x=acc_df["date"], y=acc_df["actual"],
-                mode="lines+markers", name="Actual",
-                line=dict(color="#ffd93d", width=2),
-                marker=dict(size=7),
-                connectgaps=True,
-        ))
-
-        # Color markers for within/outside band
-        outside = acc_df[~acc_df["within_band"]]
-        if not outside.empty:
+        # Prediction band (active market hours only)
+        if not acc_active.empty:
             fig_acc.add_trace(go.Scatter(
-                    x=outside["date"], y=outside["actual"],
-                    mode="markers", name="Outside Band ✗",
-                    marker=dict(size=12, color="#ff6b6b", symbol="x"),
+                    x=acc_active["date"], y=acc_active["high_range"],
+                    mode="lines", name="Upper Band",
+                    line=dict(width=0), showlegend=False,
+                    connectgaps=True,
             ))
+            fig_acc.add_trace(go.Scatter(
+                    x=acc_active["date"], y=acc_active["low_range"],
+                    mode="lines", name="Prediction Range",
+                    fill="tonexty", fillcolor="rgba(0,212,170,0.12)",
+                    line=dict(width=0),
+                    connectgaps=True,
+            ))
+
+        # Predicted line — solid green (active market hours)
+        if not acc_active.empty:
+            fig_acc.add_trace(go.Scatter(
+                    x=acc_active["date"], y=acc_active["predicted"],
+                    mode="lines+markers", name="Predicted",
+                    line=dict(color="#00d4aa", width=2),
+                    marker=dict(size=7, symbol="diamond"),
+                    connectgaps=True,
+            ))
+
+        # Actual line — solid yellow (active market hours)
+        if not acc_active.empty:
+            fig_acc.add_trace(go.Scatter(
+                    x=acc_active["date"], y=acc_active["actual"],
+                    mode="lines+markers", name="Actual",
+                    line=dict(color="#ffd93d", width=2),
+                    marker=dict(size=7),
+                    connectgaps=True,
+            ))
+
+        # Weekend hours: yellow actual + green dotted predicted overlaid
+        if not acc_weekend.empty:
+            # Build bridge points from last active hour to first weekend hour
+            # so the lines stay visually connected.
+            wk_x = list(acc_weekend["date"])
+            wk_actual = list(acc_weekend["actual"])
+            wk_pred = list(acc_weekend["predicted"])
+            if not acc_active.empty:
+                bridge = acc_active.iloc[-1]
+                wk_x = [bridge["date"]] + wk_x
+                wk_actual = [bridge["actual"]] + wk_actual
+                wk_pred = [bridge["predicted"]] + wk_pred
+
+            # Yellow actual flatline through weekend
+            fig_acc.add_trace(go.Scatter(
+                    x=wk_x, y=wk_actual,
+                    mode="lines", name="Actual (Weekend)",
+                    line=dict(color="#ffd93d", width=2),
+                    showlegend=False,
+            ))
+            # Green dotted predicted on top — visually merges with yellow
+            fig_acc.add_trace(go.Scatter(
+                    x=wk_x, y=wk_pred,
+                    mode="lines", name="Predicted (Market Closed)",
+                    line=dict(color="#00d4aa", width=2, dash="dot"),
+            ))
+
+        # Color markers for within/outside band (active hours only)
+        if not acc_active.empty:
+            outside = acc_active[~acc_active["within_band"]]
+            if not outside.empty:
+                fig_acc.add_trace(go.Scatter(
+                        x=outside["date"], y=outside["actual"],
+                        mode="markers", name="Outside Band ✗",
+                        marker=dict(size=12, color="#ff6b6b", symbol="x"),
+                ))
 
         # Compute a sensible y-axis range using the actual prices as the
         # anchor, ignoring wild prediction outliers that would ruin the chart.
@@ -1488,8 +1524,11 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         st.plotly_chart(fig_acc, width="stretch")
 
         # ── Hourly Accuracy Table ────────────────────────────────
+        # Show only active market hours in the table (weekend hours are
+        # visible in the chart as green-dotted but excluded from metrics).
         with st.expander("📋 Hourly Accuracy Breakdown", expanded=False):
-            display_df = acc_df[["date", "predicted", "actual", "low_range",
+            _table_df = acc_active if not acc_active.empty else acc_df
+            display_df = _table_df[["date", "predicted", "actual", "low_range",
                                  "high_range", "error", "pct_error", "within_band"]].copy()
             # Sort chronologically (oldest → newest) so the table reads
             # in natural time order instead of an arbitrary insertion order.

@@ -118,17 +118,19 @@ class AccuracyTracker:
 
     # ── Fix USD-leaked predictions in stored plans ─────────────────────
 
-    _USD_FIX_VERSION = "v1_fix_usd_apr13"
+    _USD_FIX_VERSION = "v3_surgical_truncate_usd_apr13"
 
     def _fix_usd_leaked_predictions(self):
-        """One-time fix: replace USD-scale predictions in stored plans
-        with carried-forward INR values.
+        """One-time surgical fix: remove only the corrupted USD-scale hours
+        from the two affected April 12 plans without wiping any other data.
 
         Some plans from April 12-13 2026 had hourly predictions where the
         USD→INR conversion failed for later hours, leaving predicted_price
-        at ~$3,878 instead of ~₹142,000.  This fix carries forward the
-        last valid INR prediction within each plan and removes corrupted
-        entries from the prediction archive.
+        at ~$3,878 instead of ~₹142,000.  This fix:
+          1. Truncates only the corrupted hours from those specific plans
+          2. Removes only the corrupted archive entries (predicted < ₹30k)
+          3. Removes only the accuracy-log entries for the affected plans
+             so they get re-evaluated — all other plans' data is untouched
         """
         marker_path = CACHE_DIR / "usd_prediction_fix.marker"
         try:
@@ -141,52 +143,48 @@ class AccuracyTracker:
 
         _INR_FLOOR = 30_000  # anything below this is clearly USD, not INR/10g
 
-        fixed_plans = 0
-        fixed_hours = 0
+        fixed_plan_ids: list[str] = []   # generated_at timestamps of affected plans
+        removed_hours = 0
 
         for plan in self._stored_plans:
             preds = plan.get("daily_predictions", [])
             if not preds:
                 continue
 
-            last_valid_price = None
-            last_valid_low = None
-            last_valid_high = None
-            plan_modified = False
+            # Check if this plan has any USD-scale predictions
+            has_usd = any(
+                self._pred_price(dp) < _INR_FLOOR
+                for dp in preds
+                if self._pred_price(dp) > 0
+            )
+            if not has_usd:
+                continue
 
-            for dp in preds:
-                predicted = dp.get("predicted_price", 0)
-                try:
-                    predicted = float(predicted)
-                except (TypeError, ValueError):
-                    predicted = 0
+            # Keep only predictions with valid INR-scale prices
+            valid_preds = [
+                dp for dp in preds
+                if self._pred_price(dp) >= _INR_FLOOR
+            ]
+            truncated = len(preds) - len(valid_preds)
+            if truncated > 0:
+                plan["daily_predictions"] = valid_preds
+                removed_hours += truncated
+                plan_id = plan.get("generated_at", "")
+                if plan_id:
+                    fixed_plan_ids.append(plan_id)
 
-                if predicted >= _INR_FLOOR:
-                    # Valid INR prediction — remember it
-                    last_valid_price = predicted
-                    last_valid_low = dp.get("low_range") or predicted
-                    last_valid_high = dp.get("high_range") or predicted
-                elif last_valid_price is not None:
-                    # USD-scale prediction: carry forward last valid INR price
-                    dp["predicted_price"] = last_valid_price
-                    dp["low_range"] = round(last_valid_low, 2)
-                    dp["high_range"] = round(last_valid_high, 2)
-                    fixed_hours += 1
-                    plan_modified = True
-
-            # Fix current_price if it's in USD scale
+            # Fix current_price if it's in USD scale — use the first
+            # valid prediction price as a reasonable INR reference.
             cp = plan.get("current_price", 0)
-            if 0 < cp < _INR_FLOOR and last_valid_price is not None:
-                plan["current_price"] = last_valid_price
-                plan_modified = True
+            if 0 < cp < _INR_FLOOR and valid_preds:
+                plan["current_price"] = valid_preds[0].get(
+                    "predicted_price", cp
+                )
 
-            if plan_modified:
-                fixed_plans += 1
-
-        if fixed_plans:
+        if fixed_plan_ids:
             self._save_stored_plans()
 
-        # Remove corrupted archive entries (USD-scale predicted prices)
+        # Remove ONLY corrupted archive entries (USD-scale predicted prices)
         archive_before = len(self._archive)
         self._archive = [
             e for e in self._archive
@@ -196,22 +194,41 @@ class AccuracyTracker:
         if archive_removed:
             self._save_archive()
 
-        # Clear accuracy log so plans get re-evaluated with fixed predictions
-        if fixed_plans:
-            self._log = []
-            self._save_log()
+        # Remove ONLY the accuracy-log entries for affected plans so they
+        # get re-evaluated on next refresh.  All other plans stay untouched.
+        log_removed = 0
+        if fixed_plan_ids:
+            affected = set(fixed_plan_ids)
+            log_before = len(self._log)
+            self._log = [
+                e for e in self._log
+                if e.get("plan_generated_at", "") not in affected
+            ]
+            log_removed = log_before - len(self._log)
+            if log_removed:
+                self._save_log()
 
         try:
             marker_path.write_text(self._USD_FIX_VERSION, encoding="utf-8")
         except Exception:
             pass
 
-        if fixed_plans or archive_removed:
+        if fixed_plan_ids or archive_removed:
             logger.info(
-                f"USD prediction fix ({self._USD_FIX_VERSION}): fixed "
-                f"{fixed_hours} hours in {fixed_plans} plans, removed "
-                f"{archive_removed} archive entries, cleared accuracy log"
+                f"USD prediction fix ({self._USD_FIX_VERSION}): truncated "
+                f"{removed_hours} corrupted hours from {len(fixed_plan_ids)} "
+                f"plans ({fixed_plan_ids}), removed {archive_removed} "
+                f"archive entries, removed {log_removed if fixed_plan_ids else 0} "
+                f"log entries for re-evaluation"
             )
+
+    @staticmethod
+    def _pred_price(dp: dict) -> float:
+        """Extract predicted_price as float, returning 0 on failure."""
+        try:
+            return float(dp.get("predicted_price", 0))
+        except (TypeError, ValueError):
+            return 0
 
     # ── Retroactive guardrail rebase ─────────────────────────────────
 

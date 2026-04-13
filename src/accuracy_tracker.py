@@ -141,7 +141,7 @@ class AccuracyTracker:
             self._save_log()
 
         # Also purge blacklisted plans and plans with invalid anchor prices
-        # (e.g. USD-scale current_price < ₹30,000) from stored plans.
+        # (e.g. USD-scale prices outside the valid INR/10g range) from stored plans.
         from .guardrails import is_valid_inr_price
         before_plans = len(self._stored_plans)
         self._stored_plans = [

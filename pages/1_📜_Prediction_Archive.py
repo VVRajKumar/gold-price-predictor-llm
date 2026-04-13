@@ -236,10 +236,13 @@ if "plan_generated_at" in df.columns:
     df = df.drop(columns=["_gen_at"])
     df = df.sort_values("date")
 
-# Exclude market-closed hours (weekends + Monday pre-market) from all
+# Exclude market-closed hours (weekends + Monday pre-market) from
 # metrics, tables, and summaries — these predictions are trivially
 # correct (predicted == actual) and would inflate accuracy numbers.
-df = df[~df["date"].apply(lambda dt: is_market_closed_ist(dt.to_pydatetime()))].copy()
+# But keep a full copy for the chart (weekend hours shown as green-dotted).
+df["_is_closed"] = df["date"].apply(lambda dt: is_market_closed_ist(dt.to_pydatetime()))
+df_all = df.copy()  # includes weekend hours for chart rendering
+df = df[~df["_is_closed"]].copy()
 
 if df.empty:
     st.info("No market-hours predictions available yet.")
@@ -301,19 +304,25 @@ with col_filter1:
 with col_filter2:
     show_band_misses_only = st.checkbox("Show only band misses (outside predicted range)", value=False)
 
-# Apply filters
-filtered_df = df.copy()
+# Apply filters — use df_all (includes weekends) for chart rendering
+filtered_df = df.copy()            # active-market-only for metrics/tables
+filtered_df_all = df_all.copy()    # includes weekends for chart
 now = now_ist().replace(tzinfo=None)
 if time_filter == "Last 24 Hours":
     filtered_df = filtered_df[filtered_df["date"] >= now - timedelta(hours=24)]
+    filtered_df_all = filtered_df_all[filtered_df_all["date"] >= now - timedelta(hours=24)]
 elif time_filter == "Last 3 Days":
     filtered_df = filtered_df[filtered_df["date"] >= now - timedelta(days=3)]
+    filtered_df_all = filtered_df_all[filtered_df_all["date"] >= now - timedelta(days=3)]
 elif time_filter == "Last 7 Days":
     filtered_df = filtered_df[filtered_df["date"] >= now - timedelta(days=7)]
+    filtered_df_all = filtered_df_all[filtered_df_all["date"] >= now - timedelta(days=7)]
 elif time_filter == "Last 14 Days":
     filtered_df = filtered_df[filtered_df["date"] >= now - timedelta(days=14)]
+    filtered_df_all = filtered_df_all[filtered_df_all["date"] >= now - timedelta(days=14)]
 elif time_filter == "Last 30 Days":
     filtered_df = filtered_df[filtered_df["date"] >= now - timedelta(days=30)]
+    filtered_df_all = filtered_df_all[filtered_df_all["date"] >= now - timedelta(days=30)]
 
 if show_band_misses_only and "within_band" in filtered_df.columns:
     filtered_df = filtered_df[~filtered_df["within_band"]]
@@ -333,50 +342,85 @@ _heading_map = {
 }
 st.subheader(_heading_map.get(time_filter, "📈 Predicted vs Actual – Full History"))
 
+# Split into active market hours and weekend/closed hours for charting
+_chart_df = filtered_df_all.copy()
+_chart_active = _chart_df[~_chart_df["_is_closed"]].copy()
+_chart_weekend = _chart_df[_chart_df["_is_closed"]].copy()
+
 # Forward-fill NaN gaps so lines stay connected
 for _col in ("predicted", "actual", "high_range", "low_range"):
-    if _col in filtered_df.columns:
-        filtered_df[_col] = filtered_df[_col].ffill()
+    if _col in _chart_active.columns:
+        _chart_active[_col] = _chart_active[_col].ffill()
+    if _col in _chart_weekend.columns:
+        _chart_weekend[_col] = _chart_weekend[_col].ffill()
 
 fig = go.Figure()
 
-# Prediction band
-if "high_range" in filtered_df.columns and "low_range" in filtered_df.columns:
+# Prediction band (active market hours only)
+if not _chart_active.empty and "high_range" in _chart_active.columns and "low_range" in _chart_active.columns:
     fig.add_trace(go.Scatter(
-        x=filtered_df["date"], y=filtered_df["high_range"],
+        x=_chart_active["date"], y=_chart_active["high_range"],
         mode="lines", name="Upper Band",
         line=dict(width=0), showlegend=False,
         connectgaps=True,
     ))
     fig.add_trace(go.Scatter(
-        x=filtered_df["date"], y=filtered_df["low_range"],
+        x=_chart_active["date"], y=_chart_active["low_range"],
         mode="lines", name="Prediction Range",
         fill="tonexty", fillcolor="rgba(0,212,170,0.10)",
         line=dict(width=0),
         connectgaps=True,
     ))
 
-# Predicted line — solid green
-fig.add_trace(go.Scatter(
-    x=filtered_df["date"], y=filtered_df["predicted"],
-    mode="lines+markers", name="Predicted",
-    line=dict(color="#00d4aa", width=2),
-    marker=dict(size=5, symbol="diamond"),
-    connectgaps=True,
-))
+# Predicted line — solid green (active market hours)
+if not _chart_active.empty:
+    fig.add_trace(go.Scatter(
+        x=_chart_active["date"], y=_chart_active["predicted"],
+        mode="lines+markers", name="Predicted",
+        line=dict(color="#00d4aa", width=2),
+        marker=dict(size=5, symbol="diamond"),
+        connectgaps=True,
+    ))
 
-# Actual line — solid yellow
-fig.add_trace(go.Scatter(
-    x=filtered_df["date"], y=filtered_df["actual"],
-    mode="lines+markers", name="Actual",
-    line=dict(color="#ffd93d", width=2),
-    marker=dict(size=5),
-    connectgaps=True,
-))
+# Actual line — solid yellow (active market hours)
+if not _chart_active.empty:
+    fig.add_trace(go.Scatter(
+        x=_chart_active["date"], y=_chart_active["actual"],
+        mode="lines+markers", name="Actual",
+        line=dict(color="#ffd93d", width=2),
+        marker=dict(size=5),
+        connectgaps=True,
+    ))
 
-# Highlight band misses
-if "within_band" in filtered_df.columns:
-    outside = filtered_df[~filtered_df["within_band"]]
+# Weekend hours: yellow actual + green dotted predicted overlaid
+if not _chart_weekend.empty:
+    wk_x = list(_chart_weekend["date"])
+    wk_actual = list(_chart_weekend["actual"])
+    wk_pred = list(_chart_weekend["predicted"])
+    # Bridge from last active hour so lines stay connected
+    if not _chart_active.empty:
+        bridge = _chart_active.iloc[-1]
+        wk_x = [bridge["date"]] + wk_x
+        wk_actual = [bridge["actual"]] + wk_actual
+        wk_pred = [bridge["predicted"]] + wk_pred
+
+    # Yellow actual flatline through weekend
+    fig.add_trace(go.Scatter(
+        x=wk_x, y=wk_actual,
+        mode="lines", name="Actual (Weekend)",
+        line=dict(color="#ffd93d", width=2),
+        showlegend=False,
+    ))
+    # Green dotted predicted on top
+    fig.add_trace(go.Scatter(
+        x=wk_x, y=wk_pred,
+        mode="lines", name="Predicted (Market Closed)",
+        line=dict(color="#00d4aa", width=2, dash="dot"),
+    ))
+
+# Highlight band misses (active hours only)
+if not _chart_active.empty and "within_band" in _chart_active.columns:
+    outside = _chart_active[~_chart_active["within_band"]]
     if not outside.empty:
         fig.add_trace(go.Scatter(
             x=outside["date"], y=outside["actual"],
@@ -385,7 +429,7 @@ if "within_band" in filtered_df.columns:
         ))
 
 # Smart y-axis scaling based on actual prices
-_actual_vals = filtered_df["actual"].dropna()
+_actual_vals = _chart_df["actual"].dropna()
 if not _actual_vals.empty:
     _y_center = _actual_vals.median()
     _y_iqr = _actual_vals.quantile(0.75) - _actual_vals.quantile(0.25)

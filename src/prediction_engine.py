@@ -111,9 +111,17 @@ class PredictionEngine:
         )
 
     def _save_plan(self, plan: PredictionPlan):
+        # Reject corrupted plans before persisting to S3
+        from .guardrails import is_valid_inr_price
+        if not is_valid_inr_price(plan.current_price):
+            logger.warning(
+                f"Refusing to save plan with invalid current_price ₹{plan.current_price!r} "
+                f"— not in INR/10g range [₹30,000–₹500,000]"
+            )
+            return
         content = json.loads(plan.model_dump_json())
         # Strip large fields that aren't needed for plan persistence/display
-        # and bloat the Gist payload.
+        # and bloat the S3 payload.
         agent_reports = content.get("agent_reports") or {}
         # Remove hourly SHAP drivers (large per-hour breakdown; feature_importance kept)
         ml_report = agent_reports.get("_ml_ensemble") or {}
@@ -130,7 +138,14 @@ class PredictionEngine:
             try:
                 data = json.loads(self._cache_path.read_text(encoding="utf-8"))
                 plan = PredictionPlan(**data)
-                if not np.isfinite(plan.current_price) or plan.current_price <= 0:
+
+                # Reject blacklisted plans (known corrupted data)
+                from .accuracy_tracker import _is_blacklisted_plan
+                if _is_blacklisted_plan(plan.generated_at):
+                    logger.warning(
+                        f"Cached plan {plan.generated_at} is blacklisted (corrupted); discarding"
+                    )
+                elif not np.isfinite(plan.current_price) or plan.current_price <= 0:
                     logger.warning("Ignoring cached prediction plan with invalid current_price")
                 elif plan.current_price < 30_000:
                     # Price is clearly not in INR/10g scale (likely stale USD-era cache)

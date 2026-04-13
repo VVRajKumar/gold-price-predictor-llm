@@ -164,8 +164,8 @@ class AccuracyTracker:
                 if predicted >= _INR_FLOOR:
                     # Valid INR prediction — remember it
                     last_valid_price = predicted
-                    last_valid_low = dp.get("low_range", predicted)
-                    last_valid_high = dp.get("high_range", predicted)
+                    last_valid_low = dp.get("low_range") or predicted
+                    last_valid_high = dp.get("high_range") or predicted
                 elif last_valid_price is not None:
                     # USD-scale prediction: carry forward last valid INR price
                     dp["predicted_price"] = last_valid_price

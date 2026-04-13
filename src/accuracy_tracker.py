@@ -81,6 +81,7 @@ class AccuracyTracker:
         self._last_checked: Optional[str] = None
         self._auto_running = False
         self._purge_stale_entries()
+        self._fix_usd_leaked_predictions()
         # Backfill archive BEFORE rebase so that data from the accuracy log
         # (e.g. April 4-6 evaluations) is copied to the permanent archive
         # before _rebase_guardrails() clears the log for re-evaluation.
@@ -114,6 +115,103 @@ class AccuracyTracker:
             if d.get("predicted", 0) < 30000:
                 return False
         return True
+
+    # ── Fix USD-leaked predictions in stored plans ─────────────────────
+
+    _USD_FIX_VERSION = "v1_fix_usd_apr13"
+
+    def _fix_usd_leaked_predictions(self):
+        """One-time fix: replace USD-scale predictions in stored plans
+        with carried-forward INR values.
+
+        Some plans from April 12-13 2026 had hourly predictions where the
+        USD→INR conversion failed for later hours, leaving predicted_price
+        at ~$3,878 instead of ~₹142,000.  This fix carries forward the
+        last valid INR prediction within each plan and removes corrupted
+        entries from the prediction archive.
+        """
+        marker_path = CACHE_DIR / "usd_prediction_fix.marker"
+        try:
+            if (marker_path.exists()
+                    and marker_path.read_text(encoding="utf-8").strip()
+                    == self._USD_FIX_VERSION):
+                return  # already applied
+        except Exception:
+            pass
+
+        _INR_FLOOR = 30_000  # anything below this is clearly USD, not INR/10g
+
+        fixed_plans = 0
+        fixed_hours = 0
+
+        for plan in self._stored_plans:
+            preds = plan.get("daily_predictions", [])
+            if not preds:
+                continue
+
+            last_valid_price = None
+            last_valid_low = None
+            last_valid_high = None
+            plan_modified = False
+
+            for dp in preds:
+                predicted = dp.get("predicted_price", 0)
+                try:
+                    predicted = float(predicted)
+                except (TypeError, ValueError):
+                    predicted = 0
+
+                if predicted >= _INR_FLOOR:
+                    # Valid INR prediction — remember it
+                    last_valid_price = predicted
+                    last_valid_low = dp.get("low_range", predicted)
+                    last_valid_high = dp.get("high_range", predicted)
+                elif last_valid_price is not None:
+                    # USD-scale prediction: carry forward last valid INR price
+                    dp["predicted_price"] = last_valid_price
+                    dp["low_range"] = round(last_valid_low, 2)
+                    dp["high_range"] = round(last_valid_high, 2)
+                    fixed_hours += 1
+                    plan_modified = True
+
+            # Fix current_price if it's in USD scale
+            cp = plan.get("current_price", 0)
+            if 0 < cp < _INR_FLOOR and last_valid_price is not None:
+                plan["current_price"] = last_valid_price
+                plan_modified = True
+
+            if plan_modified:
+                fixed_plans += 1
+
+        if fixed_plans:
+            self._save_stored_plans()
+
+        # Remove corrupted archive entries (USD-scale predicted prices)
+        archive_before = len(self._archive)
+        self._archive = [
+            e for e in self._archive
+            if not (0 < e.get("predicted", 0) < _INR_FLOOR)
+        ]
+        archive_removed = archive_before - len(self._archive)
+        if archive_removed:
+            self._save_archive()
+
+        # Clear accuracy log so plans get re-evaluated with fixed predictions
+        if fixed_plans:
+            self._log = []
+            self._save_log()
+
+        try:
+            marker_path.write_text(self._USD_FIX_VERSION, encoding="utf-8")
+        except Exception:
+            pass
+
+        if fixed_plans or archive_removed:
+            logger.info(
+                f"USD prediction fix ({self._USD_FIX_VERSION}): fixed "
+                f"{fixed_hours} hours in {fixed_plans} plans, removed "
+                f"{archive_removed} archive entries, cleared accuracy log"
+            )
 
     # ── Retroactive guardrail rebase ─────────────────────────────────
 

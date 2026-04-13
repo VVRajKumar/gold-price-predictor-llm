@@ -239,11 +239,17 @@ def _is_ephemeral_env() -> bool:
 # ── Public API ──────────────────────────────────────────────────────
 
 def sync_from_cloud():
-    """Pull tracked files from cloud → local cache (runs once on startup).
+    """Pull tracked files from cloud → local cache on startup.
 
     Tries AWS S3 first; if S3 is unavailable or returns nothing for a file,
-    falls back to GitHub Gist.  Only restores files that don't already exist
-    locally.  Skips entirely if synced within the TTL window.
+    falls back to GitHub Gist.
+
+    On ephemeral environments (Streamlit Cloud) **always overwrites** local
+    files with the cloud version so that manual S3 edits are reflected
+    immediately on the next cold start.  On local dev, only restores files
+    that don't already exist.
+
+    Skips entirely if synced within the TTL window.
     """
     global _last_sync_time
     if not is_available():
@@ -254,6 +260,8 @@ def sync_from_cloud():
     if now - _last_sync_time < _SYNC_TTL_SECONDS:
         logger.debug("[cloud_storage] Sync skipped – within TTL window")
         return
+
+    ephemeral = _is_ephemeral_env()
 
     # Pull from available backends
     s3_remote: dict[str, str] = {}
@@ -274,7 +282,10 @@ def sync_from_cloud():
     restored = 0
     for filename in _TRACKED_FILES:
         local_path = CACHE_DIR / filename
-        if local_path.exists():
+
+        # On ephemeral envs, always overwrite local with cloud data so
+        # manual S3 edits are picked up on every cold start.
+        if local_path.exists() and not ephemeral:
             logger.debug(f"[cloud_storage] {filename} exists locally – skipping")
             continue
 
@@ -283,12 +294,13 @@ def sync_from_cloud():
         if content:
             local_path.write_text(content, encoding="utf-8")
             restored += 1
-            logger.info(f"[cloud_storage] Restored {filename} from cloud ({len(content)} bytes)")
-        else:
+            action = "Refreshed" if ephemeral else "Restored"
+            logger.info(f"[cloud_storage] {action} {filename} from cloud ({len(content)} bytes)")
+        elif not local_path.exists():
             logger.warning(f"[cloud_storage] {filename} not found in any cloud backend")
 
     if restored:
-        logger.info(f"[cloud_storage] Restored {restored} file(s) from cloud")
+        logger.info(f"[cloud_storage] {restored} file(s) synced from cloud")
 
 
 def persist(filename: str, data: Any):

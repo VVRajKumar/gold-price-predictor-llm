@@ -621,7 +621,7 @@ if plan is None:
 # ── Top Metrics Row ──────────────────────────────────────────────────
 import math as _math
 _live_fx = market.get_usdinr_rate()
-_valid_price = _math.isfinite(plan.current_price) and plan.current_price > 0
+_valid_price = _math.isfinite(plan.current_price) and plan.current_price >= 30_000
 _is_weekend = not is_market_open()
 c1, c2, c3, c4, c5, c6 = st.columns(6)
 with c1:
@@ -1397,6 +1397,13 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
             acc_df = acc_df.sort_values(["date", "pct_error"])
             acc_df = acc_df.drop_duplicates(subset="date", keep="first")
         acc_df = acc_df.sort_values("date")
+
+        # ── Filter out corrupted predictions (USD-scale leak) ────
+        # Reject rows where predicted or actual is below ₹30,000 (clearly
+        # not INR/10g scale) to prevent corrupted data from ruining charts.
+        for _price_col in ("predicted", "actual"):
+            if _price_col in acc_df.columns:
+                acc_df = acc_df[acc_df[_price_col] >= 30_000].copy()
 
         # ── Limit chart to last 72 hours ─────────────────────────
         _cutoff_72h = pd.Timestamp(now_ist().replace(tzinfo=None)) - pd.Timedelta(hours=72)

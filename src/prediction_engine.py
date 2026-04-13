@@ -111,6 +111,14 @@ class PredictionEngine:
         )
 
     def _save_plan(self, plan: PredictionPlan):
+        # Reject corrupted plans before persisting to S3
+        from .guardrails import is_valid_inr_price
+        if not is_valid_inr_price(plan.current_price):
+            logger.warning(
+                f"Refusing to save plan with invalid current_price ₹{plan.current_price!r} "
+                f"— not in INR/10g range [₹30,000–₹500,000]"
+            )
+            return
         content = json.loads(plan.model_dump_json())
         # Strip large fields that aren't needed for plan persistence/display
         # and bloat the S3 payload.

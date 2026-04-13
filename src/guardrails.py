@@ -52,6 +52,21 @@ _CONFIDENCE_PENALTY = 0.15          # how much to penalise
 _BIAS_NEAR_ZERO = 0.05
 
 
+# ── Price Validation ────────────────────────────────────────────────
+
+def is_valid_inr_price(price: object) -> bool:
+    """Return True if *price* is a finite number in a plausible INR/10g range.
+
+    Valid range: ₹30,000–₹500,000 per 10g.  Rejects NaN, None, non-numeric,
+    and values in USD-scale (e.g. ₹3,878) or absurdly high outliers.
+    """
+    if not isinstance(price, (int, float)):
+        return False
+    if not math.isfinite(price):
+        return False
+    return _MIN_INR_PRICE <= price <= _MAX_INR_PRICE
+
+
 # ── Agent Report Guardrails ─────────────────────────────────────────
 
 def validate_agent_report(report_dict: dict[str, Any], agent_name: str) -> dict[str, Any]:
@@ -149,6 +164,7 @@ def validate_prediction_plan(
     """Validate the meta-LLM JSON response and correct illogical predictions.
 
     Enforces:
+      - current_price is in valid INR/10g range [30K, 500K]
       - overall_outlook is valid
       - overall_confidence clamped & penalised if overconfident
       - every daily_prediction has valid price / range / confidence
@@ -156,7 +172,16 @@ def validate_prediction_plan(
       - sequential hour-to-hour moves don't exceed max threshold
       - low ≤ predicted ≤ high
       - band widths within reasonable limits
+
+    Raises ValueError if current_price is outside plausible INR range.
     """
+    # ── Reject invalid anchor price early ──
+    if not is_valid_inr_price(current_price):
+        raise ValueError(
+            f"validate_prediction_plan: current_price ₹{current_price!r} is outside "
+            f"valid INR/10g range [₹{_MIN_INR_PRICE:,.0f}–₹{_MAX_INR_PRICE:,.0f}]"
+        )
+
     corrections: list[str] = []
 
     # ── Overall fields ──
@@ -327,6 +352,12 @@ def validate_xgb_predictions(
     current_price_inr: float,
 ) -> list[dict]:
     """Sanity-check XGBoost predictions before blending with LLM forecast."""
+    if not is_valid_inr_price(current_price_inr):
+        logger.warning(
+            f"validate_xgb_predictions: current_price_inr ₹{current_price_inr!r} "
+            f"outside valid INR range — returning empty predictions"
+        )
+        return []
     validated: list[dict] = []
     prev = current_price_inr
 

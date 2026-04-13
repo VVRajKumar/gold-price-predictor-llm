@@ -344,14 +344,13 @@ class Orchestrator:
 
         # Validate that we have a sane INR/10g gold price after all attempts.
         # Typical range ~₹50,000–₹250,000 per 10g as of 2024-2026.
-        if (
-            not isinstance(current_price, (int, float))
-            or not math.isfinite(current_price)
-            or current_price <= 0
-        ):
+        # Use the guardrail bounds (₹30K–₹500K) to catch USD-scale leaks.
+        from .guardrails import is_valid_inr_price
+        if not is_valid_inr_price(current_price):
             raise ValueError(
-                f"Cannot obtain a valid gold price (got {current_price!r}). "
-                "Both MCX and COMEX fallback failed."
+                f"Cannot obtain a valid gold price (got ₹{current_price!r}). "
+                f"Value is outside the plausible INR/10g range [₹30,000–₹500,000]. "
+                "Both MCX and COMEX fallback may have returned USD-scale data."
             )
 
         logger.info(f"Current Indian gold price: \u20b9{current_price:,.2f} per 10g")

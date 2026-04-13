@@ -148,9 +148,13 @@ class AccuracyTracker:
                 return False
         except (ValueError, TypeError):
             return False
+        # Reject entries with USD-scale current_price (anchor price was wrong)
+        cp = entry.get("current_price_at_prediction", 0)
+        if isinstance(cp, (int, float)) and 0 < cp < 30_000:
+            return False
         # Also reject entries with USD-scale predictions
         for d in entry.get("daily_results", []):
-            if d.get("predicted", 0) < 30000:
+            if d.get("predicted", 0) < 30_000:
                 return False
         return True
 
@@ -381,6 +385,12 @@ class AccuracyTracker:
         # Skip blacklisted plans (known corrupted data)
         if _is_blacklisted_plan(gen_at):
             logger.info(f"Skipping blacklisted plan {gen_at}")
+            return
+        # Reject plans with invalid current_price (e.g. USD-scale leak)
+        from .guardrails import is_valid_inr_price
+        cp = plan_dict.get("current_price", 0)
+        if not is_valid_inr_price(cp):
+            logger.warning(f"Skipping plan {gen_at}: current_price ₹{cp!r} outside INR range")
             return
         # Skip plans generated before the hourly scorecard cutoff
         try:

@@ -70,7 +70,7 @@ def _is_before_data_cutoff(date_str: str) -> bool:
 
 # Directional neutral zone: if actual moved less than this %, the market
 # is considered flat and the prediction is counted as directionally correct.
-# 0.15% ≈ ₹213 at ₹142k — absorbs bid/ask spread, data-source rounding,
+# 0.15% ≈ ₹213 at ₹142k — absorbs bid/ask spread, data source rounding,
 # and micro-noise that is impossible for any model to predict directionally.
 _DIR_NEUTRAL_PCT = 0.15
 

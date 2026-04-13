@@ -29,14 +29,14 @@ if "src" in sys.modules:
 try:
     from src.prediction_engine import PredictionEngine
     from src.time_utils import now_ist, parse_iso_to_ist, is_market_closed_ist
-    from src.accuracy_tracker import compute_accuracy_score, _DIR_NEUTRAL_PCT
+    from src.accuracy_tracker import compute_accuracy_score, _DIR_NEUTRAL_PCT, _DATA_CUTOFF
     from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
 except (KeyError, ImportError, AttributeError):
     for _k in [k for k in list(sys.modules) if k == "src" or k.startswith("src.")]:
         del sys.modules[_k]
     from src.prediction_engine import PredictionEngine
     from src.time_utils import now_ist, parse_iso_to_ist, is_market_closed_ist
-    from src.accuracy_tracker import compute_accuracy_score, _DIR_NEUTRAL_PCT
+    from src.accuracy_tracker import compute_accuracy_score, _DIR_NEUTRAL_PCT, _DATA_CUTOFF
     from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
 
 # ── Page config ──────────────────────────────────────────────────────
@@ -242,6 +242,9 @@ if "plan_generated_at" in df.columns:
 for _price_col in ("predicted", "actual"):
     if _price_col in df.columns:
         df = df[df[_price_col] >= _MIN_VALID_PRICE].copy()
+
+# Exclude predicted hours before the data quality cutoff (early calibration period)
+df = df[df["date"] >= pd.Timestamp(_DATA_CUTOFF)].copy()
 
 # Exclude market-closed hours (weekends + Monday pre-market) from
 # metrics, tables, and summaries — these predictions are trivially

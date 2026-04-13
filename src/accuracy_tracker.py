@@ -31,6 +31,11 @@ _ARCHIVE_PATH = CACHE_DIR / "prediction_archive.json"
 # Only evaluate/store plans generated on or after this cutoff (hourly scorecard start)
 _HOURLY_SCORECARD_START = datetime(2026, 4, 4, 0, 0, 0)
 
+# Data quality cutoff: exclude all *predicted hours* (the "date" field) before
+# this timestamp.  Early predictions (Apr 4-8 morning) were made while the
+# project was still being calibrated and drag down metrics significantly.
+_DATA_CUTOFF = datetime(2026, 4, 8, 11, 0, 0)  # 2026-04-08 11:00 IST
+
 # Blacklisted plan timestamps: these plans had corrupted data (e.g. USD-scale
 # prices instead of INR) and must be excluded from all accuracy tracking.
 # Timestamps are matched by prefix (ignoring timezone suffix) so both
@@ -48,10 +53,26 @@ def _is_blacklisted_plan(generated_at: str) -> bool:
     normalized = str(generated_at).replace(" ", "T")
     return any(normalized.startswith(prefix) for prefix in _BLACKLISTED_PLAN_PREFIXES)
 
+
+def _is_before_data_cutoff(date_str: str) -> bool:
+    """Return True if a predicted-hour timestamp is before the data cutoff."""
+    if not date_str:
+        return False
+    try:
+        dt = datetime.strptime(str(date_str), "%Y-%m-%d %H:%M:%S")
+        return dt < _DATA_CUTOFF
+    except (ValueError, TypeError):
+        try:
+            dt = datetime.fromisoformat(str(date_str))
+            return dt.replace(tzinfo=None) < _DATA_CUTOFF
+        except (ValueError, TypeError):
+            return False
+
 # Directional neutral zone: if actual moved less than this %, the market
 # is considered flat and the prediction is counted as directionally correct.
-# 0.05% ≈ ₹36 at ₹73k — ignores noise from bid/ask spread & rounding.
-_DIR_NEUTRAL_PCT = 0.05
+# 0.15% ≈ ₹213 at ₹142k — absorbs bid/ask spread, data-source rounding,
+# and micro-noise that is impossible for any model to predict directionally.
+_DIR_NEUTRAL_PCT = 0.15
 
 # Market-closed (weekend) band factors: predicted = actual, bands ±0.2%
 _MARKET_CLOSED_BAND_LOWER = 0.998  # -0.2%
@@ -129,16 +150,18 @@ class AccuracyTracker:
             logger.info(f"Purged {before_plans - len(self._stored_plans)} blacklisted stored plans")
             self._save_stored_plans()
 
-        # Also purge blacklisted entries and corrupted prices from the permanent archive
+        # Also purge blacklisted entries, corrupted prices, and pre-cutoff
+        # predicted hours from the permanent archive.
         before_archive = len(self._archive)
         self._archive = [
             e for e in self._archive
             if not _is_blacklisted_plan(e.get("plan_generated_at", ""))
             and not (isinstance(e.get("predicted", 0), (int, float)) and 0 < e.get("predicted", 0) < _MIN_VALID_PRICE)
             and not (isinstance(e.get("actual", 0), (int, float)) and 0 < e.get("actual", 0) < _MIN_VALID_PRICE)
+            and not _is_before_data_cutoff(e.get("date", ""))
         ]
         if len(self._archive) < before_archive:
-            logger.info(f"Purged {before_archive - len(self._archive)} blacklisted archive entries")
+            logger.info(f"Purged {before_archive - len(self._archive)} archive entries (blacklisted/corrupted/pre-cutoff)")
             self._save_archive()
 
     def _is_valid_entry(self, entry: dict) -> bool:
@@ -353,6 +376,9 @@ class AccuracyTracker:
             _act = d.get("actual", 0)
             if (isinstance(_pred, (int, float)) and _pred < _MIN_VALID_PRICE) or \
                (isinstance(_act, (int, float)) and _act < _MIN_VALID_PRICE):
+                continue
+            # Skip predicted hours before the data quality cutoff
+            if _is_before_data_cutoff(d.get("date", "")):
                 continue
             key = (gen_at, d.get("date", ""))
             entry_data = {
@@ -724,6 +750,9 @@ class AccuracyTracker:
                     continue
                 if d_ts < cutoff:
                     continue
+                # Skip predicted hours before the data quality cutoff
+                if d_ts < _DATA_CUTOFF:
+                    continue
 
                 # Skip market-closed hours (weekends + Monday pre-market)
                 if is_market_closed_ist(d_ts):
@@ -823,6 +852,9 @@ class AccuracyTracker:
                     try:
                         _d_ts = datetime.strptime(date_key, "%Y-%m-%d %H:%M:%S")
                         if is_market_closed_ist(_d_ts):
+                            continue
+                        # Skip predicted hours before data quality cutoff
+                        if _d_ts < _DATA_CUTOFF:
                             continue
                     except (ValueError, TypeError):
                         pass

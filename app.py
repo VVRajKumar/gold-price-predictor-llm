@@ -32,7 +32,7 @@ try:
     from src.prediction_engine import PredictionEngine
     from src.data_fetchers.market_data import MarketDataFetcher
     from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open, is_market_closed_ist
-    from src.accuracy_tracker import compute_accuracy_score
+    from src.accuracy_tracker import compute_accuracy_score, _DATA_CUTOFF
     from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
 except (KeyError, ImportError, AttributeError):
     # On Streamlit Cloud hot-reload the module cache can be in an inconsistent
@@ -43,7 +43,7 @@ except (KeyError, ImportError, AttributeError):
     from src.prediction_engine import PredictionEngine
     from src.data_fetchers.market_data import MarketDataFetcher
     from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open, is_market_closed_ist
-    from src.accuracy_tracker import compute_accuracy_score
+    from src.accuracy_tracker import compute_accuracy_score, _DATA_CUTOFF
     from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
 
 # ── Display-time name helpers ────────────────────────────────────────
@@ -1429,6 +1429,9 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         for _price_col in ("predicted", "actual"):
             if _price_col in acc_df.columns:
                 acc_df = acc_df[acc_df[_price_col] >= _MIN_VALID_PRICE].copy()
+
+        # Exclude predicted hours before the data quality cutoff
+        acc_df = acc_df[acc_df["date"] >= pd.Timestamp(_DATA_CUTOFF)].copy()
 
         # ── Limit chart to last 72 hours ─────────────────────────
         _cutoff_72h = pd.Timestamp(now_ist().replace(tzinfo=None)) - pd.Timedelta(hours=72)

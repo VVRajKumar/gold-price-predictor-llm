@@ -64,7 +64,7 @@ class ResidualLearner:
             "sample_count": self._sample_count,
         }
         try:
-            # Sync to cloud (Gist) so corrections survive Cloud restarts.
+            # Sync to cloud (S3) so corrections survive Cloud restarts.
             # Pass the dict (not a JSON string) to persist() to avoid
             # double-serialization — persist() calls json.dumps() internally.
             from . import cloud_storage

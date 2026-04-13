@@ -113,7 +113,7 @@ class PredictionEngine:
     def _save_plan(self, plan: PredictionPlan):
         content = json.loads(plan.model_dump_json())
         # Strip large fields that aren't needed for plan persistence/display
-        # and bloat the Gist payload.
+        # and bloat the S3 payload.
         agent_reports = content.get("agent_reports") or {}
         # Remove hourly SHAP drivers (large per-hour breakdown; feature_importance kept)
         ml_report = agent_reports.get("_ml_ensemble") or {}

@@ -829,7 +829,7 @@ class AccuracyTracker:
         Returns the number of plans that had new evaluable days.
         """
         # On Cloud, local cache may have been wiped while the cached object
-        # is still alive.  Re-load from disk/Gist if in-memory state is empty.
+        # is still alive.  Re-load from disk/S3 if in-memory state is empty.
         if not self._stored_plans:
             self._stored_plans = self._load_stored_plans()
         if not self._log:

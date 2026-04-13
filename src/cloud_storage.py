@@ -1,23 +1,15 @@
 """
-Cloud persistence layer – AWS S3 (primary) with GitHub Gist fallback.
+Cloud persistence layer – AWS S3.
 
 On Streamlit Cloud the filesystem is ephemeral: every deploy / sleep wipes
 `data/cache/`.  This module syncs critical JSON files (stored_plans, accuracy_log,
-prediction_archive) to a cloud backend so they survive across restarts.
-
-**Priority order:**
-  1. AWS S3  – preferred (no file-size limit).  Uses boto3's default credential
-     chain (IAM role, instance profile, ~/.aws/credentials) — no explicit
-     access keys needed.  Only ``AWS_S3_BUCKET_NAME`` (and optionally
-     ``AWS_S3_REGION`` / ``AWS_S3_PREFIX``) are read from Streamlit secrets.
-  2. GitHub Gist – fallback when S3 is unavailable or fails.
+prediction_archive) to AWS S3 so they survive across restarts.
 
 Setup:
-  • S3:  Add AWS_S3_BUCKET_NAME (and optionally AWS_S3_REGION, AWS_S3_PREFIX)
-         to Streamlit secrets.  Credentials come from IAM / default chain.
-  • Gist: Add GITHUB_GIST_TOKEN, GITHUB_GIST_ID to Streamlit secrets (or .env).
+  • Add AWS_S3_BUCKET_NAME (and optionally AWS_S3_REGION, AWS_S3_PREFIX)
+    to Streamlit secrets.  Credentials come from IAM / default chain.
 
-When neither backend is configured the module silently becomes a no-op,
+When S3 is not configured the module silently becomes a no-op,
 so local development is unaffected.
 """
 
@@ -30,7 +22,6 @@ import threading
 import time
 from typing import Any, Optional
 
-import requests
 from loguru import logger
 
 try:
@@ -153,73 +144,7 @@ def _s3_load_file(filename: str) -> Optional[str]:
         return None
 
 
-# ── GitHub Gist backend (fallback) ─────────────────────────────────
-
-_GIST_API_BASE = "https://api.github.com/gists"
-_GIST_TIMEOUT = 15
-_gist_token: Optional[str] = None
-_gist_id: Optional[str] = None
-
-
-def _init_gist():
-    global _gist_token, _gist_id
-    if _gist_token is None:
-        _gist_token = _get_secret("GITHUB_GIST_TOKEN")
-        _gist_id = _get_secret("GITHUB_GIST_ID")
-
-
-def _gist_available() -> bool:
-    _init_gist()
-    return bool(_gist_token and _gist_id)
-
-
-def _gist_headers() -> dict:
-    return {
-        "Authorization": f"Bearer {_gist_token}",
-        "Accept": "application/vnd.github+json",
-    }
-
-
-def _gist_pull_all() -> dict[str, str]:
-    """Download all file contents from the Gist."""
-    try:
-        resp = requests.get(
-            f"{_GIST_API_BASE}/{_gist_id}",
-            headers=_gist_headers(),
-            timeout=_GIST_TIMEOUT,
-        )
-        resp.raise_for_status()
-        files = resp.json().get("files", {})
-        return {name: info.get("content", "") for name, info in files.items()}
-    except Exception as e:
-        logger.warning(f"[cloud_storage] Gist pull failed: {e}")
-        return {}
-
-
-def _gist_push_file(filename: str, content: str) -> bool:
-    """Update a single file in the Gist.  Returns True on success."""
-    try:
-        resp = requests.patch(
-            f"{_GIST_API_BASE}/{_gist_id}",
-            headers=_gist_headers(),
-            json={"files": {filename: {"content": content}}},
-            timeout=_GIST_TIMEOUT,
-        )
-        resp.raise_for_status()
-        logger.info(f"[cloud_storage] Pushed {filename} to Gist ({len(content)} bytes)")
-        return True
-    except Exception as e:
-        logger.warning(f"[cloud_storage] Gist push failed for {filename}: {e}")
-        return False
-
-
-def _gist_load_file(filename: str) -> Optional[str]:
-    """Download a single file from the Gist."""
-    remote = _gist_pull_all()
-    return remote.get(filename) or None
-
-
-# ── Unified backend selection ──────────────────────────────────────
+# ── State ──────────────────────────────────────────────────────────
 
 _lock = threading.Lock()
 _last_sync_time: float = 0.0
@@ -227,8 +152,8 @@ _file_content_hashes: dict[str, str] = {}
 
 
 def is_available() -> bool:
-    """Return True when at least one cloud backend is configured."""
-    return _s3_available() or _gist_available()
+    """Return True when S3 is configured."""
+    return _s3_available()
 
 
 def _is_ephemeral_env() -> bool:
@@ -239,21 +164,18 @@ def _is_ephemeral_env() -> bool:
 # ── Public API ──────────────────────────────────────────────────────
 
 def sync_from_cloud():
-    """Pull tracked files from cloud → local cache on startup.
-
-    Tries AWS S3 first; if S3 is unavailable or returns nothing for a file,
-    falls back to GitHub Gist.
+    """Pull tracked files from S3 → local cache on startup.
 
     On ephemeral environments (Streamlit Cloud) **always overwrites** local
-    files with the cloud version so that manual S3 edits are reflected
+    files with the S3 version so that manual S3 edits are reflected
     immediately on the next cold start.  On local dev, only restores files
-    that don't already exist.
+    that don't already exist locally.
 
     Skips entirely if synced within the TTL window.
     """
     global _last_sync_time
     if not is_available():
-        logger.debug("[cloud_storage] No cloud backend configured – skipping sync")
+        logger.debug("[cloud_storage] S3 not configured – skipping sync")
         return
 
     now = time.monotonic()
@@ -263,50 +185,35 @@ def sync_from_cloud():
 
     ephemeral = _is_ephemeral_env()
 
-    # Pull from available backends
-    s3_remote: dict[str, str] = {}
-    gist_remote: dict[str, str] = {}
-
-    if _s3_available():
-        s3_remote = _s3_pull_all()
-
-    # Only pull Gist if S3 didn't cover all files
-    need_gist = any(
-        (not (CACHE_DIR / f).exists()) and f not in s3_remote
-        for f in _TRACKED_FILES
-    )
-    if need_gist and _gist_available():
-        gist_remote = _gist_pull_all()
+    s3_remote = _s3_pull_all()
 
     _last_sync_time = time.monotonic()
     restored = 0
     for filename in _TRACKED_FILES:
         local_path = CACHE_DIR / filename
 
-        # On ephemeral envs, always overwrite local with cloud data so
+        # On ephemeral envs, always overwrite local with S3 data so
         # manual S3 edits are picked up on every cold start.
         if local_path.exists() and not ephemeral:
             logger.debug(f"[cloud_storage] {filename} exists locally – skipping")
             continue
 
-        # Prefer S3 content, fall back to Gist
-        content = s3_remote.get(filename) or gist_remote.get(filename)
+        content = s3_remote.get(filename)
         if content:
             local_path.write_text(content, encoding="utf-8")
             restored += 1
             action = "Refreshed" if ephemeral else "Restored"
-            logger.info(f"[cloud_storage] {action} {filename} from cloud ({len(content)} bytes)")
+            logger.info(f"[cloud_storage] {action} {filename} from S3 ({len(content)} bytes)")
         elif not local_path.exists():
-            logger.warning(f"[cloud_storage] {filename} not found in any cloud backend")
+            logger.warning(f"[cloud_storage] {filename} not found in S3")
 
     if restored:
-        logger.info(f"[cloud_storage] {restored} file(s) synced from cloud")
+        logger.info(f"[cloud_storage] {restored} file(s) synced from S3")
 
 
 def persist(filename: str, data: Any):
-    """Write JSON to local file **and** push to the best available cloud backend.
+    """Write JSON to local file **and** push to S3.
 
-    Tries AWS S3 first; falls back to GitHub Gist on failure.
     On ephemeral environments the push is synchronous; locally it's threaded.
     Hash-based dedup avoids redundant pushes.
     """
@@ -320,19 +227,12 @@ def persist(filename: str, data: Any):
     # Hash-based dedup
     content_hash = hashlib.sha256(content.encode()).hexdigest()
     if _file_content_hashes.get(filename) == content_hash:
-        logger.debug(f"[cloud_storage] {filename} unchanged – skipping cloud push")
+        logger.debug(f"[cloud_storage] {filename} unchanged – skipping S3 push")
         return
     _file_content_hashes[filename] = content_hash
 
     def _do_push():
-        pushed = False
-        if _s3_available():
-            pushed = _s3_push_file(filename, content)
-        # Always push to Gist too (when available) to keep it in sync.
-        # Previously Gist was only updated on S3 failure, which left stale
-        # data in the Gist that could be pulled on subsequent cold starts.
-        if _gist_available():
-            _gist_push_file(filename, content)
+        _s3_push_file(filename, content)
 
     if _is_ephemeral_env():
         _do_push()
@@ -345,7 +245,7 @@ def persist(filename: str, data: Any):
 
 
 def load(filename: str) -> Any:
-    """Load JSON from local file; if missing, try S3 then Gist."""
+    """Load JSON from local file; if missing, try S3."""
     local_path = CACHE_DIR / filename
     if local_path.exists():
         try:
@@ -356,15 +256,7 @@ def load(filename: str) -> Any:
     if not is_available():
         return None
 
-    content: Optional[str] = None
-
-    # Try S3 first
-    if _s3_available():
-        content = _s3_load_file(filename)
-
-    # Fall back to Gist
-    if not content and _gist_available():
-        content = _gist_load_file(filename)
+    content = _s3_load_file(filename)
 
     if content:
         local_path.write_text(content, encoding="utf-8")

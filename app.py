@@ -10,7 +10,6 @@ import re
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
-import numpy as np
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
@@ -49,45 +48,9 @@ except (KeyError, ImportError, AttributeError):
 
 # ── Chart gap-breaker helper ─────────────────────────────────────────
 # When plotting only market-open hours, Plotly draws a straight line from
-# Friday's last hour to Monday's first hour.  This helper inserts ``None``
-# values at those gaps so the line visually breaks across weekends.
-
-_MAX_CONTIGUOUS_GAP_HOURS = 6  # gaps wider than this get a break
-
-
-def _break_at_gaps(dates, *value_cols):
-    """Insert ``None`` gap-breakers when consecutive timestamps differ by
-    more than ``_MAX_CONTIGUOUS_GAP_HOURS``.
-
-    Parameters
-    ----------
-    dates : pd.Series or array-like of datetime
-        Sorted timestamps.
-    *value_cols : pd.Series or array-like
-        One or more value columns aligned with *dates*.
-
-    Returns
-    -------
-    tuple of lists: (x_out, y1_out, y2_out, …)
-    """
-    dates_list = list(dates)
-    val_lists = [list(v) for v in value_cols]
-    x_out: list = []
-    y_outs: list[list] = [[] for _ in val_lists]
-
-    for i in range(len(dates_list)):
-        if i > 0:
-            gap = (dates_list[i] - dates_list[i - 1]).total_seconds() / 3600
-            if gap > _MAX_CONTIGUOUS_GAP_HOURS:
-                x_out.append(None)
-                for y in y_outs:
-                    y.append(None)
-        x_out.append(dates_list[i])
-        for j, vl in enumerate(val_lists):
-            y_outs[j].append(vl[i])
-
-    return (x_out, *y_outs)
-
+# Friday's last hour to Monday's first hour.  break_at_gaps() inserts
+# ``None`` values at those gaps so the line visually breaks across weekends.
+from src.chart_utils import break_at_gaps as _break_at_gaps
 
 # ── Display-time name helpers ────────────────────────────────────────
 # Chart-friendly names (short labels for SHAP bar chart / table headers)

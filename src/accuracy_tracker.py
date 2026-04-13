@@ -106,7 +106,7 @@ def compute_accuracy_score(mape: float, band_hit: float, direction: float) -> fl
 # Bump this version string whenever guardrail parameters change.
 # Triggers a one-time rebase that retroactively widens bands on all stored
 # plans so accuracy metrics reflect the new parameters immediately.
-_GUARDRAIL_VERSION = "v5_ist_timezone_fix_20260411"
+_GUARDRAIL_VERSION = "v6_skip_invalid_prices_20260413"
 
 
 class AccuracyTracker:
@@ -140,14 +140,17 @@ class AccuracyTracker:
             logger.info(f"Purged {before_log - len(self._log)} stale accuracy log entries")
             self._save_log()
 
-        # Also purge blacklisted plans from stored plans
+        # Also purge blacklisted plans and plans with invalid anchor prices
+        # (e.g. USD-scale prices outside the valid INR/10g range) from stored plans.
+        from .guardrails import is_valid_inr_price
         before_plans = len(self._stored_plans)
         self._stored_plans = [
             p for p in self._stored_plans
             if not _is_blacklisted_plan(p.get("generated_at", ""))
+            and is_valid_inr_price(p.get("current_price", 0))
         ]
         if len(self._stored_plans) < before_plans:
-            logger.info(f"Purged {before_plans - len(self._stored_plans)} blacklisted stored plans")
+            logger.info(f"Purged {before_plans - len(self._stored_plans)} invalid/blacklisted stored plans")
             self._save_stored_plans()
 
         # Also purge blacklisted entries, corrupted prices, and pre-cutoff
@@ -213,17 +216,28 @@ class AccuracyTracker:
                 pass
             return
 
-        from .guardrails import validate_prediction_plan, _band_envelope_pct
+        from .guardrails import validate_prediction_plan, _band_envelope_pct, is_valid_inr_price
 
         bands_widened = 0
+        plans_skipped = 0
         for plan in self._stored_plans:
             current_price = plan.get("current_price", 0)
             preds = plan.get("daily_predictions", [])
             if not preds or current_price <= 0:
                 continue
 
+            # Skip plans with invalid prices (e.g. USD-scale leaked data)
+            if not is_valid_inr_price(current_price):
+                plans_skipped += 1
+                continue
+
             # Step 1: standard guardrails (enforces new min-band 1%, wider caps)
-            validate_prediction_plan(plan, current_price, len(preds))
+            try:
+                validate_prediction_plan(plan, current_price, len(preds))
+            except (ValueError, TypeError, KeyError) as exc:
+                logger.warning(f"Rebase: skipping plan (current_price={current_price}): {exc}")
+                plans_skipped += 1
+                continue
 
             # Step 2: horizon-aware band widening using the new envelope.
             # _band_envelope_pct(h) returns the max-allowed band half-width
@@ -260,7 +274,8 @@ class AccuracyTracker:
 
         logger.info(
             f"Guardrail rebase ({_GUARDRAIL_VERSION}): widened {bands_widened} "
-            f"prediction bands across {len(self._stored_plans)} plans, "
+            f"prediction bands across {len(self._stored_plans)} plans "
+            f"(skipped {plans_skipped} invalid), "
             f"cleared accuracy log for re-evaluation"
         )
 

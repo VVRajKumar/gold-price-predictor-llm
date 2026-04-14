@@ -95,7 +95,7 @@ def validate_agent_report(report_dict: dict[str, Any], agent_name: str) -> dict[
     confidence = _clamp(confidence, 0.0, 1.0)
     original_conf = confidence
     if confidence > _OVERCONFIDENCE_THRESHOLD:
-        confidence = confidence - _CONFIDENCE_PENALTY
+        confidence = max(0.0, confidence - _CONFIDENCE_PENALTY)
         corrections.append(
             f"confidence {original_conf:.2f} → {confidence:.2f} (overconfidence penalty)"
         )

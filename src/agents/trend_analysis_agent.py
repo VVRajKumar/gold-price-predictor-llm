@@ -47,9 +47,11 @@ Return ONLY valid JSON, no markdown fences."""
         if df.empty:
             df = self._market.fetch_ticker("GC=F", period_days=90)
             data_source = "COMEX (GC=F)"
-        elif float(pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna().iloc[-1]) < 10_000:
-            df = self._market.fetch_ticker("GC=F", period_days=90)
-            data_source = "COMEX (GC=F)"
+        else:
+            _close_check = pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna()
+            if _close_check.empty or float(_close_check.iloc[-1]) < 10_000:
+                df = self._market.fetch_ticker("GC=F", period_days=90)
+                data_source = "COMEX (GC=F)"
         correlations = self._market.get_correlation_snapshot(90)
 
         # Compute simple moving averages

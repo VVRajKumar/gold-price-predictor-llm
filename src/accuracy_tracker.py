@@ -616,7 +616,7 @@ class AccuracyTracker:
         # Sort by time, then compare consecutive hours to check if the
         # predicted direction matches the actual direction of movement.
         # This is consistent with the aggregate scorecard computation.
-        # Neutral zone: if actual moved < 0.05% either way, count it as
+        # Neutral zone: if actual moved < 0.15% either way, count it as
         # correct regardless of prediction (the market was essentially flat).
         sorted_results = sorted(evaluated_days, key=lambda d: d.get("date", ""))
         directional_correct = 0
@@ -806,13 +806,13 @@ class AccuracyTracker:
             return None
 
         errors = [abs(d.get("error", 0)) for d in all_days]
-        pct_errors = [d["pct_error"] for d in all_days]
-        band_hits = [d["within_band"] for d in all_days]
+        pct_errors = [d.get("pct_error", 0) for d in all_days]
+        band_hits = [d.get("within_band", False) for d in all_days]
 
         # Directional accuracy: hour-over-hour from the deduplicated series.
         # Sort by time, then for each consecutive pair check if the predicted
         # direction matches the actual direction of price movement.
-        # Neutral zone: if actual moved < 0.05%, count as correct (market flat).
+        # Neutral zone: if actual moved < 0.15%, count as correct (market flat).
         sorted_days = sorted(all_days, key=lambda d: d.get("date", ""))
         dir_correct = 0
         dir_total = 0

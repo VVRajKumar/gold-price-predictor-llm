@@ -124,7 +124,7 @@ def _ensure_full_stop(text: str) -> str:
     if cleaned.endswith("."):
         return cleaned
     if cleaned.endswith("!") or cleaned.endswith("?"):
-        return cleaned[:-1].rstrip() + "."
+        return cleaned
     return cleaned + "."
 
 
@@ -465,12 +465,18 @@ class Orchestrator:
         if daily:
             flatline_price = current_price  # use actual market closing price
             # Pre-parse all dates once to avoid redundant strptime calls
-            dp_dates = [
-                datetime.strptime(dp.date, "%Y-%m-%d %H:%M") for dp in daily
-            ]
+            dp_dates = []
+            for dp in daily:
+                try:
+                    dp_dates.append(datetime.strptime(dp.date, "%Y-%m-%d %H:%M"))
+                except (ValueError, TypeError):
+                    try:
+                        dp_dates.append(datetime.fromisoformat(dp.date))
+                    except (ValueError, TypeError):
+                        dp_dates.append(None)
             # Flatline all market-closed hours at the actual closing price
             for dp, dp_dt in zip(daily, dp_dates):
-                if is_market_closed_ist(dp_dt):
+                if dp_dt is not None and is_market_closed_ist(dp_dt):
                     dp.predicted_price = round(flatline_price, 2)
                     dp.low_range = round(flatline_price * 0.998, 2)
                     dp.high_range = round(flatline_price * 1.002, 2)

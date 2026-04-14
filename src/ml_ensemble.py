@@ -520,7 +520,7 @@ class MLEnsemble:
             # Validate predictions
             current_inr = self._market.get_gold_inr_price()
             if not (isinstance(current_inr, (int, float)) and np.isfinite(current_inr) and current_inr > 0):
-                current_inr = preds[0]["xgb_price"] if preds else 70000.0
+                current_inr = preds[0]["xgb_price"] if preds else 92000.0
             preds = validate_xgb_predictions(preds, current_inr)
 
             # Apply residual corrections from past errors

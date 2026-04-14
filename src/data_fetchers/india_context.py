@@ -12,7 +12,6 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-import requests
 from loguru import logger
 from cachetools import TTLCache
 
@@ -94,8 +93,17 @@ def _fetch_india_10y_yield() -> dict[str, Any]:
         # IN10Y=RR is the India 10-Year Government Bond yield on Yahoo Finance
         df = yf.download("IN10Y=RR", period="30d", progress=False)
         if df.empty:
-            # Fallback: try alternate India bond ticker
-            df = yf.download("^IRX", period="30d", progress=False)
+            # Fallback: try alternate India government bond ticker
+            # Note: ^IRX is the US 13-week T-bill, NOT an Indian bond.
+            # ^GSPC10YR is not available either; if IN10Y=RR fails we
+            # return a sensible default rather than wrong US data.
+            logger.warning("India 10Y bond ticker IN10Y=RR returned no data; using default yield")
+            _india_macro_cache[cache_key] = {
+                "current_yield_pct": 7.10,  # approximate India 10Y as of early 2026
+                "5d_change_bps": 0.0,
+                "trend": "stable",
+            }
+            return _india_macro_cache[cache_key]
 
         if not df.empty:
             if isinstance(df.columns, pd.MultiIndex):

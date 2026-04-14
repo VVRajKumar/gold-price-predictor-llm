@@ -395,15 +395,18 @@ class ResidualLearner:
                 signed_error = result.get("error", 0.0)
                 bias_correction = self._bias.get(delta_hours, 0.0)
 
-                # If the correction was in the opposite direction of the error,
-                # it helped (reduced the error).  If same direction, it hurt.
+                # Assess correction effectiveness:
+                # bias_correction is SUBTRACTED from price in correct_predictions().
+                # If bias > 0 and error > 0: correction reduced overshoot → helped.
+                # If bias > 0 and error < 0: correction over-corrected → hurt.
+                # Same-sign = correction was in right direction; opposite = over-corrected.
                 if bias_correction != 0 and signed_error != 0:
                     if (signed_error > 0 and bias_correction > 0) or \
                        (signed_error < 0 and bias_correction < 0):
-                        # Correction direction matches error → it helped
+                        # Correction was in the right direction (same sign as residual)
                         helped += 1
                     else:
-                        # Correction direction opposes error → it may have hurt
+                        # Correction flipped the sign of error (over-corrected)
                         hurt += 1
 
         total = helped + hurt

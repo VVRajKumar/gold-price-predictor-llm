@@ -50,6 +50,7 @@ _ROLL_WINDOWS = [6, 12, 24]
 _MIN_HISTORY = 25            # minimum samples for feature construction
 _TRAIN_PERIOD_DAYS = 90      # 3 months of hourly data (~2160 bars)
 _MIN_TRAIN_SAMPLES = 200     # hard floor after cleanup
+_DEFAULT_INR_PRICE = 92_000  # fallback gold price (INR/10g) when market data unavailable
 
 # ── Internal feature names (used for model training) ─────────────────
 # NOTE: Only 16 time-series features are used for training, because agent
@@ -520,7 +521,7 @@ class MLEnsemble:
             # Validate predictions
             current_inr = self._market.get_gold_inr_price()
             if not (isinstance(current_inr, (int, float)) and np.isfinite(current_inr) and current_inr > 0):
-                current_inr = preds[0]["xgb_price"] if preds else 92000.0
+                current_inr = preds[0]["xgb_price"] if preds else _DEFAULT_INR_PRICE
             preds = validate_xgb_predictions(preds, current_inr)
 
             # Apply residual corrections from past errors

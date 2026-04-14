@@ -12,6 +12,12 @@ from .base_agent import BaseAgent, AgentReport
 from ..data_fetchers.market_data import MarketDataFetcher
 
 
+# Fallback values when insufficient data produces NaN
+_BOLLINGER_FALLBACK_UPPER = 1.02   # +2% band
+_BOLLINGER_FALLBACK_LOWER = 0.98   # -2% band
+_BOLLINGER_FALLBACK_BW_PCT = 4.0   # bandwidth %
+
+
 def _compute_rsi(series: pd.Series, period: int = 14) -> float:
     delta = series.diff()
     gain = delta.where(delta > 0, 0.0).rolling(period).mean()
@@ -59,10 +65,10 @@ def _compute_bollinger(series: pd.Series, window: int = 20, num_std: float = 2.0
     # Guard against NaN from insufficient data
     if any(pd.isna(v) for v in (last_upper, last_sma, last_lower)):
         return {
-            "upper_band": current * 1.02,
+            "upper_band": current * _BOLLINGER_FALLBACK_UPPER,
             "middle_band": current,
-            "lower_band": current * 0.98,
-            "bandwidth_pct": 4.0,
+            "lower_band": current * _BOLLINGER_FALLBACK_LOWER,
+            "bandwidth_pct": _BOLLINGER_FALLBACK_BW_PCT,
             "position": "within_bands",
         }
     return {

@@ -33,7 +33,9 @@ def _summary_preview(text: str, max_chars: int = 500) -> str:
         return "No summary available."
 
     if len(cleaned) <= max_chars:
-        return cleaned if cleaned.endswith(".") else cleaned.rstrip("!?") + "."
+        if cleaned[-1] in ".!?":
+            return cleaned
+        return cleaned + "."
 
     snippet = cleaned[:max_chars].rstrip()
     cut = max(snippet.rfind(". "), snippet.rfind("! "), snippet.rfind("? "), snippet.rfind("\n"))
@@ -44,7 +46,9 @@ def _summary_preview(text: str, max_chars: int = 500) -> str:
         if word_cut > 0:
             snippet = snippet[:word_cut].rstrip()
 
-    return snippet if snippet.endswith(".") else snippet.rstrip("!?") + "."
+    if snippet[-1] in ".!?":
+        return snippet
+    return snippet + "."
 
 
 def main():

@@ -345,16 +345,68 @@ class PredictionEngine:
         """Start a background thread that regenerates predictions on 6-hour slot boundaries.
 
         Predictions are aligned to 00:00, 06:00, 12:00, 18:00 IST.
-        On weekends (Saturday/Sunday IST) the thread runs weekend analysis
-        every 6 hours so agents gather fresh news and the narrative stays
-        up-to-date with a Monday-reopening focus.  Full ML prediction
-        generation resumes automatically on Monday 09:00 IST.
+
+        Weekday behaviour:
+          - Full ML-first predictions are generated at each 6-hour slot.
+
+        Weekend behaviour (Saturday, Sunday, and Monday before 09:00 IST):
+          - No ML predictions are generated (MCX Gold is closed).
+          - All 8 agents still run every 6 hours to gather fresh worldwide
+            news, geopolitics, sentiment, ETF flows, etc.
+          - The LLM narrator summarises the weekend intelligence into a
+            Monday-reopening briefing (what to expect when market opens).
+          - Full ML prediction generation resumes automatically when the
+            market reopens (Monday 09:00 IST).
+
+        Startup behaviour:
+          - On first iteration the thread checks whether the cached plan
+            belongs to the current 6-hour slot.  If not, it immediately
+            generates a new prediction (weekday) or weekend analysis
+            (weekend) so users never see stale data after an app restart.
         """
         if self._running:
             return
         self._running = True
 
         def _loop():
+            # ── Startup check ────────────────────────────────────────
+            # After an app restart (e.g. Streamlit Cloud waking from
+            # sleep), the cached plan may be from a previous slot.
+            # Generate immediately if the plan is stale so users don't
+            # see outdated data while waiting for the next slot boundary.
+            try:
+                if is_market_open():
+                    # Weekday startup: use ensure_hourly_prediction() which
+                    # checks the slot and only generates if needed.
+                    plan = self.ensure_hourly_prediction()
+                    if plan:
+                        logger.info(
+                            f"Auto-refresh startup: weekday plan ready "
+                            f"(generated_at={plan.generated_at})"
+                        )
+                else:
+                    # Weekend startup: run agents for fresh news if we
+                    # haven't already produced a weekend analysis for this slot.
+                    current = self._current_plan
+                    needs_weekend_refresh = True
+                    if current is not None:
+                        try:
+                            gen_dt = datetime.fromisoformat(current.generated_at)
+                            needs_weekend_refresh = slot_id(gen_dt) != slot_id(now_ist())
+                        except Exception:
+                            pass
+                    if needs_weekend_refresh:
+                        logger.info("Auto-refresh startup: running weekend analysis")
+                        try:
+                            self.generate_weekend_analysis()
+                        except Exception as e:
+                            logger.warning(f"Startup weekend analysis failed: {e}")
+                    else:
+                        logger.info("Auto-refresh startup: weekend plan already current")
+            except Exception as e:
+                logger.warning(f"Auto-refresh startup check failed: {e}")
+
+            # ── Main slot-aligned loop ────────────────────────────────
             while self._running:
                 try:
                     now = now_ist()

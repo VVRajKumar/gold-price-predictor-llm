@@ -266,13 +266,14 @@ class MarketDataFetcher:
             if pd.notna(post_median) and post_median < 10_000:
                 logger.error(
                     f"FX conversion appears to have failed (post-median={post_median:.0f}),"
-                    f" forcing spot-rate conversion"
+                    f" forcing spot-rate conversion from raw USD data"
                 )
+                # Re-read raw USD values from the *original* DataFrame to avoid
+                # double-applying FX + oz_to_10g on already-converted columns.
                 spot = self.get_usdinr_rate()
                 for col2 in ("Open", "High", "Low", "Close"):
-                    if col2 in result.columns:
-                        # Values are still in USD, apply full conversion
-                        result[col2] = pd.to_numeric(result[col2], errors="coerce") * spot * oz_to_10g
+                    if col2 in usd_df.columns:
+                        result[col2] = pd.to_numeric(usd_df[col2], errors="coerce") * spot * oz_to_10g
 
         logger.info(
             f"FX conversion applied: rate range {fx_aligned.min():.2f}–{fx_aligned.max():.2f}"

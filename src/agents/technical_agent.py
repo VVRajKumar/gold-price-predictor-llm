@@ -12,13 +12,22 @@ from .base_agent import BaseAgent, AgentReport
 from ..data_fetchers.market_data import MarketDataFetcher
 
 
+# Fallback values when insufficient data produces NaN
+_BOLLINGER_FALLBACK_UPPER = 1.02   # +2% band
+_BOLLINGER_FALLBACK_LOWER = 0.98   # -2% band
+_BOLLINGER_FALLBACK_BW_PCT = 4.0   # bandwidth %
+
+
 def _compute_rsi(series: pd.Series, period: int = 14) -> float:
     delta = series.diff()
     gain = delta.where(delta > 0, 0.0).rolling(period).mean()
     loss = (-delta.where(delta < 0, 0.0)).rolling(period).mean()
     rs = gain / loss.replace(0, np.nan)
     rsi = 100 - (100 / (1 + rs))
-    return round(float(rsi.iloc[-1]), 2) if not rsi.empty else 50.0
+    if rsi.empty:
+        return 50.0
+    last = rsi.iloc[-1]
+    return round(float(last), 2) if pd.notna(last) else 50.0
 
 
 def _compute_macd(series: pd.Series) -> dict:
@@ -27,13 +36,18 @@ def _compute_macd(series: pd.Series) -> dict:
     macd_line = ema12 - ema26
     signal_line = macd_line.ewm(span=9).mean()
     histogram = macd_line - signal_line
+    last_macd = macd_line.iloc[-1] if not macd_line.empty else float('nan')
+    last_signal = signal_line.iloc[-1] if not signal_line.empty else float('nan')
+    last_hist = histogram.iloc[-1] if not histogram.empty else float('nan')
     return {
-        "macd": round(float(macd_line.iloc[-1]), 4),
-        "signal": round(float(signal_line.iloc[-1]), 4),
-        "histogram": round(float(histogram.iloc[-1]), 4),
+        "macd": round(float(last_macd), 4) if pd.notna(last_macd) else 0.0,
+        "signal": round(float(last_signal), 4) if pd.notna(last_signal) else 0.0,
+        "histogram": round(float(last_hist), 4) if pd.notna(last_hist) else 0.0,
         "crossover": (
-            "bullish" if len(histogram) > 1 and float(histogram.iloc[-1]) > 0 and float(histogram.iloc[-2]) <= 0
-            else "bearish" if len(histogram) > 1 and float(histogram.iloc[-1]) < 0 and float(histogram.iloc[-2]) >= 0
+            "bullish" if len(histogram) > 1 and pd.notna(histogram.iloc[-1]) and pd.notna(histogram.iloc[-2])
+                        and float(histogram.iloc[-1]) > 0 and float(histogram.iloc[-2]) <= 0
+            else "bearish" if len(histogram) > 1 and pd.notna(histogram.iloc[-1]) and pd.notna(histogram.iloc[-2])
+                        and float(histogram.iloc[-1]) < 0 and float(histogram.iloc[-2]) >= 0
             else "none"
         ),
     }
@@ -45,14 +59,26 @@ def _compute_bollinger(series: pd.Series, window: int = 20, num_std: float = 2.0
     upper = sma + (std * num_std)
     lower = sma - (std * num_std)
     current = float(series.iloc[-1])
+    last_upper = upper.iloc[-1]
+    last_sma = sma.iloc[-1]
+    last_lower = lower.iloc[-1]
+    # Guard against NaN from insufficient data
+    if any(pd.isna(v) for v in (last_upper, last_sma, last_lower)):
+        return {
+            "upper_band": current * _BOLLINGER_FALLBACK_UPPER,
+            "middle_band": current,
+            "lower_band": current * _BOLLINGER_FALLBACK_LOWER,
+            "bandwidth_pct": _BOLLINGER_FALLBACK_BW_PCT,
+            "position": "within_bands",
+        }
     return {
-        "upper_band": round(float(upper.iloc[-1]), 2),
-        "middle_band": round(float(sma.iloc[-1]), 2),
-        "lower_band": round(float(lower.iloc[-1]), 2),
-        "bandwidth_pct": round((float(upper.iloc[-1]) - float(lower.iloc[-1])) / float(sma.iloc[-1]) * 100, 2),
+        "upper_band": round(float(last_upper), 2),
+        "middle_band": round(float(last_sma), 2),
+        "lower_band": round(float(last_lower), 2),
+        "bandwidth_pct": round((float(last_upper) - float(last_lower)) / float(last_sma) * 100, 2) if float(last_sma) != 0 else 0.0,
         "position": (
-            "above_upper" if current > float(upper.iloc[-1])
-            else "below_lower" if current < float(lower.iloc[-1])
+            "above_upper" if current > float(last_upper)
+            else "below_lower" if current < float(last_lower)
             else "within_bands"
         ),
     }
@@ -92,31 +118,39 @@ Return ONLY valid JSON, no markdown fences."""
         if df.empty or pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna().empty:
             source = "COMEX (GC=F)"
             df = self._market.fetch_ticker("GC=F", period_days=120)
-        elif float(pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna().iloc[-1]) < 10_000:
-            source = "COMEX (GC=F)"
-            df = self._market.fetch_ticker("GC=F", period_days=120)
+        else:
+            _close_check = pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna()
+            if _close_check.empty or float(_close_check.iloc[-1]) < 10_000:
+                source = "COMEX (GC=F)"
+                df = self._market.fetch_ticker("GC=F", period_days=120)
         if df.empty:
             return {"error": "No gold data"}
 
         close = df["Close"].squeeze()
         high = df["High"].squeeze()
         low = df["Low"].squeeze()
+
+        def _safe_round(val, ndigits=2, fallback=0.0):
+            """Round a value safely, returning fallback if NaN."""
+            return round(float(val), ndigits) if pd.notna(val) else fallback
+
+        _current = float(close.iloc[-1]) if not close.empty else 0.0
         indicators = {
             "rsi_14": _compute_rsi(close, 14),
             "macd": _compute_macd(close),
             "bollinger": _compute_bollinger(close),
-            "sma_20": round(float(close.rolling(20).mean().iloc[-1]), 2),
-            "sma_50": round(float(close.rolling(50).mean().iloc[-1]), 2),
-            "ema_9": round(float(close.ewm(span=9).mean().iloc[-1]), 2),
-            "current_price": round(float(close.iloc[-1]), 2),
+            "sma_20": _safe_round(close.rolling(20).mean().iloc[-1], fallback=_current),
+            "sma_50": _safe_round(close.rolling(50).mean().iloc[-1], fallback=_current),
+            "ema_9": _safe_round(close.ewm(span=9).mean().iloc[-1], fallback=_current),
+            "current_price": round(_current, 2),
             "last_10_closes": [round(float(c), 2) for c in close.tail(10).tolist()],
-            "atr_14": round(float(
+            "atr_14": _safe_round(
                 pd.concat([
                     high - low,
                     (high - close.shift()).abs(),
                     (low - close.shift()).abs(),
                 ], axis=1).max(axis=1).rolling(14).mean().iloc[-1]
-            ), 2),
+            ),
         }
 
         return {"indicators": indicators, "data_source": source}

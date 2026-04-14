@@ -50,6 +50,7 @@ _ROLL_WINDOWS = [6, 12, 24]
 _MIN_HISTORY = 25            # minimum samples for feature construction
 _TRAIN_PERIOD_DAYS = 90      # 3 months of hourly data (~2160 bars)
 _MIN_TRAIN_SAMPLES = 200     # hard floor after cleanup
+_DEFAULT_INR_PRICE = 92_000  # fallback gold price (INR/10g) when market data unavailable
 
 # ── Internal feature names (used for model training) ─────────────────
 # NOTE: Only 16 time-series features are used for training, because agent
@@ -417,15 +418,15 @@ class MLEnsemble:
                 # follow through on genuine market moves instead of always
                 # reverting toward the mean (which hurts directional accuracy).
                 # The nudge decays with horizon: strongest for the first few
-                # hours, fades out by hour 8 so it doesn't cause drift.
-                if len(history) >= 3 and ref_usd_price > 0 and h < 8:
+                # hours, fades out by hour 12 so it doesn't cause drift.
+                if len(history) >= 3 and ref_usd_price > 0 and h < 12:
                     # Compute average of last 3 hourly returns
                     recent = history[-3:]
                     avg_ret = (recent[-1] - recent[0]) / recent[0] if recent[0] > 0 else 0.0
                     # Cap at ±0.5% per step to avoid amplifying noise
                     avg_ret = max(-0.005, min(0.005, avg_ret / 2.0))
-                    # Decay: full effect for h=0..2, linearly fading to 0 by h=8
-                    momentum_decay = max(0.0, 1.0 - h / 8.0)
+                    # Decay: full effect for h=0..3, linearly fading to 0 by h=12
+                    momentum_decay = max(0.0, 1.0 - h / 12.0)
                     p_final_usd *= (1.0 + avg_ret * momentum_decay)
 
                 # ── Mean-reversion pressure ──
@@ -433,13 +434,14 @@ class MLEnsemble:
                 # the reference price.  The blend increases for later horizons
                 # so near-term predictions stay responsive while far-horizon
                 # ones don't compound into unrealistic trends.
-                # Near-term (h<4): zero reversion — let the model's directional
-                # signal come through.  Ramp from hour 4 onward (0.02*(h-3),
-                # cap 30%) to still damp far-horizon drift.
-                if h < 4:
+                # Near-term (h<8): zero reversion — let the model's directional
+                # signal come through.  Ramp from hour 8 onward (0.01*(h-7),
+                # cap 15%) — gentle enough to avoid the "hill shape" where
+                # predictions peak then revert to the starting price.
+                if h < 8:
                     reversion_strength = 0.0  # preserve directional signal
                 else:
-                    reversion_strength = min(0.30, 0.02 * (h - 3))  # hour 4→2%, hour 12→18%, hour 18→30%
+                    reversion_strength = min(0.15, 0.01 * (h - 7))  # hour 8→1%, hour 12→5%, hour 22→15%
                 p_final_usd = p_final_usd * (1.0 - reversion_strength) + ref_usd_price * reversion_strength
 
                 # ── Per-step USD sanity check ──
@@ -477,8 +479,8 @@ class MLEnsemble:
                 band_half = (hi_usd - lo_usd) / 2.0
                 widen_factor = math.sqrt(h + 1)
                 band_half *= widen_factor
-                # Minimum floor: 0.2% of reference × sqrt(h+1)
-                min_band_half = ref_usd_price * 0.002 * widen_factor
+                # Minimum floor: 0.3% of reference × sqrt(h+1)
+                min_band_half = ref_usd_price * 0.003 * widen_factor
                 band_half = max(band_half, min_band_half)
                 # Re-center bands around the predicted price (not the quantile center)
                 lo_usd = p_final_usd - band_half
@@ -519,7 +521,7 @@ class MLEnsemble:
             # Validate predictions
             current_inr = self._market.get_gold_inr_price()
             if not (isinstance(current_inr, (int, float)) and np.isfinite(current_inr) and current_inr > 0):
-                current_inr = preds[0]["xgb_price"] if preds else 70000.0
+                current_inr = preds[0]["xgb_price"] if preds else _DEFAULT_INR_PRICE
             preds = validate_xgb_predictions(preds, current_inr)
 
             # Apply residual corrections from past errors

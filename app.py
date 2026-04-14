@@ -498,49 +498,6 @@ if not is_market_open():
             "You can click **Refresh Weekend Analysis** for a preview of Monday's outlook."
         )
 
-if view_mode == "Weekly Archive":
-    st.subheader("🗂️ Weekly Prediction Archive")
-    weekly_archive = engine.get_weekly_archive()
-
-    if not weekly_archive:
-        st.info("No completed weekly predictions archived yet.")
-        st.stop()
-
-    rows = []
-    for item in weekly_archive:
-        plan_dict = item.get("plan", {})
-        rows.append({
-            "Week": item.get("week_id", ""),
-            "Generated": plan_dict.get("generated_at", "")[:16],
-            "Outlook": str(plan_dict.get("overall_outlook", "")).upper(),
-            "Confidence": f"{float(plan_dict.get('overall_confidence', 0)):.0%}",
-            "Anchor Price": f"₹{float(plan_dict.get('current_price', 0)):,.2f}",
-        })
-
-    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
-
-    for item in weekly_archive:
-        plan_dict = item.get("plan", {})
-        week_id = item.get("week_id", "Unknown Week")
-        outlook = str(plan_dict.get("overall_outlook", "neutral")).upper()
-        with st.expander(f"{week_id} — {outlook}"):
-            _arch_summary = plan_dict.get("executive_summary", "No summary available.")
-            st.markdown(_clean_text(_arch_summary) if _arch_summary else "No summary available.")
-
-            daily = plan_dict.get("daily_predictions", [])
-            if daily:
-                adf = pd.DataFrame(daily)
-                if "date" in adf.columns:
-                    adf["date"] = pd.to_datetime(adf["date"])
-                if "key_driver" in adf.columns:
-                    adf["key_driver"] = adf["key_driver"].apply(lambda x: _clean_text(str(x)) if x else x)
-                st.dataframe(
-                    adf[["date", "predicted_price", "low_range", "high_range", "confidence", "key_driver"]],
-                    width="stretch",
-                    hide_index=True,
-                )
-    st.stop()
-
 # MAIN DASHBOARD
 # ════════════════════════════════════════════════════════════════════
 # Don't auto-generate on every page visit — just show the cached plan.
@@ -629,7 +586,11 @@ if plan is None:
 # ── Top Metrics Row ──────────────────────────────────────────────────
 import math as _math
 _live_fx = market.get_usdinr_rate()
-_valid_price = _math.isfinite(plan.current_price) and plan.current_price >= _MIN_VALID_PRICE
+_valid_price = (
+    isinstance(plan.current_price, (int, float))
+    and _math.isfinite(plan.current_price)
+    and plan.current_price >= _MIN_VALID_PRICE
+)
 _is_weekend = not is_market_open()
 c1, c2, c3, c4, c5, c6 = st.columns(6)
 with c1:
@@ -665,7 +626,7 @@ with c4:
     else:
         st.metric("24-Hour Target", "N/A")
 with c5:
-    st.metric("USD/INR Rate", f"₹{_live_fx:.2f}" if _math.isfinite(_live_fx) else "N/A")
+    st.metric("USD/INR Rate", f"₹{_live_fx:.2f}" if isinstance(_live_fx, (int, float)) and _math.isfinite(_live_fx) else "N/A")
 with c6:
     try:
         st.metric("Last Updated", parse_iso_to_ist(plan.generated_at).strftime("%H:%M %b %d"))
@@ -968,9 +929,8 @@ if _shap:
 
     _feat_imp = _shap.get("feature_importance", [])
     if _feat_imp:
-        # Translate any old internal names to friendly display names
-        for item in _feat_imp:
-            item["feature"] = _friendly(item["feature"])
+        # Build a shallow copy so we don't mutate the cached plan object
+        _feat_imp = [dict(item, feature=_friendly(item["feature"])) for item in _feat_imp]
         shap_df = pd.DataFrame(_feat_imp[:20])
         # Color code: price features green, agent signals teal, time features gray
         _price_feats = {"Price 1 Hour Ago", "Price 2 Hours Ago", "Price 3 Hours Ago",
@@ -1156,11 +1116,13 @@ if plan.agent_reports:
         "Impact": "How much this factor is affecting gold prices right now (0% = minimal, 100% = major)",
         "Bias": "Which direction this agent leans: negative = prices may fall, positive = prices may rise",
     }
-    for name, report in plan.agent_reports.items():
+    for name, _orig_report in plan.agent_reports.items():
         if name.startswith("_"):
             continue
-        if not isinstance(report, dict) or "outlook" not in report:
+        if not isinstance(_orig_report, dict) or "outlook" not in _orig_report:
             continue
+        # Work on a shallow copy to avoid mutating the cached plan object
+        report = dict(_orig_report)
 
         outlook = report.get("outlook", "neutral")
         emoji = outlook_emoji(outlook)

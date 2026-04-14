@@ -41,7 +41,7 @@ _MAX_BAND_PCT = 5.0       # band cannot be wider than 5% of price
 # Returns the max allowed deviation (as a fraction) from predicted price for bands.
 def _band_envelope_pct(horizon_idx: int) -> float:
     """Max band deviation at a given horizon step (fraction, e.g. 0.02 = 2%)."""
-    return min(0.035, 0.008 + 0.0012 * horizon_idx)
+    return min(0.05, 0.012 + 0.002 * horizon_idx)
 
 # Overconfidence thresholds
 _OVERCONFIDENCE_THRESHOLD = 0.92   # individual agents
@@ -95,7 +95,7 @@ def validate_agent_report(report_dict: dict[str, Any], agent_name: str) -> dict[
     confidence = _clamp(confidence, 0.0, 1.0)
     original_conf = confidence
     if confidence > _OVERCONFIDENCE_THRESHOLD:
-        confidence = confidence - _CONFIDENCE_PENALTY
+        confidence = max(0.0, confidence - _CONFIDENCE_PENALTY)
         corrections.append(
             f"confidence {original_conf:.2f} → {confidence:.2f} (overconfidence penalty)"
         )
@@ -268,13 +268,13 @@ def validate_prediction_plan(
             corrections.append(f"hour {i}: band too wide → capped to ±{max_band/2:.0f}")
 
         # ── Confidence decay: later hours → lower confidence ──
-        # Hours 1-6: no decay, 7-12: mild decay, 13-24: stronger decay
+        # Hours 1-8: no decay, 9-14: mild decay, 15-24: stronger decay
         horizon_decay = 0.0
-        if i >= 12:
-            horizon_decay = 0.03 * (i - 11)  # e.g. hour 24 → 0.39
-        elif i >= 6:
-            horizon_decay = 0.015 * (i - 5)   # e.g. hour 12 → 0.105
-        dp_conf = min(dp_conf, max(0.3, dp_conf - horizon_decay))
+        if i >= 14:
+            horizon_decay = 0.02 * (i - 13)  # e.g. hour 24 → 0.22
+        elif i >= 8:
+            horizon_decay = 0.01 * (i - 7)   # e.g. hour 14 → 0.07
+        dp_conf = max(0.25, dp_conf - horizon_decay)
 
         # ── Overconfidence for individual hours ──
         if dp_conf > _OVERCONFIDENCE_THRESHOLD:
@@ -438,7 +438,7 @@ def adjust_confidence_from_track_record(
         elif band_hit_rate < 0.50:
             penalty += 0.08
 
-    adjusted = max(confidence - penalty, 0.05)
+    adjusted = max(confidence - penalty, 0.20)
     if penalty > 0:
         logger.info(
             f"[guardrail:track-record] Confidence {confidence:.2f} → {adjusted:.2f} "

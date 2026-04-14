@@ -95,7 +95,7 @@ class ResidualLearner:
             for result in evaluation.get("daily_results", []):
                 pred_date = result.get("date", "")
                 try:
-                    pred_dt = datetime.fromisoformat(str(pred_date))
+                    pred_dt = datetime.fromisoformat(str(pred_date)).replace(tzinfo=None)
                 except (ValueError, TypeError):
                     continue
 

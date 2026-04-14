@@ -68,6 +68,14 @@ _MIN_SESSION_SAMPLES = 5
 # Mean-reversion strength: only for extreme deviations (>3% from start)
 _MEAN_REVERSION_THRESHOLD_PCT = 0.03
 _MEAN_REVERSION_STRENGTH = 0.15
+# Target session-pattern per-hour move (fraction of price, 0.05%).
+# Raw COMEX hourly returns are ~0.01-0.03%, which is barely visible on charts.
+# This target scales them up to ~0.05% per hour for meaningful chart movement
+# while staying within realistic gold volatility.
+_TARGET_SESSION_MOVE = 0.0005
+# Maximum session-pattern amplification (prevents over-scaling if raw returns
+# are extremely small, e.g. during very quiet markets)
+_MAX_SESSION_SCALE = 10.0
 
 # ── Internal feature names (used for model training) ─────────────────
 # NOTE: Only 16 time-series features are used for training, because agent
@@ -525,11 +533,11 @@ class MLEnsemble:
                 # Scale session pattern to be visible on charts.
                 # Raw returns are often ~0.01-0.05% per hour; scale to ~0.05-0.15%
                 # for meaningful chart movement while keeping it realistic.
-                session_scale = max(1.0, 0.0005 / max(
-                    np.mean([abs(v) for v in session_pattern.values()]) if session_pattern else 0.0005,
+                session_scale = max(1.0, _TARGET_SESSION_MOVE / max(
+                    np.mean([abs(v) for v in session_pattern.values()]) if session_pattern else _TARGET_SESSION_MOVE,
                     1e-8
                 ))
-                session_scale = min(session_scale, 10.0)  # cap amplification
+                session_scale = min(session_scale, _MAX_SESSION_SCALE)
                 session_component = session_return * session_scale
 
                 # ── Directional drift: ML + agents (applied evenly) ──

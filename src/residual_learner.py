@@ -60,6 +60,12 @@ _AGENT_WEIGHT_RANGE = (0.5, 2.0)  # agent weight multiplier bounds
 # Maximum recent-error hour keys to cache (~4 days × 24 hours × 2 slots overlap)
 _MAX_RECENT_HOUR_KEYS = 192
 
+# ── Self-healing: over-correction detection (#10) ───────────────────
+# If residual corrections worsened accuracy in the recent window, halve
+# correction strength to prevent systematic over-correction after regime changes.
+_SELF_HEAL_WINDOW = 12      # look at last 12 hours of corrections
+_SELF_HEAL_DAMPEN = 0.5     # halve correction strength when over-correcting
+
 
 class ResidualLearner:
     """Learns from past prediction errors and produces corrections."""
@@ -82,6 +88,11 @@ class ResidualLearner:
         self._agent_weights: dict[str, float] = {}
         # agent_name → list of (signal_value, prediction_error_pct) for correlation
         self._agent_error_history: dict[str, list[tuple[float, float]]] = {}
+
+        # ── Self-healing (#10): track if corrections are helping or hurting ──
+        # Stores recent (corrected_error_pct, uncorrected_error_pct) pairs
+        self._correction_performance: list[tuple[float, float]] = []
+        self._overcorrecting: bool = False
 
         self._load_cache()
 
@@ -109,6 +120,10 @@ class ResidualLearner:
                 # Load agent weights
                 self._agent_weights = data.get("agent_weights", {})
 
+                # Load self-healing state
+                self._correction_performance = data.get("correction_performance", [])
+                self._overcorrecting = data.get("overcorrecting", False)
+
                 logger.debug(
                     f"Residual learner loaded: {len(self._bias)} horizons, "
                     f"{len(self._slot_bias)} slots, "
@@ -126,6 +141,8 @@ class ResidualLearner:
             "slot_count": {str(k): v for k, v in self._slot_count.items()},
             "recent_errors": self._recent_errors,
             "agent_weights": self._agent_weights,
+            "correction_performance": self._correction_performance[-_SELF_HEAL_WINDOW:],
+            "overcorrecting": self._overcorrecting,
         }
         try:
             from . import cloud_storage
@@ -256,6 +273,9 @@ class ResidualLearner:
         if agent_signals_history:
             self._update_agent_weights(agent_signals_history)
 
+        # ── 5. Self-healing: assess if corrections are helping (#10) ──
+        self._assess_correction_performance(accuracy_log)
+
         self._save_cache()
 
         if new_bias:
@@ -326,6 +346,88 @@ class ResidualLearner:
                 + ", ".join(f"{k}={v:.2f}" for k, v in self._agent_weights.items())
             )
 
+    # ── Self-healing: assess correction performance (#10) ──────────
+
+    def _assess_correction_performance(self, accuracy_log: list[dict]):
+        """Assess whether residual corrections improved or worsened accuracy.
+
+        Compares the actual signed error against the bias correction that was
+        applied.  If corrections have been systematically making predictions
+        *worse* over the recent window, set ``_overcorrecting = True`` so that
+        ``correct_predictions`` halves correction strength.
+        """
+        if not self._bias:
+            self._overcorrecting = False
+            return
+
+        # We look at the most recent evaluations (up to _SELF_HEAL_WINDOW plans)
+        recent = accuracy_log[-_SELF_HEAL_WINDOW:] if accuracy_log else []
+        if not recent:
+            return
+
+        helped = 0
+        hurt = 0
+        for evaluation in recent:
+            try:
+                gen_dt = datetime.fromisoformat(
+                    str(evaluation.get("plan_generated_at", ""))
+                ).replace(tzinfo=None)
+            except (ValueError, TypeError):
+                continue
+
+            for result in evaluation.get("daily_results", []):
+                try:
+                    pred_dt = datetime.fromisoformat(
+                        str(result.get("date", ""))
+                    ).replace(tzinfo=None)
+                except (ValueError, TypeError):
+                    try:
+                        pred_dt = datetime.strptime(
+                            str(result.get("date", "")), "%Y-%m-%d %H:%M:%S"
+                        )
+                    except (ValueError, TypeError):
+                        continue
+
+                delta_hours = round((pred_dt - gen_dt).total_seconds() / 3600)
+                if delta_hours < 1 or delta_hours > PREDICTION_HOURS:
+                    continue
+
+                signed_error = result.get("error", 0.0)
+                bias_correction = self._bias.get(delta_hours, 0.0)
+
+                # If the correction was in the opposite direction of the error,
+                # it helped (reduced the error).  If same direction, it hurt.
+                if bias_correction != 0 and signed_error != 0:
+                    if (signed_error > 0 and bias_correction > 0) or \
+                       (signed_error < 0 and bias_correction < 0):
+                        # Correction direction matches error → it helped
+                        helped += 1
+                    else:
+                        # Correction direction opposes error → it may have hurt
+                        hurt += 1
+
+        total = helped + hurt
+        if total < 6:
+            # Not enough data to judge
+            return
+
+        hurt_ratio = hurt / total
+        was_overcorrecting = self._overcorrecting
+
+        # If >60% of corrections worsened accuracy, flag as over-correcting
+        self._overcorrecting = hurt_ratio > 0.6
+
+        if self._overcorrecting and not was_overcorrecting:
+            logger.warning(
+                f"[residual:self-heal] Over-correction detected: "
+                f"{hurt}/{total} corrections worsened accuracy → halving strength"
+            )
+        elif not self._overcorrecting and was_overcorrecting:
+            logger.info(
+                f"[residual:self-heal] Over-correction resolved: "
+                f"{helped}/{total} corrections now helping → restoring full strength"
+            )
+
     # ── Apply corrections ────────────────────────────────────────────
 
     def correct_predictions(
@@ -384,6 +486,10 @@ class ResidualLearner:
                     / max(_MIN_SAMPLES_STRONG - _MIN_SAMPLES_BIAS, 1),
                     0.8,
                 )
+
+                # Self-healing: halve correction strength if over-correcting (#10)
+                if self._overcorrecting:
+                    strength *= _SELF_HEAL_DAMPEN
 
                 max_corr = price * (_MAX_CORRECTION_PCT / 100.0)
                 clamped_bias = max(-max_corr, min(combined_bias, max_corr))

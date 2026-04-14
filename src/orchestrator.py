@@ -63,6 +63,7 @@ class PredictionPlan(BaseModel):
     bull_case: str = ""
     bear_case: str = ""
     agent_reports: dict[str, dict] = Field(default_factory=dict)  # slim copies
+    guardrail_correction_count: int = Field(default=0)  # number of guardrail corrections applied
 
 
 def _extract_summary_text(text: str) -> str:
@@ -486,15 +487,30 @@ class Orchestrator:
         # Overall confidence from ML band widths (NOT from LLM)
         ml_confidence = compute_ml_confidence(ml_predictions, current_price)
 
-        # Track-record adjustment
+        # Track-record adjustment — now returns (adjusted_conf, penalty)
         _recent_band = self._get_recent_band_hit_rate()
-        ml_confidence = adjust_confidence_from_track_record(
+        ml_confidence, _track_penalty = adjust_confidence_from_track_record(
             ml_confidence,
             mape=self._get_recent_mape(),
             # band_hit_rate is stored as percentage (e.g. 31.0) in the log
             # but adjust_confidence_from_track_record expects 0-1 fraction
             band_hit_rate=(_recent_band / 100) if _recent_band is not None else None,
         )
+
+        # Compute dynamic volatility-aware caps from recent COMEX data
+        from .guardrails import compute_dynamic_caps
+        _hourly_vol, _daily_vol = None, None
+        try:
+            _market = MarketDataFetcher()
+            _comex_df = _market.fetch_ticker("GC=F", period_days=3, interval="1h")
+            if _comex_df is not None and not _comex_df.empty:
+                import pandas as _pd
+                _close = _pd.to_numeric(_comex_df["Close"], errors="coerce").dropna()
+                if len(_close) >= 6:
+                    _returns = _close.pct_change().dropna() * 100  # percentage returns
+                    _hourly_vol, _daily_vol = compute_dynamic_caps(_returns.tolist())
+        except Exception as _e:
+            logger.debug(f"Could not compute dynamic caps: {_e}")
 
         # Store SHAP + component info in agent_reports for UI display
         if shap_explanation:
@@ -518,7 +534,15 @@ class Orchestrator:
 
         # Apply guardrails on the final plan
         plan_dict = json.loads(plan.model_dump_json())
-        corrected = validate_prediction_plan(plan_dict, current_price, PREDICTION_HOURS)
+        corrected = validate_prediction_plan(
+            plan_dict, current_price, PREDICTION_HOURS,
+            track_record_penalty=_track_penalty,
+            recent_hourly_vol=_hourly_vol,
+            recent_daily_vol=_daily_vol,
+        )
+        # Extract guardrail correction count before passing to Pydantic
+        _gc_count = corrected.pop("_guardrail_correction_count", 0)
+        corrected["guardrail_correction_count"] = _gc_count
         plan = PredictionPlan(**corrected)
         # Restore agent_reports (guardrails don't modify these)
         plan.agent_reports = agent_report_dict

@@ -21,7 +21,7 @@ from ..config import (
     TEMPERATURE,
 )
 from ..time_utils import iso_now_ist
-from ..guardrails import validate_agent_report
+from ..guardrails import validate_agent_report, check_data_freshness
 
 
 class AgentReport(BaseModel):
@@ -302,6 +302,20 @@ class BaseAgent(ABC):
         """Convenience: gather → analyse → guardrail in one call."""
         logger.info(f"[{self.NAME}] Starting run …")
         data = self.gather_data()
+
+        # ── Stale data check (#9) ──
+        # Check data freshness using all top-level keys from gathered data
+        # as required keys.  If <50% are present, cap confidence/impact.
+        _stale_fallback = False
+        if data:
+            _is_valid, _warnings = check_data_freshness(
+                data,
+                required_keys=list(data.keys()),
+                agent_name=self.NAME,
+            )
+            if "_stale_data_fallback" in _warnings:
+                _stale_fallback = True
+
         report = self.analyse(data)
 
         # ── Guardrail: validate & correct agent output ──
@@ -318,6 +332,23 @@ class BaseAgent(ABC):
         report.confidence = corrected["confidence"]
         report.impact_score = corrected["impact_score"]
         report.prediction_bias = corrected["prediction_bias"]
+
+        # ── Apply stale data ceiling (#9) ──
+        if _stale_fallback:
+            _STALE_CONF_CEILING = 0.3
+            _STALE_IMPACT_CEILING = 0.4
+            if report.confidence > _STALE_CONF_CEILING:
+                logger.warning(
+                    f"[guardrail:stale:{self.NAME}] confidence {report.confidence:.2f} "
+                    f"→ {_STALE_CONF_CEILING} (stale data fallback)"
+                )
+                report.confidence = _STALE_CONF_CEILING
+            if report.impact_score > _STALE_IMPACT_CEILING:
+                logger.warning(
+                    f"[guardrail:stale:{self.NAME}] impact {report.impact_score:.2f} "
+                    f"→ {_STALE_IMPACT_CEILING} (stale data fallback)"
+                )
+                report.impact_score = _STALE_IMPACT_CEILING
 
         logger.info(
             f"[{self.NAME}] Done – outlook={report.outlook}, "

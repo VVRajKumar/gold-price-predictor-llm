@@ -34,14 +34,14 @@ _MAX_HOURLY_MOVE_PCT = 1.0
 _MAX_TOTAL_DEVIATION_PCT = 5.0
 
 # Band width limits (as % of predicted price)
-_MIN_BAND_PCT = 0.5       # band cannot be tighter than 0.5% of price
+_MIN_BAND_PCT = 1.0       # band cannot be tighter than 1.0% of price
 _MAX_BAND_PCT = 5.0       # band cannot be wider than 5% of price
 
 # Horizon-aware band deviation envelope (shared formula used by guardrails).
 # Returns the max allowed deviation (as a fraction) from predicted price for bands.
 def _band_envelope_pct(horizon_idx: int) -> float:
     """Max band deviation at a given horizon step (fraction, e.g. 0.02 = 2%)."""
-    return min(0.05, 0.012 + 0.002 * horizon_idx)
+    return min(0.08, 0.015 + 0.003 * horizon_idx)
 
 # Overconfidence thresholds
 _OVERCONFIDENCE_THRESHOLD = 0.92   # individual agents
@@ -268,13 +268,13 @@ def validate_prediction_plan(
             corrections.append(f"hour {i}: band too wide → capped to ±{max_band/2:.0f}")
 
         # ── Confidence decay: later hours → lower confidence ──
-        # Hours 1-8: no decay, 9-14: mild decay, 15-24: stronger decay
+        # Hours 1-12: no decay, 13-18: mild decay, 19-24: moderate decay
         horizon_decay = 0.0
-        if i >= 14:
-            horizon_decay = 0.02 * (i - 13)  # e.g. hour 24 → 0.22
-        elif i >= 8:
-            horizon_decay = 0.01 * (i - 7)   # e.g. hour 14 → 0.07
-        dp_conf = max(0.25, dp_conf - horizon_decay)
+        if i >= 18:
+            horizon_decay = 0.015 * (i - 17)  # e.g. hour 24 → 0.09
+        elif i >= 12:
+            horizon_decay = 0.008 * (i - 11)   # e.g. hour 18 → 0.056
+        dp_conf = max(0.30, dp_conf - horizon_decay)
 
         # ── Overconfidence for individual hours ──
         if dp_conf > _OVERCONFIDENCE_THRESHOLD:
@@ -417,9 +417,9 @@ def adjust_confidence_from_track_record(
 ) -> float:
     """Penalise plan confidence when historical accuracy is poor.
 
-    - MAPE > 2%  → mild penalty
-    - MAPE > 5%  → heavy penalty
-    - band_hit_rate < 40% → additional penalty
+    - MAPE > 5%  → mild penalty
+    - MAPE > 8%  → heavy penalty
+    - band_hit_rate < 20% → additional penalty
     """
     if mape is None and band_hit_rate is None:
         return confidence   # no history yet
@@ -427,18 +427,18 @@ def adjust_confidence_from_track_record(
     penalty = 0.0
 
     if mape is not None:
-        if mape > 5.0:
-            penalty += 0.20
-        elif mape > 2.0:
-            penalty += 0.10
-
-    if band_hit_rate is not None:
-        if band_hit_rate < 0.30:
+        if mape > 8.0:
             penalty += 0.15
-        elif band_hit_rate < 0.50:
+        elif mape > 5.0:
             penalty += 0.08
 
-    adjusted = max(confidence - penalty, 0.20)
+    if band_hit_rate is not None:
+        if band_hit_rate < 0.20:
+            penalty += 0.10
+        elif band_hit_rate < 0.35:
+            penalty += 0.05
+
+    adjusted = max(confidence - penalty, 0.30)
     if penalty > 0:
         logger.info(
             f"[guardrail:track-record] Confidence {confidence:.2f} → {adjusted:.2f} "

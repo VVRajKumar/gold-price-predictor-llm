@@ -434,14 +434,15 @@ class MLEnsemble:
                 # the reference price.  The blend increases for later horizons
                 # so near-term predictions stay responsive while far-horizon
                 # ones don't compound into unrealistic trends.
-                # Near-term (h<8): zero reversion — let the model's directional
-                # signal come through.  Ramp from hour 8 onward (0.01*(h-7),
-                # cap 15%) — gentle enough to avoid the "hill shape" where
-                # predictions peak then revert to the starting price.
-                if h < 8:
+                # Near-term (h<14): zero reversion — let the model's directional
+                # signal come through for the majority of the 24h window.
+                # Ramp from hour 14 onward (very gentle 0.005*(h-13), cap 5%)
+                # — this prevents the "hill shape" where predictions peak mid-
+                # window then revert toward the starting price.
+                if h < 14:
                     reversion_strength = 0.0  # preserve directional signal
                 else:
-                    reversion_strength = min(0.15, 0.01 * (h - 7))  # hour 8→1%, hour 12→5%, hour 22→15%
+                    reversion_strength = min(0.05, 0.005 * (h - 13))  # hour 14→0.5%, hour 18→2.5%, hour 23→5%
                 p_final_usd = p_final_usd * (1.0 - reversion_strength) + ref_usd_price * reversion_strength
 
                 # ── Per-step USD sanity check ──
@@ -479,8 +480,8 @@ class MLEnsemble:
                 band_half = (hi_usd - lo_usd) / 2.0
                 widen_factor = math.sqrt(h + 1)
                 band_half *= widen_factor
-                # Minimum floor: 0.3% of reference × sqrt(h+1)
-                min_band_half = ref_usd_price * 0.003 * widen_factor
+                # Minimum floor: 0.5% of reference × sqrt(h+1)
+                min_band_half = ref_usd_price * 0.005 * widen_factor
                 band_half = max(band_half, min_band_half)
                 # Re-center bands around the predicted price (not the quantile center)
                 lo_usd = p_final_usd - band_half

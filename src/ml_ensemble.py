@@ -200,6 +200,7 @@ def _build_feature_vector(
 
 def _compute_agent_adjustment(
     agent_signals: Optional[dict[str, float]],
+    learned_weight_adjustments: Optional[dict[str, float]] = None,
 ) -> float:
     """Compute a directional adjustment factor from agent signals.
 
@@ -208,16 +209,22 @@ def _compute_agent_adjustment(
 
     The composite signal is a weighted average of the 8 agent scores,
     each in [-1, +1], mapped to a bounded percentage adjustment.
+
+    If ``learned_weight_adjustments`` is provided (from ResidualLearner),
+    agent weights are dynamically multiplied by learned accuracy factors.
     """
     if not agent_signals:
         return 1.0
 
     weighted_sum = 0.0
     total_weight = 0.0
-    for name, weight in _AGENT_WEIGHTS.items():
+    for name, base_weight in _AGENT_WEIGHTS.items():
         val = agent_signals.get(name, 0.0)
-        weighted_sum += val * weight
-        total_weight += weight
+        # Apply learned weight adjustment if available
+        learned_mult = learned_weight_adjustments.get(name, 1.0) if learned_weight_adjustments else 1.0
+        effective_weight = base_weight * learned_mult
+        weighted_sum += val * effective_weight
+        total_weight += effective_weight
 
     if total_weight == 0:
         return 1.0
@@ -485,8 +492,9 @@ class MLEnsemble:
             ml_1step_return = (ml_direction_usd - ref_usd_price) / ref_usd_price if ref_usd_price > 0 else 0.0
             ml_1step_return = max(-_MAX_STEP_PCT, min(_MAX_STEP_PCT, ml_1step_return))
 
-            # ── 2. Agent adjustment ──
-            agent_multiplier = _compute_agent_adjustment(agent_signals)
+            # ── 2. Agent adjustment (with learned weight tuning) ──
+            learned_agent_weights = self._residual_learner.get_agent_weight_adjustments()
+            agent_multiplier = _compute_agent_adjustment(agent_signals, learned_agent_weights)
             agent_adj_pct = (agent_multiplier - 1.0) * 100
             logger.info(
                 f"Agent signal adjustment: {agent_adj_pct:+.3f}% "
@@ -611,8 +619,14 @@ class MLEnsemble:
                 current_inr = preds[0]["xgb_price"] if preds else _DEFAULT_INR_PRICE
             preds = validate_xgb_predictions(preds, current_inr)
 
-            # Apply residual corrections from past errors
-            preds = self._residual_learner.correct_predictions(preds)
+            # Apply residual corrections from past errors.
+            # Pass the current IST slot so slot-specific bias is applied.
+            from .time_utils import current_slot_ist
+            try:
+                gen_slot = current_slot_ist().hour
+            except Exception:
+                gen_slot = None
+            preds = self._residual_learner.correct_predictions(preds, generation_slot=gen_slot)
 
             # Store for SHAP computation
             self._last_X_pred = np.vstack(X_for_shap) if X_for_shap else None

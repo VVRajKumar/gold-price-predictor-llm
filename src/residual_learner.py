@@ -57,6 +57,9 @@ _MAX_MOMENTUM_PCT = 0.5     # cap momentum correction at ±0.5% of price
 _MIN_AGENT_SAMPLES = 5      # need ≥5 samples to start adjusting agent weights
 _AGENT_WEIGHT_RANGE = (0.5, 2.0)  # agent weight multiplier bounds
 
+# Maximum recent-error hour keys to cache (~4 days × 24 hours × 2 slots overlap)
+_MAX_RECENT_HOUR_KEYS = 192
+
 
 class ResidualLearner:
     """Learns from past prediction errors and produces corrections."""
@@ -242,10 +245,10 @@ class ResidualLearner:
             # Keep only the most recent _MOMENTUM_WINDOW entries
             sorted_entries = sorted(error_list, key=lambda x: x[1], reverse=True)
             new_recent[hour_key] = sorted_entries[:_MOMENTUM_WINDOW]
-        # Only keep recent hours (last 48h worth of keys to limit cache size)
+        # Only keep recent hours (limit cache size to ~4 days of data)
         if new_recent:
             all_keys = sorted(new_recent.keys(), reverse=True)
-            self._recent_errors = {k: new_recent[k] for k in all_keys[:48 * 2]}
+            self._recent_errors = {k: new_recent[k] for k in all_keys[:_MAX_RECENT_HOUR_KEYS]}
         else:
             self._recent_errors = {}
 
@@ -517,8 +520,11 @@ class ResidualLearner:
 
 
 def _nearest_slot(hour: int) -> int:
-    """Map an hour (0-23) to the nearest IST slot (0, 6, 12, 18)."""
+    """Map an hour (0-23) to the nearest IST slot (0, 6, 12, 18).
+
+    Hours before the first slot (e.g. 0-5) map to slot 0.
+    """
     for slot in sorted(SLOT_HOURS, reverse=True):
         if hour >= slot:
             return slot
-    return SLOT_HOURS[-1]  # wrap around to 18:00 for very early hours
+    return SLOT_HOURS[0]  # hours before first slot → slot 0

@@ -254,11 +254,12 @@ def _extract_session_pattern(close_series: pd.Series) -> dict[int, float]:
     if returns.empty:
         return {}
 
-    # Group returns by hour-of-day
+    # Group returns by hour-of-day (skip entries without valid timestamps)
     hour_returns: dict[int, list[float]] = {}
     for ts, ret in returns.items():
-        h = ts.hour if hasattr(ts, 'hour') else 0
-        hour_returns.setdefault(h, []).append(float(ret))
+        if not hasattr(ts, 'hour'):
+            continue  # skip entries without valid timestamp
+        hour_returns.setdefault(ts.hour, []).append(float(ret))
 
     # Compute average return per hour, only if we have enough samples
     raw_pattern: dict[int, float] = {}
@@ -541,10 +542,12 @@ class MLEnsemble:
                 # Scale session pattern to be visible on charts.
                 # Raw returns are often ~0.01-0.05% per hour; scale to ~0.05-0.15%
                 # for meaningful chart movement while keeping it realistic.
-                session_scale = max(1.0, _TARGET_SESSION_MOVE / max(
-                    np.mean([abs(v) for v in session_pattern.values()]) if session_pattern else _TARGET_SESSION_MOVE,
-                    1e-8
-                ))
+                avg_abs_return = (
+                    np.mean([abs(v) for v in session_pattern.values()])
+                    if session_pattern
+                    else _TARGET_SESSION_MOVE
+                )
+                session_scale = max(1.0, _TARGET_SESSION_MOVE / max(avg_abs_return, 1e-8))
                 session_scale = min(session_scale, _MAX_SESSION_SCALE)
                 session_component = session_return * session_scale
 

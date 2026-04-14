@@ -274,7 +274,7 @@ def validate_prediction_plan(
             horizon_decay = 0.02 * (i - 13)  # e.g. hour 24 → 0.22
         elif i >= 8:
             horizon_decay = 0.01 * (i - 7)   # e.g. hour 14 → 0.07
-        dp_conf = min(dp_conf, max(0.25, dp_conf - horizon_decay))
+        dp_conf = max(0.25, dp_conf - horizon_decay)
 
         # ── Overconfidence for individual hours ──
         if dp_conf > _OVERCONFIDENCE_THRESHOLD:

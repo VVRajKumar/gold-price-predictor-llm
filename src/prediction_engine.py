@@ -162,6 +162,9 @@ class PredictionEngine:
                     corrected = validate_prediction_plan(
                         plan_dict, plan.current_price, len(plan.daily_predictions)
                     )
+                    # Map guardrail count key for Pydantic
+                    _gc = corrected.pop("_guardrail_correction_count", 0)
+                    corrected["guardrail_correction_count"] = _gc
                     plan = PredictionPlan(**corrected)
                     # Restore agent_reports (guardrails don't handle these)
                     if saved_reports:

@@ -661,6 +661,12 @@ if _quick_agg and _quick_agg["total_predictions_evaluated"] > 0:
         unsafe_allow_html=True,
     )
 
+# ── Guardrail Correction Count (#7) ─────────────────────────────────
+_gc_count = getattr(plan, "guardrail_correction_count", 0)
+if _gc_count > 0:
+    _gc_icon = "🛡️"
+    st.caption(f"{_gc_icon} **{_gc_count}** guardrail correction(s) applied this prediction cycle")
+
 # ── Executive Summary ────────────────────────────────────────────────
 with st.expander("📋 Executive Summary", expanded=True):
     _summary = _clean_text(plan.executive_summary) if plan.executive_summary else ""

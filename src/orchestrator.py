@@ -435,7 +435,7 @@ class Orchestrator:
                 hi = float(ml_item.get("xgb_high", price * 1.005))
                 band_pct = (hi - lo) / price * 100 if price > 0 else 1.0
                 # Tighter bands → higher confidence for that hour
-                hour_conf = max(0.20, min(0.90, 0.85 - band_pct * 0.15))
+                hour_conf = max(0.30, min(0.90, 0.85 - band_pct * 0.10))
                 daily.append(DayPrediction(
                     date=ts.strftime("%Y-%m-%d %H:00"),
                     predicted_price=round(price, 2),

@@ -52,23 +52,22 @@ _TRAIN_PERIOD_DAYS = 90      # 3 months of hourly data (~2160 bars)
 _MIN_TRAIN_SAMPLES = 200     # hard floor after cleanup
 _DEFAULT_INR_PRICE = 92_000  # fallback gold price (INR/10g) when market data unavailable
 
-# ── Direct multi-step prediction constants ─────────────────────────
+# ── Session-aware prediction constants ──────────────────────────────
 # Total deviation cap: max cumulative movement from starting price (±5%)
 _MAX_TOTAL_DEV_PCT = 0.05
-# Per-step cap: max single-hour move (±1.0%) — generous enough for volatile sessions
+# Per-step cap: max single-hour move (±1.0%)
 _MAX_STEP_PCT = 0.01
 # Band floor: minimum band half-width (fraction of price)
 _BAND_BASE_FLOOR = 0.003
 # Band per-horizon floor: scales with √(h+1)
 _BAND_HORIZON_FLOOR = 0.005
-# Target per-hour move magnitude (fraction of price, ~0.1% = realistic gold move)
-_TARGET_HOURLY_MOVE_PCT = 0.001
-# Max amplification of model's raw per-hour deltas (prevents over-scaling tiny signals)
-_MAX_DELTA_SCALE = 50.0
-# Agent signal spread factor: distributes agent adjustment across PREDICTION_HOURS
-# with heavier weighting on near-term hours. Factor of 3 means agent contributes
-# ~3× its per-hour share in the first few hours (decaying with horizon).
-_AGENT_SPREAD_FACTOR = 3
+# Number of recent days to compute intra-day session patterns
+_SESSION_PATTERN_DAYS = 14
+# Minimum number of data points per hour-of-day bin to use session patterns
+_MIN_SESSION_SAMPLES = 5
+# Mean-reversion strength: only for extreme deviations (>3% from start)
+_MEAN_REVERSION_THRESHOLD_PCT = 0.03
+_MEAN_REVERSION_STRENGTH = 0.15
 
 # ── Internal feature names (used for model training) ─────────────────
 # NOTE: Only 16 time-series features are used for training, because agent
@@ -223,6 +222,63 @@ def _compute_agent_adjustment(
     return 1.0 + adjustment_pct
 
 
+def _extract_session_pattern(close_series: pd.Series) -> dict[int, float]:
+    """Extract zero-centered hourly return pattern by hour-of-day from recent data.
+
+    The returned pattern has its mean subtracted so it represents SHAPE only
+    (which hours are relatively more bullish vs bearish), not overall direction.
+    The ML model and agent signals provide the directional bias separately.
+
+    Returns a dict mapping hour (0-23) to mean-subtracted hourly return (fraction).
+    If insufficient data, returns an empty dict.
+    """
+    if len(close_series) < 48:  # need at least 2 days of hourly data
+        return {}
+
+    returns = close_series.pct_change().dropna()
+    if returns.empty:
+        return {}
+
+    # Group returns by hour-of-day
+    hour_returns: dict[int, list[float]] = {}
+    for ts, ret in returns.items():
+        h = ts.hour if hasattr(ts, 'hour') else 0
+        hour_returns.setdefault(h, []).append(float(ret))
+
+    # Compute average return per hour, only if we have enough samples
+    raw_pattern: dict[int, float] = {}
+    for h in range(24):
+        rets = hour_returns.get(h, [])
+        if len(rets) >= _MIN_SESSION_SAMPLES:
+            # Use trimmed mean (exclude top/bottom 10%) to reduce outlier impact
+            sorted_rets = sorted(rets)
+            trim = max(1, len(sorted_rets) // 10)
+            trimmed = sorted_rets[trim:-trim] if len(sorted_rets) > 2 * trim else sorted_rets
+            raw_pattern[h] = float(np.mean(trimmed))
+        else:
+            raw_pattern[h] = 0.0
+
+    if not raw_pattern:
+        return {}
+
+    # Zero-center: subtract mean so pattern represents SHAPE only
+    # (relative bullish/bearish hours), not overall market direction
+    mean_ret = np.mean(list(raw_pattern.values()))
+    pattern = {h: r - mean_ret for h, r in raw_pattern.items()}
+
+    if pattern:
+        bullish_hours = sorted([h for h, r in pattern.items() if r > 0.00005])
+        bearish_hours = sorted([h for h, r in pattern.items() if r < -0.00005])
+        avg_abs = np.mean([abs(r) for r in pattern.values()]) * 100
+        logger.info(
+            f"Session pattern (zero-centered): {len(pattern)} hours, "
+            f"bullish_hours={bullish_hours}, bearish_hours={bearish_hours}, "
+            f"avg |return|={avg_abs:.4f}%"
+        )
+
+    return pattern
+
+
 class MLEnsemble:
     """Three-model stacking ensemble with quantile bands and SHAP."""
 
@@ -360,23 +416,23 @@ class MLEnsemble:
         """
         Forecast the next PREDICTION_HOURS hourly prices in INR/10g.
 
-        Uses **direct multi-step prediction**: each future hour is predicted
-        independently from the *actual* market history (no autoregressive
-        feedback).  Only the time-of-day and day-of-week features change
-        across hours, which lets the model's learned intra-day patterns
-        produce natural shapes — up, down, hill, zigzag, flat — depending
-        on what time of day each predicted hour falls in.
+        Uses **session-pattern shaping**: combines the ML model's directional
+        signal with actual intra-day return patterns extracted from recent
+        COMEX history.  This produces realistic 24-hour shapes (hill, zigzag,
+        flat, etc.) because the pattern reflects how gold *actually* behaves
+        at each hour of the day.
 
-        Why not autoregressive?
-          Autoregressive feeding (appending each prediction to history)
-          causes tree models to compound: if h+1 is slightly up, h+2 sees
-          that higher price as lag_1 and predicts even higher, creating
-          monotonic curves.  Direct prediction avoids this by always using
-          the same actual history for lag features.
+        Architecture:
+          1. Get ML model's 1-step-ahead prediction → directional bias
+          2. Extract real per-hour-of-day return pattern from last 14 days
+          3. Shape the 24h forecast: session pattern × directional bias × agents
+          4. Apply safety caps (±1% per step, ±5% total)
+          5. Compute quantile bands with horizon widening
 
-        Why not monotonic extrapolation?
-          Real gold prices go up AND down within 24 hours (session effects,
-          news releases, etc.).  Forcing a single direction is unrealistic.
+        Why session-pattern shaping?
+          - Autoregressive: tree models compound → monotonic curves
+          - Direct multi-step: only 4 time features change → artificial patterns
+          - Session pattern: uses ACTUAL historical return patterns → natural flow
 
         Returns list of dicts with keys:
             date, xgb_price, xgb_low, xgb_high,
@@ -387,10 +443,6 @@ class MLEnsemble:
             return []
 
         try:
-            # Using COMEX hourly data for prediction (MCX hourly unavailable on Yahoo).
-            # COMEX (GC=F) trades nearly 24/7 (Sun evening – Fri afternoon US time),
-            # so lag features (1h, 2h, 6h avg, etc.) are available even when MCX is
-            # closed (weekends, Monday pre-market).
             df = self._market.fetch_ticker("GC=F", period_days=30, interval="1h")
             if df.empty:
                 return []
@@ -400,141 +452,120 @@ class MLEnsemble:
                 return []
 
             values = close.to_numpy(dtype=float)
-            actual_history = values.tolist()  # NEVER mutated — always actual prices
+            actual_history = values.tolist()
             last_ts = close.index.max()
 
             usdinr = self._market.get_usdinr_rate()
             oz_to_10g = 10.0 / 31.1035
 
-            # Compute agent adjustment multiplier
+            ref_usd_price = float(values[-1])
+
+            # ── 1. ML model's directional signal ──
+            # Use the model's 1-step-ahead prediction to determine direction + magnitude.
+            # This is the most reliable prediction from tree models.
+            ts_1 = pd.Timestamp(last_ts) + pd.Timedelta(hours=1)
+            feat_1 = _build_feature_vector(actual_history, ts_1).reshape(1, -1)
+
+            p_xgb_1 = float(self._xgb_model.predict(feat_1)[0])
+            p_lgb_1 = float(self._lgb_model.predict(
+                pd.DataFrame(feat_1, columns=FEATURE_NAMES))[0])
+            p_ridge_1 = float(self._ridge_model.predict(feat_1)[0])
+            stack_1 = np.array([[p_xgb_1, p_lgb_1, p_ridge_1]])
+            ml_direction_usd = float(self._meta_model.predict(stack_1)[0])
+
+            # ML model's 1-step return (direction + magnitude)
+            ml_1step_return = (ml_direction_usd - ref_usd_price) / ref_usd_price if ref_usd_price > 0 else 0.0
+            ml_1step_return = max(-_MAX_STEP_PCT, min(_MAX_STEP_PCT, ml_1step_return))
+
+            # ── 2. Agent adjustment ──
             agent_multiplier = _compute_agent_adjustment(agent_signals)
             agent_adj_pct = (agent_multiplier - 1.0) * 100
             logger.info(
                 f"Agent signal adjustment: {agent_adj_pct:+.3f}% "
-                f"(multiplier={agent_multiplier:.5f}, signals={agent_signals})"
+                f"(multiplier={agent_multiplier:.5f})"
             )
 
+            # ── 3. Extract real session pattern from recent COMEX data ──
+            session_pattern = _extract_session_pattern(close)
+
+            # ── 4. Build 24-hour price path using session pattern ──
+            # Strategy: session pattern provides SHAPE (which hours are relatively
+            # up vs down), while ML direction + agents provide overall DRIFT.
+            # The session pattern is zero-centered, so without ML/agent bias the
+            # prediction would oscillate around the starting price.
             preds: list[dict] = []
             X_for_shap: list[np.ndarray] = []
+            prev_usd = ref_usd_price
 
-            # Reference USD price for safety caps
-            ref_usd_price = float(values[-1])
-
-            # Get all 24 raw model predictions first (direct, independent)
-            raw_predictions: list[float] = []
+            # Directional drift: ML's predicted return spread over 24 hours
+            # plus agent signal spread over 24 hours.
+            # This is a GENTLE per-hour drift that doesn't overpower session pattern.
+            ml_drift_per_hour = ml_1step_return / PREDICTION_HOURS
+            agent_drift_per_hour = (agent_multiplier - 1.0) / PREDICTION_HOURS
 
             for h in range(PREDICTION_HOURS):
                 ts = pd.Timestamp(last_ts) + pd.Timedelta(hours=h + 1)
 
-                # Features from ACTUAL history — only time features change per hour.
-                # This is the key difference from autoregressive: lag features always
-                # reflect actual market data, so each hour's prediction is independent.
+                # Build features for SHAP and component display
                 feat = _build_feature_vector(actual_history, ts).reshape(1, -1)
                 X_for_shap.append(feat.flatten())
 
-                # Base predictions from each model (USD/oz)
+                # Component predictions for UI transparency
                 p_xgb = float(self._xgb_model.predict(feat)[0])
                 p_lgb = float(self._lgb_model.predict(
                     pd.DataFrame(feat, columns=FEATURE_NAMES))[0])
                 p_ridge = float(self._ridge_model.predict(feat)[0])
 
-                # Meta-learner stacked prediction
-                stack = np.array([[p_xgb, p_lgb, p_ridge]])
-                p_meta_usd = float(self._meta_model.predict(stack)[0])
+                # ── Session pattern: SHAPE component (zero-centered) ──
+                # This determines whether this hour tends to be up or down
+                # relative to the mean — the core of realistic intra-day flow
+                target_hour = ts.hour
+                session_return = session_pattern.get(target_hour, 0.0)
 
-                raw_predictions.append(p_meta_usd)
+                # Scale session pattern to be visible on charts.
+                # Raw returns are often ~0.01-0.05% per hour; scale to ~0.05-0.15%
+                # for meaningful chart movement while keeping it realistic.
+                session_scale = max(1.0, 0.0005 / max(
+                    np.mean([abs(v) for v in session_pattern.values()]) if session_pattern else 0.0005,
+                    1e-8
+                ))
+                session_scale = min(session_scale, 10.0)  # cap amplification
+                session_component = session_return * session_scale
 
-                # Quantile bands (also from actual features)
+                # ── Directional drift: ML + agents (applied evenly) ──
+                # ML drift decays with horizon (near-term is more accurate)
+                ml_decay = max(0.3, 1.0 - 0.03 * h)
+                drift_component = ml_drift_per_hour * ml_decay + agent_drift_per_hour
+
+                # ── Combined per-hour return ──
+                combined_return = session_component + drift_component
+
+                # ── Light mean-reversion for extreme deviations ──
+                if ref_usd_price > 0:
+                    cum_dev = (prev_usd - ref_usd_price) / ref_usd_price
+                    if abs(cum_dev) > _MEAN_REVERSION_THRESHOLD_PCT:
+                        revert = -cum_dev * _MEAN_REVERSION_STRENGTH
+                        combined_return += revert
+
+                # Apply return to get new price
+                p_final_usd = prev_usd * (1.0 + combined_return)
+
+                # ── Per-step cap: ±1.0% ──
+                if prev_usd > 0:
+                    max_step = prev_usd * _MAX_STEP_PCT
+                    p_final_usd = max(prev_usd - max_step,
+                                      min(p_final_usd, prev_usd + max_step))
+
+                # ── Total deviation cap: ±5% ──
+                if ref_usd_price > 0:
+                    max_dev = ref_usd_price * _MAX_TOTAL_DEV_PCT
+                    p_final_usd = max(ref_usd_price - max_dev,
+                                      min(p_final_usd, ref_usd_price + max_dev))
+
+                # ── Quantile bands ──
                 lo_usd = float(self._xgb_lo.predict(feat)[0])
                 hi_usd = float(self._xgb_hi.predict(feat)[0])
-
-                preds.append({
-                    "date": ts.strftime("%Y-%m-%d %H:00"),
-                    "_raw_usd": p_meta_usd,
-                    "_lo_usd": lo_usd,
-                    "_hi_usd": hi_usd,
-                    "_p_xgb": p_xgb,
-                    "_p_lgb": p_lgb,
-                    "_p_ridge": p_ridge,
-                })
-
-            # ── Post-process: amplify per-hour variation + apply agents ──
-            # Direct predictions from tree models tend to be close together
-            # because lag features dominate.  The per-hour DIFFERENCES are
-            # the model's learned time-of-day signal.  We amplify these
-            # differences so the chart shows natural intra-day patterns
-            # (dips, rises) at a visible scale.
-            #
-            # Strategy: anchor on hour 1's prediction (closest to "1-step-ahead"
-            # which is most accurate), then accumulate the per-hour deltas
-            # scaled up to a visible magnitude.
-
-            if len(raw_predictions) >= 2 and ref_usd_price > 0:
-                # The hour-1 prediction is the model's best single-step forecast
-                base_usd = raw_predictions[0]
-                # The overall direction signal: where does the model think price
-                # is going over 24h? Average of all raw predictions vs current.
-                avg_pred = np.mean(raw_predictions)
-                overall_bias = (avg_pred - ref_usd_price) / ref_usd_price
-
-                # Per-hour differences from the model (time-of-day patterns)
-                # These are typically tiny (0.01-0.05%) because lag features dominate.
-                # Scale them up so they're visible as intra-day patterns.
-                hour_deltas = []
-                for i in range(PREDICTION_HOURS):
-                    if i == 0:
-                        delta = raw_predictions[0] - ref_usd_price
-                    else:
-                        delta = raw_predictions[i] - raw_predictions[i - 1]
-                    hour_deltas.append(delta)
-
-                # Compute typical delta magnitude for scaling
-                delta_magnitudes = [abs(d) for d in hour_deltas if abs(d) > 1e-8]
-                median_delta = float(np.median(delta_magnitudes)) if delta_magnitudes else 1.0
-                target_delta = ref_usd_price * _TARGET_HOURLY_MOVE_PCT
-                scale_factor = target_delta / median_delta if median_delta > 0 else 1.0
-                scale_factor = max(1.0, min(scale_factor, _MAX_DELTA_SCALE))
-
-                # Build final price path: cumulative scaled deltas + agent bias
-                prev_usd = ref_usd_price
-                final_prices = []
-                for h in range(PREDICTION_HOURS):
-                    # Scaled delta preserves the model's per-hour direction signal
-                    scaled_delta = hour_deltas[h] * scale_factor
-
-                    # Agent adjustment decays with horizon
-                    horizon_decay = max(0.3, 1.0 - 0.03 * h)
-                    agent_adj = ref_usd_price * (agent_multiplier - 1.0) * horizon_decay / PREDICTION_HOURS * _AGENT_SPREAD_FACTOR
-
-                    p_final_usd = prev_usd + scaled_delta + agent_adj
-
-                    # Per-step cap: ±1.0%
-                    if prev_usd > 0:
-                        max_step = prev_usd * _MAX_STEP_PCT
-                        p_final_usd = max(prev_usd - max_step,
-                                          min(p_final_usd, prev_usd + max_step))
-
-                    # Total deviation cap: ±5%
-                    if ref_usd_price > 0:
-                        max_dev = ref_usd_price * _MAX_TOTAL_DEV_PCT
-                        p_final_usd = max(ref_usd_price - max_dev,
-                                          min(p_final_usd, ref_usd_price + max_dev))
-
-                    final_prices.append(p_final_usd)
-                    prev_usd = p_final_usd
-            else:
-                # Fallback: use raw predictions directly
-                final_prices = raw_predictions
-
-            # ── Build output with bands ──
-            output_preds: list[dict] = []
-            for h in range(PREDICTION_HOURS):
-                p_final_usd = final_prices[h]
-
-                # Band widening with horizon
-                lo_raw = preds[h]["_lo_usd"]
-                hi_raw = preds[h]["_hi_usd"]
-                band_half = (hi_raw - lo_raw) / 2.0
+                band_half = (hi_usd - lo_usd) / 2.0
                 widen_factor = math.sqrt(h + 1)
                 band_half *= widen_factor
                 min_band_half = ref_usd_price * _BAND_HORIZON_FLOOR * widen_factor
@@ -554,12 +585,8 @@ class MLEnsemble:
                 if hi_inr < p_final_inr:
                     hi_inr = p_final_inr * 1.003
 
-                p_xgb = preds[h]["_p_xgb"]
-                p_lgb = preds[h]["_p_lgb"]
-                p_ridge = preds[h]["_p_ridge"]
-
-                output_preds.append({
-                    "date": preds[h]["date"],
+                preds.append({
+                    "date": ts.strftime("%Y-%m-%d %H:00"),
                     "xgb_price": round(p_final_inr, 2),
                     "xgb_low": round(lo_inr, 2),
                     "xgb_high": round(hi_inr, 2),
@@ -568,19 +595,21 @@ class MLEnsemble:
                     "component_ridge": round(p_ridge * usdinr * oz_to_10g, 2),
                 })
 
+                prev_usd = p_final_usd
+
             # Validate predictions
             current_inr = self._market.get_gold_inr_price()
             if not (isinstance(current_inr, (int, float)) and np.isfinite(current_inr) and current_inr > 0):
-                current_inr = output_preds[0]["xgb_price"] if output_preds else _DEFAULT_INR_PRICE
-            output_preds = validate_xgb_predictions(output_preds, current_inr)
+                current_inr = preds[0]["xgb_price"] if preds else _DEFAULT_INR_PRICE
+            preds = validate_xgb_predictions(preds, current_inr)
 
             # Apply residual corrections from past errors
-            output_preds = self._residual_learner.correct_predictions(output_preds)
+            preds = self._residual_learner.correct_predictions(preds)
 
             # Store for SHAP computation
             self._last_X_pred = np.vstack(X_for_shap) if X_for_shap else None
 
-            return output_preds
+            return preds
 
         except Exception as e:
             logger.error(f"ML ensemble prediction failed: {e}")

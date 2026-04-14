@@ -106,7 +106,7 @@ def compute_accuracy_score(mape: float, band_hit: float, direction: float) -> fl
 # Bump this version string whenever guardrail parameters change.
 # Triggers a one-time rebase that retroactively widens bands on all stored
 # plans so accuracy metrics reflect the new parameters immediately.
-_GUARDRAIL_VERSION = "v10_autoregressive_no_mean_revert_20260414"
+_GUARDRAIL_VERSION = "v10_direct_multistep_20260414"
 
 
 class AccuracyTracker:

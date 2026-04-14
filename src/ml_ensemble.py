@@ -52,7 +52,7 @@ _TRAIN_PERIOD_DAYS = 90      # 3 months of hourly data (~2160 bars)
 _MIN_TRAIN_SAMPLES = 200     # hard floor after cleanup
 _DEFAULT_INR_PRICE = 92_000  # fallback gold price (INR/10g) when market data unavailable
 
-# ── Autoregressive prediction constants ────────────────────────────
+# ── Direct multi-step prediction constants ─────────────────────────
 # Total deviation cap: max cumulative movement from starting price (±5%)
 _MAX_TOTAL_DEV_PCT = 0.05
 # Per-step cap: max single-hour move (±1.0%) — generous enough for volatile sessions
@@ -61,6 +61,14 @@ _MAX_STEP_PCT = 0.01
 _BAND_BASE_FLOOR = 0.003
 # Band per-horizon floor: scales with √(h+1)
 _BAND_HORIZON_FLOOR = 0.005
+# Target per-hour move magnitude (fraction of price, ~0.1% = realistic gold move)
+_TARGET_HOURLY_MOVE_PCT = 0.001
+# Max amplification of model's raw per-hour deltas (prevents over-scaling tiny signals)
+_MAX_DELTA_SCALE = 50.0
+# Agent signal spread factor: distributes agent adjustment across PREDICTION_HOURS
+# with heavier weighting on near-term hours. Factor of 3 means agent contributes
+# ~3× its per-hour share in the first few hours (decaying with horizon).
+_AGENT_SPREAD_FACTOR = 3
 
 # ── Internal feature names (used for model training) ─────────────────
 # NOTE: Only 16 time-series features are used for training, because agent
@@ -483,10 +491,9 @@ class MLEnsemble:
                 # Compute typical delta magnitude for scaling
                 delta_magnitudes = [abs(d) for d in hour_deltas if abs(d) > 1e-8]
                 median_delta = float(np.median(delta_magnitudes)) if delta_magnitudes else 1.0
-                # Target: per-hour moves in the 0.05-0.15% range (realistic gold)
-                target_delta = ref_usd_price * 0.001  # 0.1% of price
+                target_delta = ref_usd_price * _TARGET_HOURLY_MOVE_PCT
                 scale_factor = target_delta / median_delta if median_delta > 0 else 1.0
-                scale_factor = max(1.0, min(scale_factor, 50.0))  # don't over-amplify
+                scale_factor = max(1.0, min(scale_factor, _MAX_DELTA_SCALE))
 
                 # Build final price path: cumulative scaled deltas + agent bias
                 prev_usd = ref_usd_price
@@ -497,7 +504,7 @@ class MLEnsemble:
 
                     # Agent adjustment decays with horizon
                     horizon_decay = max(0.3, 1.0 - 0.03 * h)
-                    agent_adj = ref_usd_price * (agent_multiplier - 1.0) * horizon_decay / PREDICTION_HOURS * 3
+                    agent_adj = ref_usd_price * (agent_multiplier - 1.0) * horizon_decay / PREDICTION_HOURS * _AGENT_SPREAD_FACTOR
 
                     p_final_usd = prev_usd + scaled_delta + agent_adj
 

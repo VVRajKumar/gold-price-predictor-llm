@@ -57,7 +57,7 @@ _DEFAULT_INR_PRICE = 92_000  # fallback gold price (INR/10g) when market data un
 _TREND_BLEND_MODEL = 0.40      # weight for model's 1-step prediction
 _TREND_BLEND_MOM_3H = 0.35    # weight for 3-hour actual momentum
 _TREND_BLEND_MOM_6H = 0.25    # weight for 6-hour actual momentum
-_AGENT_RETURN_SCALE = 0.1       # scales ±1.5% agent signal to ±0.15%/h return
+_AGENT_RETURN_SCALE = 0.1       # agent_multiplier ∈ [0.985,1.015] → ±0.0015 → ±0.15%/h
 _MAX_HOURLY_RETURN = 0.01     # cap per-hour base return at ±1.0%
 _MAX_CUMULATIVE_DEV = 0.05    # cap total cumulative deviation at ±5%
 _STEP_SAFETY_PCT = 0.02       # per-step safety net (2%, rarely triggers)
@@ -419,9 +419,9 @@ class MLEnsemble:
             # ── Step 2: Recent actual momentum ──
             momentum_3h = 0.0
             momentum_6h = 0.0
-            if len(history) >= 4:
+            if len(history) >= 4 and history[-3] > 0:
                 momentum_3h = (history[-1] - history[-3]) / history[-3] / 3.0
-            if len(history) >= 7:
+            if len(history) >= 7 and history[-6] > 0:
                 momentum_6h = (history[-1] - history[-6]) / history[-6] / 6.0
 
             # ── Step 3: Agent signal (additive return component) ──
@@ -478,6 +478,7 @@ class MLEnsemble:
 
                 # ── Price from trend extrapolation ──
                 # √(h+1) scaling: trend continues but naturally decelerates.
+                # Uses h+1 (not h) so hour 0 gets dampening=1.0 (not 0.0).
                 # h=0→1.0, h=3→2.0, h=8→3.0, h=15→4.0, h=23→4.9
                 # This ensures monotonic movement (no hill shape) while
                 # the per-hour marginal change diminishes realistically.

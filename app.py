@@ -604,14 +604,47 @@ with c3:
     _display_conf = 0.95 if _is_weekend else plan.overall_confidence
     st.metric("Confidence", f"{_display_conf:.0%}")
 with c4:
-    if _is_weekend and _valid_price:
-        # Weekend: 24-Hour Target is the same as Friday's close (market is flat)
+    if _is_weekend and _valid_price and plan.daily_predictions:
+        # Weekend: use the model's predicted closing price (last active-market
+        # hour prediction) as the 24-Hour Target instead of the flat current
+        # price.  The chart merges predictions with actual price after close,
+        # but the metric shows the model's closing forecast so visitors see a
+        # meaningful prediction.
+        _closing_pred = None
+        for _dp in reversed(plan.daily_predictions):
+            _dp_dt = pd.to_datetime(_dp.date)
+            if not is_market_closed_ist(_dp_dt.to_pydatetime()):
+                _closing_pred = _dp
+                break
+        if _closing_pred is not None:
+            _close_delta = _closing_pred.predicted_price - plan.current_price
+            st.metric(
+                "24-Hour Target",
+                f"₹{_closing_pred.predicted_price:,.2f}",
+                delta=round(_close_delta, 2),
+                delta_color="normal",
+                help=(
+                    f"Model's predicted market closing price — "
+                    f"change from Friday close: ₹{_close_delta:+,.2f}"
+                ),
+            )
+        else:
+            # All predictions fall on closed hours — fall back to current price
+            st.metric(
+                "24-Hour Target",
+                f"₹{plan.current_price:,.2f}",
+                delta=0,
+                delta_color="off",
+                help="Market is closed — price held at Friday's closing level",
+            )
+    elif _is_weekend and _valid_price:
+        # Weekend with no predictions available
         st.metric(
             "24-Hour Target",
             f"₹{plan.current_price:,.2f}",
             delta=0,
             delta_color="off",
-            help="Market is closed — price held flat at Friday's closing level",
+            help="Market is closed — price held at Friday's closing level",
         )
     elif plan.daily_predictions and _valid_price:
         horizon_target = plan.daily_predictions[-1]

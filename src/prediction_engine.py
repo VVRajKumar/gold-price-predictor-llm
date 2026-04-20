@@ -371,7 +371,7 @@ class PredictionEngine:
         if self._running and self._refresh_thread is not None and self._refresh_thread.is_alive():
             return
         # Thread died (e.g. Streamlit sleep/wake) or was never started — (re)start it.
-        if self._running and (self._refresh_thread is None or not self._refresh_thread.is_alive()):
+        if self._running:
             logger.warning(
                 "Auto-refresh flag was set but thread is dead — restarting"
             )

@@ -44,6 +44,7 @@ class PredictionEngine:
         self._weekly_archive: list[dict] = []
         self._lock = threading.Lock()
         self._running = False
+        self._refresh_thread: Optional[threading.Thread] = None
 
         # One-time storage reset requested for the new weekly workflow.
         self._reset_storage_once()
@@ -367,8 +368,11 @@ class PredictionEngine:
             generates a new prediction (weekday) or weekend analysis
             (weekend) so users never see stale data after an app restart.
         """
+        if self._refresh_thread is not None and self._refresh_thread.is_alive():
+            return  # already running — nothing to do
         if self._running:
-            return
+            # Flag is set but thread died (e.g. Streamlit sleep/wake) — restart.
+            logger.warning("Auto-refresh thread died — restarting")
         self._running = True
 
         def _loop():
@@ -486,6 +490,7 @@ class PredictionEngine:
 
         t = threading.Thread(target=_loop, daemon=True, name="prediction-refresh")
         t.start()
+        self._refresh_thread = t
         logger.info("Auto-refresh started — aligned to 6-hour IST slots, weekend analysis every 6 hours")
 
     def stop_auto_refresh(self):

@@ -39,15 +39,30 @@ NEWS_API_KEY = _get_secret("NEWS_API_KEY")
 FRED_API_KEY = _get_secret("FRED_API_KEY")
 
 # ── LLM Settings ────────────────────────────────────────────────────
-TEMPERATURE = float(os.getenv("TEMPERATURE", "0.0"))
+try:
+    TEMPERATURE = float(os.getenv("TEMPERATURE", "0.0"))
+except (ValueError, TypeError):
+    TEMPERATURE = 0.0
 
 # ── System Settings ─────────────────────────────────────────────────
-REFRESH_INTERVAL_MINUTES = int(os.getenv("REFRESH_INTERVAL_MINUTES", "30"))
+try:
+    REFRESH_INTERVAL_MINUTES = int(os.getenv("REFRESH_INTERVAL_MINUTES", "30"))
+except (ValueError, TypeError):
+    REFRESH_INTERVAL_MINUTES = 30
 FORECAST_GRANULARITY = os.getenv("FORECAST_GRANULARITY", "hourly")
-PREDICTION_HOURS = int(os.getenv("PREDICTION_HOURS", "24"))
-PLAN_REFRESH_HOURS = int(os.getenv("PLAN_REFRESH_HOURS", "6"))
+try:
+    PREDICTION_HOURS = int(os.getenv("PREDICTION_HOURS", "24"))
+except (ValueError, TypeError):
+    PREDICTION_HOURS = 24
+try:
+    PLAN_REFRESH_HOURS = int(os.getenv("PLAN_REFRESH_HOURS", "6"))
+except (ValueError, TypeError):
+    PLAN_REFRESH_HOURS = 6
 ENABLE_XGBOOST_CORRECTION = os.getenv("ENABLE_XGBOOST_CORRECTION", "true").strip().lower() in {"1", "true", "yes", "y", "on"}
-XGBOOST_BLEND_WEIGHT = float(os.getenv("XGBOOST_BLEND_WEIGHT", "0.45"))
+try:
+    XGBOOST_BLEND_WEIGHT = float(os.getenv("XGBOOST_BLEND_WEIGHT", "0.45"))
+except (ValueError, TypeError):
+    XGBOOST_BLEND_WEIGHT = 0.45
 HISTORICAL_LOOKBACK_DAYS = 365
 
 # ── Ticker Symbols ──────────────────────────────────────────────────

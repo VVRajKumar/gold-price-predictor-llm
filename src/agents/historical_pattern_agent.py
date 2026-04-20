@@ -10,7 +10,7 @@ from typing import Any
 import pandas as pd
 import numpy as np
 from .base_agent import BaseAgent, AgentReport
-from ..data_fetchers.market_data import MarketDataFetcher
+from ..data_fetchers.market_data import MarketDataFetcher, _safe_col
 from ..data_fetchers.india_context import get_festival_context
 
 
@@ -54,14 +54,14 @@ Return ONLY valid JSON, no markdown fences."""
             df = self._market.fetch_ticker("GC=F", period_days=365)
             data_source = "COMEX (GC=F)"
         else:
-            _close_check = pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna()
+            _close_check = pd.to_numeric(_safe_col(df, "Close"), errors="coerce").dropna()
             if _close_check.empty or float(_close_check.iloc[-1]) < 10_000:
                 df = self._market.fetch_ticker("GC=F", period_days=365)
                 data_source = "COMEX (GC=F)"
         if df.empty:
             return {"error": "No data"}
 
-        close = pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna()
+        close = pd.to_numeric(_safe_col(df, "Close"), errors="coerce").dropna()
         if close.empty:
             return {"error": "No valid close prices"}
 

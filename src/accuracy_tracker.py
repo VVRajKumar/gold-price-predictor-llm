@@ -18,7 +18,7 @@ import numpy as np
 from loguru import logger
 
 from .config import CACHE_DIR
-from .data_fetchers.market_data import MarketDataFetcher
+from .data_fetchers.market_data import MarketDataFetcher, _safe_col
 from .time_utils import iso_now_ist, now_ist, IST_OFFSET, is_market_closed_ist
 from .guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
 from . import cloud_storage
@@ -536,7 +536,7 @@ class AccuracyTracker:
             # Drop duplicate hours that may arise from rounding
             gold_df = gold_df[~gold_df.index.duplicated(keep="last")]
 
-        close = gold_df["Close"].squeeze()
+        close = _safe_col(gold_df, "Close")
         if isinstance(close, pd.DataFrame):
             close = close.iloc[:, 0]
 

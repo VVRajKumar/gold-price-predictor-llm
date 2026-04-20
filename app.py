@@ -7,10 +7,16 @@ import sys
 import json
 import html as _html_mod
 import re
+import os
+import threading
+import time as _time
+import urllib.request
+import urllib.error
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
@@ -30,7 +36,7 @@ if "src" in sys.modules:
 
 try:
     from src.prediction_engine import PredictionEngine
-    from src.data_fetchers.market_data import MarketDataFetcher
+    from src.data_fetchers.market_data import MarketDataFetcher, _safe_col
     from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score, _DATA_CUTOFF
     from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
@@ -41,7 +47,7 @@ except (KeyError, ImportError, AttributeError):
     for _k in [k for k in list(sys.modules) if k == "src" or k.startswith("src.")]:
         del sys.modules[_k]
     from src.prediction_engine import PredictionEngine
-    from src.data_fetchers.market_data import MarketDataFetcher
+    from src.data_fetchers.market_data import MarketDataFetcher, _safe_col
     from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score, _DATA_CUTOFF
     from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
@@ -209,6 +215,14 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ── Keep-alive heartbeat ─────────────────────────────────────────────
+# Refresh the page every 5 minutes (300 000 ms) to keep the Streamlit Cloud
+# process alive.  This does NOT trigger a new prediction — it simply re-runs
+# the script which displays the latest cached plan.  Predictions are only
+# generated at the 6-hour slot boundaries (00:00, 06:00, 12:00, 18:00 IST)
+# by the background auto-refresh thread.
+st_autorefresh(interval=5 * 60 * 1000, limit=0, key="keep_alive_heartbeat")
+
 # ── Custom CSS ───────────────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -365,6 +379,46 @@ if (not hasattr(engine, "ensure_hourly_prediction")
 engine.start_auto_refresh()
 
 
+# ── Self-ping keep-alive thread ──────────────────────────────────────
+# On Streamlit Community Cloud the app process is suspended when no browser
+# tabs are connected.  This lightweight daemon thread pings the app's own
+# health endpoint every 4 minutes, acting as a synthetic "visitor" so the
+# Cloud infrastructure sees continuous activity and keeps the process alive.
+# It does NOT trigger a new prediction — only the auto-refresh thread
+# (above) generates predictions at the 6-hour slot boundaries.
+
+def _start_self_ping():
+    """Start a daemon thread that pings the local Streamlit health endpoint."""
+    _PING_FLAG = "_self_ping_started"
+    # Guard: only one ping thread per process (survives Streamlit re-runs)
+    if getattr(st, _PING_FLAG, False):
+        return
+    try:
+        setattr(st, _PING_FLAG, True)
+    except Exception:
+        pass
+
+    port = os.environ.get("STREAMLIT_SERVER_PORT", "8501")
+    health_url = f"http://localhost:{port}/_stcore/health"
+    ping_interval = 4 * 60  # seconds (4 minutes)
+
+    def _ping_loop():
+        while True:
+            _time.sleep(ping_interval)
+            try:
+                req = urllib.request.Request(health_url, method="GET")
+                with urllib.request.urlopen(req, timeout=10):
+                    pass  # We only need the connection; ignore the response.
+            except Exception:
+                pass  # Best-effort: if the ping fails, silently retry next cycle.
+
+    t = threading.Thread(target=_ping_loop, daemon=True, name="self-ping-keepalive")
+    t.start()
+
+
+_start_self_ping()
+
+
 def outlook_color(outlook: str) -> str:
     return {"bullish": "#00d4aa", "bearish": "#ff6b6b"}.get(outlook, "#ffd93d")
 
@@ -511,10 +565,10 @@ st.subheader("🕯️ Live Indian Gold OHLC (10D) – INR/10g")
 # Try MCX gold first (native INR/10g), fall back to COMEX + FX conversion
 gold_df = market.fetch_ticker("GOLD.NS", period_days=10, interval="1h")
 _ohlc_source = "MCX (GOLD.NS)"
-if gold_df.empty or ("Close" in gold_df and pd.to_numeric(gold_df["Close"].squeeze(), errors="coerce").dropna().empty):
+if gold_df.empty or ("Close" in gold_df and pd.to_numeric(_safe_col(gold_df, "Close"), errors="coerce").dropna().empty):
     gold_df = market.fetch_ticker("GC=F", period_days=10, interval="1h")
     _ohlc_source = "COMEX (GC=F) + FX"
-elif "Close" in gold_df and float(pd.to_numeric(gold_df["Close"].squeeze(), errors="coerce").dropna().iloc[-1]) < 10_000:
+elif "Close" in gold_df and float(pd.to_numeric(_safe_col(gold_df, "Close"), errors="coerce").dropna().iloc[-1]) < 10_000:
     gold_df = market.fetch_ticker("GC=F", period_days=10, interval="1h")
     _ohlc_source = "COMEX (GC=F) + FX"
 if not gold_df.empty:
@@ -1414,6 +1468,51 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         # ── Limit chart to last 72 hours ─────────────────────────
         _cutoff_72h = pd.Timestamp(now_ist().replace(tzinfo=None)) - pd.Timedelta(hours=72)
         acc_df = acc_df[acc_df["date"] >= _cutoff_72h].copy()
+
+        # ── Fill weekend gaps with Friday's closing price ─────────
+        # During weekends (Sat, Sun, Mon pre-9am) the market is closed and
+        # the accuracy log has no entries.  Fill those market-closed hours
+        # with Friday's last close so the chart shows a flat line.
+        # Market-open hours that were missed (e.g. app offline Mon 9am–12pm)
+        # are intentionally left empty — no fabricated data.
+        _now_floor = pd.Timestamp(now_ist().replace(tzinfo=None)).floor("h")
+        _all_hours = pd.date_range(start=_cutoff_72h.ceil("h"), end=_now_floor, freq="h")
+        _existing_hours = set(acc_df["date"].dt.floor("h")) if not acc_df.empty else set()
+        _missing_hours = [
+            h for h in _all_hours
+            if h not in _existing_hours and is_market_closed_ist(h.to_pydatetime())
+        ]
+        if _missing_hours:
+            # Use Friday's last actual price as the flatline value
+            _last_actual = float("nan")
+            if not acc_df.empty and "actual" in acc_df.columns:
+                _sorted = acc_df.sort_values("date")
+                _last_actual_vals = _sorted["actual"].dropna()
+                if not _last_actual_vals.empty:
+                    _last_actual = float(_last_actual_vals.iloc[-1])
+            # Fallback: try from gold_df (OHLC chart data)
+            if (pd.isna(_last_actual) and not gold_df.empty
+                    and "Close" in gold_df.columns):
+                _close_s = _safe_col(gold_df, "Close")
+                _close_vals = _close_s.dropna()
+                if not _close_vals.empty:
+                    _last_actual = float(_close_vals.iloc[-1])
+            if not pd.isna(_last_actual) and _last_actual >= _MIN_VALID_PRICE:
+                _gap_rows = [{
+                    "date": h,
+                    "actual": _last_actual,
+                    "predicted": _last_actual,
+                    "low_range": _last_actual,
+                    "high_range": _last_actual,
+                    "error": 0.0,
+                    "pct_error": 0.0,
+                    "within_band": True,
+                    "_gap_filled": True,
+                } for h in _missing_hours]
+                acc_df = pd.concat(
+                    [acc_df, pd.DataFrame(_gap_rows)], ignore_index=True
+                )
+                acc_df = acc_df.sort_values("date").reset_index(drop=True)
 
         # Tag market-closed hours (weekends + Monday pre-market) but
         # keep them for charting so the weekend lines are visible.

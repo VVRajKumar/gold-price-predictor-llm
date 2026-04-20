@@ -241,7 +241,7 @@ class MarketDataFetcher:
 
         # Reindex daily FX to match gold data timestamps (may be hourly), forward-fill
         try:
-            fx_aligned = fx.reindex(result.index, method="ffill")
+            fx_aligned = fx.reindex(result.index).ffill()
             fx_aligned = fx_aligned.bfill()
             fx_aligned = fx_aligned.fillna(self.get_usdinr_rate())
         except Exception as e:

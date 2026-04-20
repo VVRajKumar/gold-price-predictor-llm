@@ -32,7 +32,7 @@ from .agents.oil_energy_agent import OilEnergyAgent
 from .agents.sentiment_agent import SentimentAgent
 from .agents.technical_agent import TechnicalAnalysisAgent
 from .agents.historical_pattern_agent import HistoricalPatternAgent
-from .data_fetchers.market_data import MarketDataFetcher
+from .data_fetchers.market_data import MarketDataFetcher, _safe_col
 from .guardrails import validate_prediction_plan, adjust_confidence_from_track_record
 from .time_utils import iso_now_ist, now_ist, current_slot_ist, SLOT_HOURS, is_market_closed_ist
 from .ml_ensemble import MLEnsemble
@@ -121,7 +121,7 @@ def _ensure_full_stop(text: str) -> str:
     if cleaned.endswith("..."):
         return cleaned
     if cleaned.endswith("…"):
-        return cleaned.rstrip("… ") + "..."
+        return cleaned[:-1] + "..."
     if cleaned.endswith("."):
         return cleaned
     if cleaned.endswith("!") or cleaned.endswith("?"):
@@ -337,7 +337,7 @@ class Orchestrator:
             fallback_df = self._market.fetch_ticker("GC=F", period_days=14)
             usdinr = self._market.get_usdinr_rate()
             if not fallback_df.empty and "Close" in fallback_df:
-                close = fallback_df["Close"].squeeze()
+                close = _safe_col(fallback_df, "Close")
                 close = close.dropna() if hasattr(close, "dropna") else close
                 if len(close) > 0:
                     usd_per_oz = float(close.iloc[-1])

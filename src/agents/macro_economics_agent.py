@@ -8,7 +8,7 @@ from typing import Any
 
 from .base_agent import BaseAgent, AgentReport
 from ..data_fetchers.macro_data import MacroDataFetcher
-from ..data_fetchers.market_data import MarketDataFetcher
+from ..data_fetchers.market_data import MarketDataFetcher, _safe_col
 from ..data_fetchers.india_context import get_india_macro_context, get_festival_context
 
 
@@ -53,7 +53,7 @@ Return ONLY valid JSON, no markdown fences."""
         usdinr_df = self._market.fetch_ticker("INR=X", period_days=90)
         usdinr_info = {}
         if not usdinr_df.empty:
-            usdinr_close = usdinr_df["Close"].squeeze()
+            usdinr_close = _safe_col(usdinr_df, "Close")
             usdinr_info = {
                 "current_rate": round(float(usdinr_close.iloc[-1]), 2),
                 "30d_change": round(
@@ -70,7 +70,7 @@ Return ONLY valid JSON, no markdown fences."""
         dxy_df = self._market.fetch_ticker("DX-Y.NYB", period_days=90)
         dxy_info = {}
         if not dxy_df.empty:
-            dxy_close = dxy_df["Close"].squeeze()
+            dxy_close = _safe_col(dxy_df, "Close")
             dxy_info = {
                 "current": round(float(dxy_close.iloc[-1]), 2),
                 "30d_change": round(
@@ -83,7 +83,7 @@ Return ONLY valid JSON, no markdown fences."""
         nifty_df = self._market.fetch_ticker("^NSEI", period_days=30)
         nifty_info = {}
         if not nifty_df.empty:
-            nifty_close = nifty_df["Close"].squeeze()
+            nifty_close = _safe_col(nifty_df, "Close")
             nifty_info = {
                 "current": round(float(nifty_close.iloc[-1]), 2),
                 "30d_change_pct": round(
@@ -96,7 +96,7 @@ Return ONLY valid JSON, no markdown fences."""
         sensex_df = self._market.fetch_ticker("^BSESN", period_days=30)
         sensex_info = {}
         if not sensex_df.empty:
-            sensex_close = sensex_df["Close"].squeeze()
+            sensex_close = _safe_col(sensex_df, "Close")
             sensex_info = {
                 "current": round(float(sensex_close.iloc[-1]), 2),
                 "30d_change_pct": round(
@@ -109,7 +109,7 @@ Return ONLY valid JSON, no markdown fences."""
         comex_df = self._market.fetch_ticker("GC=F", period_days=30)
         comex_info = {}
         if not comex_df.empty:
-            close = comex_df["Close"].squeeze()
+            close = _safe_col(comex_df, "Close")
             comex_info = {
                 "symbol": "GC=F",
                 "current_usd": round(float(close.iloc[-1]), 2),
@@ -122,7 +122,7 @@ Return ONLY valid JSON, no markdown fences."""
         mcx_df = self._market.fetch_ticker("GOLD.NS", period_days=30)
         mcx_info = {}
         if not mcx_df.empty:
-            mcx_close = mcx_df["Close"].squeeze()
+            mcx_close = _safe_col(mcx_df, "Close")
             if len(mcx_close) > 0 and float(mcx_close.iloc[-1]) > 10_000:
                 mcx_info = {
                     "symbol": "GOLD.NS (MCX)",

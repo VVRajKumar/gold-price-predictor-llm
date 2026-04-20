@@ -430,6 +430,32 @@ def validate_prediction_plan(
 
     result["daily_predictions"] = validated_preds
 
+    # ── Outlook-direction consistency (#8) ──
+    # If the 24-hour target (last predicted price) clearly contradicts the
+    # stated outlook, correct the outlook to match the predicted direction.
+    # A small dead-zone (0.1% of current price) avoids flipping on noise.
+    if validated_preds and current_price > 0:
+        final_price = validated_preds[-1]["predicted_price"]
+        price_delta = final_price - current_price
+        dead_zone = current_price * 0.001  # 0.1% threshold
+
+        if outlook == "bullish" and price_delta < -dead_zone:
+            corrected_outlook = "bearish"
+            corrections.append(
+                f"overall_outlook 'bullish' contradicts 24h target "
+                f"(₹{final_price:,.0f} < ₹{current_price:,.0f}, "
+                f"Δ={price_delta:+,.0f}) → '{corrected_outlook}'"
+            )
+            result["overall_outlook"] = corrected_outlook
+        elif outlook == "bearish" and price_delta > dead_zone:
+            corrected_outlook = "bullish"
+            corrections.append(
+                f"overall_outlook 'bearish' contradicts 24h target "
+                f"(₹{final_price:,.0f} > ₹{current_price:,.0f}, "
+                f"Δ={price_delta:+,.0f}) → '{corrected_outlook}'"
+            )
+            result["overall_outlook"] = corrected_outlook
+
     # ── Guardrail correction count (#7) ──
     result["_guardrail_correction_count"] = len(corrections)
 

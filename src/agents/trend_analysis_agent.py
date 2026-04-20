@@ -8,7 +8,7 @@ from typing import Any
 
 import pandas as pd
 from .base_agent import BaseAgent, AgentReport
-from ..data_fetchers.market_data import MarketDataFetcher
+from ..data_fetchers.market_data import MarketDataFetcher, _safe_col
 
 
 class TrendAnalysisAgent(BaseAgent):
@@ -48,7 +48,7 @@ Return ONLY valid JSON, no markdown fences."""
             df = self._market.fetch_ticker("GC=F", period_days=90)
             data_source = "COMEX (GC=F)"
         else:
-            _close_check = pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna()
+            _close_check = pd.to_numeric(_safe_col(df, "Close"), errors="coerce").dropna()
             if _close_check.empty or float(_close_check.iloc[-1]) < 10_000:
                 df = self._market.fetch_ticker("GC=F", period_days=90)
                 data_source = "COMEX (GC=F)"
@@ -57,7 +57,7 @@ Return ONLY valid JSON, no markdown fences."""
         # Compute simple moving averages
         sma_data = {}
         if not df.empty:
-            close = df["Close"].squeeze()
+            close = _safe_col(df, "Close")
             for window in [5, 10, 20, 50]:
                 sma = close.rolling(window).mean()
                 if len(sma.dropna()) > 0:

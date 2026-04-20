@@ -255,6 +255,55 @@ df = df[df["date"] >= pd.Timestamp(_DATA_CUTOFF)].copy()
 # But keep a full copy for the chart (weekend hours shown as green-dotted).
 df["_is_closed"] = df["date"].apply(lambda dt: is_market_closed_ist(dt.to_pydatetime()))
 df_all = df.copy()  # includes weekend hours for chart rendering
+
+# ── Fill weekend gaps with last known actual price ────────────────
+# During weekends (Sat, Sun, Mon pre-9am) the market is closed and
+# the archive may have no entries.  Fill those market-closed hours
+# with the last known actual price so the chart shows a flat line
+# through weekends instead of a gap.
+# Market-open hours that were missed (e.g. app offline Mon 9am–12pm)
+# are intentionally left empty — no fabricated data.
+if not df_all.empty:
+    _now_ts = pd.Timestamp(now_ist().replace(tzinfo=None)).floor("h")
+    _archive_start = df_all["date"].min().floor("h")
+    _all_hours = pd.date_range(start=_archive_start, end=_now_ts, freq="h")
+    _existing_hours = set(df_all["date"].dt.floor("h"))
+    _missing_closed = [
+        h for h in _all_hours
+        if h not in _existing_hours and is_market_closed_ist(h.to_pydatetime())
+    ]
+    if _missing_closed:
+        # Build a sorted actual-price series for forward-fill lookups
+        _actual_idx = (
+            df_all.sort_values("date")
+            .set_index("date")["actual"]
+            .dropna()
+            .sort_index()
+        )
+        _gap_rows = []
+        for h in _missing_closed:
+            _price = _actual_idx.asof(h)
+            if pd.isna(_price) or float(_price) < _MIN_VALID_PRICE:
+                continue
+            _price = float(_price)
+            _gap_rows.append({
+                "date": h,
+                "actual": _price,
+                "predicted": _price,
+                "low_range": _price,
+                "high_range": _price,
+                "error": 0.0,
+                "pct_error": 0.0,
+                "within_band": True,
+                "_is_closed": True,
+                "_gap_filled": True,
+            })
+        if _gap_rows:
+            df_all = pd.concat(
+                [df_all, pd.DataFrame(_gap_rows)], ignore_index=True,
+            )
+            df_all = df_all.sort_values("date").reset_index(drop=True)
+
 df = df[~df["_is_closed"]].copy()
 
 if df.empty:

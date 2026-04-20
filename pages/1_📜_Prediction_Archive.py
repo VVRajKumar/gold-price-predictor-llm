@@ -31,6 +31,7 @@ try:
     from src.time_utils import now_ist, parse_iso_to_ist, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score, _DIR_NEUTRAL_PCT, _DATA_CUTOFF
     from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
+    from src.chart_utils import break_at_gaps as _break_at_gaps, split_into_segments as _split_into_segments
 except (KeyError, ImportError, AttributeError):
     for _k in [k for k in list(sys.modules) if k == "src" or k.startswith("src.")]:
         del sys.modules[_k]
@@ -38,9 +39,7 @@ except (KeyError, ImportError, AttributeError):
     from src.time_utils import now_ist, parse_iso_to_ist, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score, _DIR_NEUTRAL_PCT, _DATA_CUTOFF
     from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
-
-# ── Chart gap-breaker helper ─────────────────────────────────────────
-from src.chart_utils import break_at_gaps as _break_at_gaps, split_into_segments as _split_into_segments
+    from src.chart_utils import break_at_gaps as _break_at_gaps, split_into_segments as _split_into_segments
 
 # ── Page config ──────────────────────────────────────────────────────
 st.set_page_config(

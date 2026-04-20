@@ -40,6 +40,7 @@ try:
     from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score, _DATA_CUTOFF
     from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
+    from src.chart_utils import break_at_gaps as _break_at_gaps, split_into_segments as _split_into_segments
 except (KeyError, ImportError, AttributeError):
     # On Streamlit Cloud hot-reload the module cache can be in an inconsistent
     # state after the cleanup above.  Purge all stale src.* modules and retry.
@@ -51,12 +52,7 @@ except (KeyError, ImportError, AttributeError):
     from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score, _DATA_CUTOFF
     from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
-
-# ── Chart gap-breaker helper ─────────────────────────────────────────
-# When plotting only market-open hours, Plotly draws a straight line from
-# Friday's last hour to Monday's first hour.  break_at_gaps() inserts
-# ``None`` values at those gaps so the line visually breaks across weekends.
-from src.chart_utils import break_at_gaps as _break_at_gaps, split_into_segments as _split_into_segments
+    from src.chart_utils import break_at_gaps as _break_at_gaps, split_into_segments as _split_into_segments
 
 # ── Display-time name helpers ────────────────────────────────────────
 # Chart-friendly names (short labels for SHAP bar chart / table headers)

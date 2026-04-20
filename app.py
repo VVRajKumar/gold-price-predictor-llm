@@ -56,7 +56,7 @@ except (KeyError, ImportError, AttributeError):
 # When plotting only market-open hours, Plotly draws a straight line from
 # Friday's last hour to Monday's first hour.  break_at_gaps() inserts
 # ``None`` values at those gaps so the line visually breaks across weekends.
-from src.chart_utils import break_at_gaps as _break_at_gaps
+from src.chart_utils import break_at_gaps as _break_at_gaps, split_into_segments as _split_into_segments
 
 # ── Display-time name helpers ────────────────────────────────────────
 # Chart-friendly names (short labels for SHAP bar chart / table headers)
@@ -801,22 +801,28 @@ if plan.daily_predictions:
     # Split predictions into active market and closed (weekend) segments
     active_preds = pred_df[~pred_df["_is_closed"]]
 
-    # Prediction band (only for active market hours) — with weekend gap breaks
+    # Prediction band (only for active market hours) — split into contiguous
+    # segments so fill="tonexty" doesn't create jagged spike artefacts.
     if not active_preds.empty:
-        _bx, _bhi, _blo = _break_at_gaps(
+        _segments = _split_into_segments(
             active_preds["date"], active_preds["high_range"], active_preds["low_range"],
         )
-        fig.add_trace(go.Scatter(
-            x=_bx, y=_bhi,
-            mode="lines", name="Upper Band",
-            line=dict(width=0), showlegend=False,
-        ))
-        fig.add_trace(go.Scatter(
-            x=_bx, y=_blo,
-            mode="lines", name="Prediction Range",
-            fill="tonexty", fillcolor="rgba(0,212,170,0.15)",
-            line=dict(width=0),
-        ))
+        for _seg_idx, _seg in enumerate(_segments):
+            _seg_x, _seg_hi, _seg_lo = _seg
+            fig.add_trace(go.Scatter(
+                x=_seg_x, y=_seg_hi,
+                mode="lines", name="Upper Band",
+                line=dict(width=0), showlegend=False,
+                legendgroup="band",
+            ))
+            fig.add_trace(go.Scatter(
+                x=_seg_x, y=_seg_lo,
+                mode="lines", name="Prediction Range",
+                fill="tonexty", fillcolor="rgba(0,212,170,0.15)",
+                line=dict(width=0),
+                showlegend=(_seg_idx == 0),
+                legendgroup="band",
+            ))
 
     # Active prediction line — solid green (market-open hours), with weekend gap breaks
     if not active_preds.empty:
@@ -1531,22 +1537,28 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
 
         fig_acc = go.Figure()
 
-        # Prediction band (active market hours only) — with weekend gap breaks
+        # Prediction band (active market hours only) — split into contiguous
+        # segments so fill="tonexty" doesn't create jagged spike artefacts.
         if not acc_active.empty:
-            _bx, _bhi, _blo = _break_at_gaps(
+            _segments = _split_into_segments(
                 acc_active["date"], acc_active["high_range"], acc_active["low_range"],
             )
-            fig_acc.add_trace(go.Scatter(
-                    x=_bx, y=_bhi,
-                    mode="lines", name="Upper Band",
-                    line=dict(width=0), showlegend=False,
-            ))
-            fig_acc.add_trace(go.Scatter(
-                    x=_bx, y=_blo,
-                    mode="lines", name="Prediction Range",
-                    fill="tonexty", fillcolor="rgba(0,212,170,0.12)",
-                    line=dict(width=0),
-            ))
+            for _seg_idx, _seg in enumerate(_segments):
+                _seg_x, _seg_hi, _seg_lo = _seg
+                fig_acc.add_trace(go.Scatter(
+                        x=_seg_x, y=_seg_hi,
+                        mode="lines", name="Upper Band",
+                        line=dict(width=0), showlegend=False,
+                        legendgroup="band",
+                ))
+                fig_acc.add_trace(go.Scatter(
+                        x=_seg_x, y=_seg_lo,
+                        mode="lines", name="Prediction Range",
+                        fill="tonexty", fillcolor="rgba(0,212,170,0.12)",
+                        line=dict(width=0),
+                        showlegend=(_seg_idx == 0),
+                        legendgroup="band",
+                ))
 
         # Actual line — single yellow trace through ALL hours, with weekend gap breaks
         if not acc_df.empty:

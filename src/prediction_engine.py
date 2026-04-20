@@ -368,13 +368,11 @@ class PredictionEngine:
             generates a new prediction (weekday) or weekend analysis
             (weekend) so users never see stale data after an app restart.
         """
-        if self._running and self._refresh_thread is not None and self._refresh_thread.is_alive():
-            return
-        # Thread died (e.g. Streamlit sleep/wake) or was never started — (re)start it.
+        if self._refresh_thread is not None and self._refresh_thread.is_alive():
+            return  # already running — nothing to do
         if self._running:
-            logger.warning(
-                "Auto-refresh flag was set but thread is dead — restarting"
-            )
+            # Flag is set but thread died (e.g. Streamlit sleep/wake) — restart.
+            logger.warning("Auto-refresh thread died — restarting")
         self._running = True
 
         def _loop():

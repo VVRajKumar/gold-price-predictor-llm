@@ -1415,15 +1415,19 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         _cutoff_72h = pd.Timestamp(now_ist().replace(tzinfo=None)) - pd.Timedelta(hours=72)
         acc_df = acc_df[acc_df["date"] >= _cutoff_72h].copy()
 
-        # ── Fill weekend/offline gaps with Friday's closing price ─
-        # When the app was offline during the weekend, the accuracy log
-        # has no entries for those hours.  Fill every missing hour in the
-        # 72h window with the last known actual price (Friday close) so
-        # the chart line stays continuous instead of showing a blank gap.
+        # ── Fill weekend gaps with Friday's closing price ─────────
+        # During weekends (Sat, Sun, Mon pre-9am) the market is closed and
+        # the accuracy log has no entries.  Fill those market-closed hours
+        # with Friday's last close so the chart shows a flat line.
+        # Market-open hours that were missed (e.g. app offline Mon 9am–12pm)
+        # are intentionally left empty — no fabricated data.
         _now_floor = pd.Timestamp(now_ist().replace(tzinfo=None)).floor("h")
         _all_hours = pd.date_range(start=_cutoff_72h.ceil("h"), end=_now_floor, freq="h")
         _existing_hours = set(acc_df["date"].dt.floor("h")) if not acc_df.empty else set()
-        _missing_hours = [h for h in _all_hours if h not in _existing_hours]
+        _missing_hours = [
+            h for h in _all_hours
+            if h not in _existing_hours and is_market_closed_ist(h.to_pydatetime())
+        ]
         if _missing_hours:
             # Use Friday's last actual price as the flatline value
             _last_actual = float("nan")

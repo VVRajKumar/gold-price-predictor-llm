@@ -49,3 +49,51 @@ def break_at_gaps(dates, *value_cols):
             y_outs[j].append(vl[i])
 
     return (x_out, *y_outs)
+
+
+def split_into_segments(dates, *value_cols):
+    """Split time-series data into contiguous segments at large gaps.
+
+    Unlike :func:`break_at_gaps` which inserts ``None`` sentinels,
+    this function returns a list of separate segments.  This is needed
+    for ``fill="tonexty"`` band traces where ``None`` gaps cause
+    jagged / spiky fill artefacts in Plotly.
+
+    Parameters
+    ----------
+    dates : sequence of datetime
+        Sorted timestamps (pd.Series, list, or array).
+    *value_cols : sequence
+        One or more aligned value columns (y-data for the traces).
+
+    Returns
+    -------
+    list[tuple[list, ...]]
+        Each element is ``(x_seg, y1_seg, y2_seg, …)`` for one
+        contiguous segment.
+    """
+    dates_list = list(dates)
+    val_lists = [list(v) for v in value_cols]
+
+    if not dates_list:
+        return []
+
+    segments: list[tuple[list, ...]] = []
+    seg_x: list = [dates_list[0]]
+    seg_ys: list[list] = [[vl[0]] for vl in val_lists]
+
+    for i in range(1, len(dates_list)):
+        gap = (dates_list[i] - dates_list[i - 1]).total_seconds() / 3600
+        if gap > _MAX_CONTIGUOUS_GAP_HOURS:
+            segments.append((seg_x, *seg_ys))
+            seg_x = []
+            seg_ys = [[] for _ in val_lists]
+        seg_x.append(dates_list[i])
+        for j, vl in enumerate(val_lists):
+            seg_ys[j].append(vl[i])
+
+    # Don't forget the last segment
+    if seg_x:
+        segments.append((seg_x, *seg_ys))
+
+    return segments

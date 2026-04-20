@@ -7,10 +7,16 @@ import sys
 import json
 import html as _html_mod
 import re
+import os
+import threading
+import time as _time
+import urllib.request
+import urllib.error
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
@@ -209,6 +215,14 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ── Keep-alive heartbeat ─────────────────────────────────────────────
+# Refresh the page every 5 minutes (300 000 ms) to keep the Streamlit Cloud
+# process alive.  This does NOT trigger a new prediction — it simply re-runs
+# the script which displays the latest cached plan.  Predictions are only
+# generated at the 6-hour slot boundaries (00:00, 06:00, 12:00, 18:00 IST)
+# by the background auto-refresh thread.
+st_autorefresh(interval=5 * 60 * 1000, limit=0, key="keep_alive_heartbeat")
+
 # ── Custom CSS ───────────────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -363,6 +377,46 @@ if (not hasattr(engine, "ensure_hourly_prediction")
 # the user hasn't refreshed the page.  The method is a no-op if already
 # running, so repeated Streamlit script re-runs are safe.
 engine.start_auto_refresh()
+
+
+# ── Self-ping keep-alive thread ──────────────────────────────────────
+# On Streamlit Community Cloud the app process is suspended when no browser
+# tabs are connected.  This lightweight daemon thread pings the app's own
+# health endpoint every 4 minutes, acting as a synthetic "visitor" so the
+# Cloud infrastructure sees continuous activity and keeps the process alive.
+# It does NOT trigger a new prediction — only the auto-refresh thread
+# (above) generates predictions at the 6-hour slot boundaries.
+
+def _start_self_ping():
+    """Start a daemon thread that pings the local Streamlit health endpoint."""
+    _PING_FLAG = "_self_ping_started"
+    # Guard: only one ping thread per process (survives Streamlit re-runs)
+    if getattr(st, _PING_FLAG, False):
+        return
+    try:
+        setattr(st, _PING_FLAG, True)
+    except Exception:
+        pass
+
+    port = os.environ.get("STREAMLIT_SERVER_PORT", "8501")
+    health_url = f"http://localhost:{port}/_stcore/health"
+    ping_interval = 4 * 60  # seconds (4 minutes)
+
+    def _ping_loop():
+        while True:
+            _time.sleep(ping_interval)
+            try:
+                req = urllib.request.Request(health_url, method="GET")
+                with urllib.request.urlopen(req, timeout=10):
+                    pass  # We only need the connection; ignore the response.
+            except Exception:
+                pass  # Best-effort: if the ping fails, silently retry next cycle.
+
+    t = threading.Thread(target=_ping_loop, daemon=True, name="self-ping-keepalive")
+    t.start()
+
+
+_start_self_ping()
 
 
 def outlook_color(outlook: str) -> str:

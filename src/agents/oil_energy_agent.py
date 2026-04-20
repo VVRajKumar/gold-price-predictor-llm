@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 from .base_agent import BaseAgent, AgentReport
-from ..data_fetchers.market_data import MarketDataFetcher
+from ..data_fetchers.market_data import MarketDataFetcher, _safe_col
 from ..data_fetchers.news_data import NewsDataFetcher
 
 
@@ -48,7 +48,7 @@ Return ONLY valid JSON, no markdown fences."""
         mcx_gold_df = self._market.fetch_ticker("GOLD.NS", period_days=90)
         mcx_gold_info = {}
         if not mcx_gold_df.empty:
-            mcx_close = mcx_gold_df["Close"].squeeze()
+            mcx_close = _safe_col(mcx_gold_df, "Close")
             if len(mcx_close) > 0 and float(mcx_close.iloc[-1]) > 10_000:
                 mcx_gold_info = {
                     "current_price_inr_10g": round(float(mcx_close.iloc[-1]), 2),
@@ -57,9 +57,9 @@ Return ONLY valid JSON, no markdown fences."""
 
         oil_info = {}
         if not oil_df.empty:
-            oil_close = oil_df["Close"].squeeze()
-            oil_high = oil_df["High"].squeeze()
-            oil_low = oil_df["Low"].squeeze()
+            oil_close = _safe_col(oil_df, "Close")
+            oil_high = _safe_col(oil_df, "High")
+            oil_low = _safe_col(oil_df, "Low")
             oil_info = {
                 "current_price": round(float(oil_close.iloc[-1]), 2),
                 "30d_high": round(float(oil_high.tail(30).max()), 2),
@@ -77,7 +77,7 @@ Return ONLY valid JSON, no markdown fences."""
         gold_oil_ratio = None
         if not oil_df.empty and not gold_df.empty:
             gold_oil_ratio = round(
-                float(gold_df["Close"].squeeze().iloc[-1]) / float(oil_df["Close"].squeeze().iloc[-1]), 2
+                float(_safe_col(gold_df, "Close").iloc[-1]) / float(_safe_col(oil_df, "Close").iloc[-1]), 2
             )
 
         energy_news = self._news.fetch_newsapi(

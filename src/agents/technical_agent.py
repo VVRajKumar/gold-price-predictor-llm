@@ -9,7 +9,7 @@ from typing import Any
 import pandas as pd
 import numpy as np
 from .base_agent import BaseAgent, AgentReport
-from ..data_fetchers.market_data import MarketDataFetcher
+from ..data_fetchers.market_data import MarketDataFetcher, _safe_col
 
 
 # Fallback values when insufficient data produces NaN
@@ -115,20 +115,20 @@ Return ONLY valid JSON, no markdown fences."""
         # Try MCX gold first (already in INR), fall back to COMEX
         source = "MCX (GOLD.NS)"
         df = self._market.fetch_ticker("GOLD.NS", period_days=120)
-        if df.empty or pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna().empty:
+        if df.empty or pd.to_numeric(_safe_col(df, "Close"), errors="coerce").dropna().empty:
             source = "COMEX (GC=F)"
             df = self._market.fetch_ticker("GC=F", period_days=120)
         else:
-            _close_check = pd.to_numeric(df["Close"].squeeze(), errors="coerce").dropna()
+            _close_check = pd.to_numeric(_safe_col(df, "Close"), errors="coerce").dropna()
             if _close_check.empty or float(_close_check.iloc[-1]) < 10_000:
                 source = "COMEX (GC=F)"
                 df = self._market.fetch_ticker("GC=F", period_days=120)
         if df.empty:
             return {"error": "No gold data"}
 
-        close = df["Close"].squeeze()
-        high = df["High"].squeeze()
-        low = df["Low"].squeeze()
+        close = _safe_col(df, "Close")
+        high = _safe_col(df, "High")
+        low = _safe_col(df, "Low")
 
         def _safe_round(val, ndigits=2, fallback=0.0):
             """Round a value safely, returning fallback if NaN."""

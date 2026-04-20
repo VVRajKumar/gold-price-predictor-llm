@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 from .base_agent import BaseAgent, AgentReport
-from ..data_fetchers.market_data import MarketDataFetcher
+from ..data_fetchers.market_data import MarketDataFetcher, _safe_col
 from ..data_fetchers.news_data import NewsDataFetcher
 
 
@@ -47,7 +47,7 @@ Return ONLY valid JSON, no markdown fences."""
         vix_df = self._market.fetch_ticker("^INDIAVIX", period_days=30)
         vix_info = {}
         if not vix_df.empty:
-            vix_close = vix_df["Close"].squeeze()
+            vix_close = _safe_col(vix_df, "Close")
             vix_info = {
                 "index": "India VIX",
                 "current": round(float(vix_close.iloc[-1]), 2),
@@ -60,7 +60,7 @@ Return ONLY valid JSON, no markdown fences."""
         nifty_df = self._market.fetch_ticker("^NSEI", period_days=30)
         nifty_info = {}
         if not nifty_df.empty:
-            nifty_close = nifty_df["Close"].squeeze()
+            nifty_close = _safe_col(nifty_df, "Close")
             _nifty_back = min(5, len(nifty_close) - 1) if len(nifty_close) > 1 else 0
             if _nifty_back > 0 and float(nifty_close.iloc[-1 - _nifty_back]) != 0:
                 nifty_info = {
@@ -77,7 +77,7 @@ Return ONLY valid JSON, no markdown fences."""
         usdinr_df = self._market.fetch_ticker("INR=X", period_days=30)
         usdinr_info = {}
         if not usdinr_df.empty:
-            usdinr_close = usdinr_df["Close"].squeeze()
+            usdinr_close = _safe_col(usdinr_df, "Close")
             _usd_back = min(5, len(usdinr_close) - 1) if len(usdinr_close) > 1 else 0
             usdinr_info = {
                 "current_rate": round(float(usdinr_close.iloc[-1]), 2),

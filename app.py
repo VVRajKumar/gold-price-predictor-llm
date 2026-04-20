@@ -1415,6 +1415,49 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         _cutoff_72h = pd.Timestamp(now_ist().replace(tzinfo=None)) - pd.Timedelta(hours=72)
         acc_df = acc_df[acc_df["date"] >= _cutoff_72h].copy()
 
+        # ── Fill weekend/offline gaps with Friday's closing price ─
+        # When the app was offline during the weekend, the accuracy log
+        # has no entries for those hours.  Fill every missing hour in the
+        # 72h window with the last known actual price (Friday close) so
+        # the chart line stays continuous instead of showing a blank gap.
+        _now_floor = pd.Timestamp(now_ist().replace(tzinfo=None)).floor("h")
+        _all_hours = pd.date_range(start=_cutoff_72h.ceil("h"), end=_now_floor, freq="h")
+        _existing_hours = set(acc_df["date"].dt.floor("h")) if not acc_df.empty else set()
+        _missing_hours = [h for h in _all_hours if h not in _existing_hours]
+        if _missing_hours:
+            # Use Friday's last actual price as the flatline value
+            _last_actual = float("nan")
+            if not acc_df.empty and "actual" in acc_df.columns:
+                _sorted = acc_df.sort_values("date")
+                _last_actual_vals = _sorted["actual"].dropna()
+                if not _last_actual_vals.empty:
+                    _last_actual = float(_last_actual_vals.iloc[-1])
+            # Fallback: try from gold_df (OHLC chart data)
+            if (pd.isna(_last_actual) and not gold_df.empty
+                    and "Close" in gold_df.columns):
+                _close_s = gold_df["Close"].squeeze()
+                if isinstance(_close_s, pd.DataFrame):
+                    _close_s = _close_s.iloc[:, 0]
+                _close_vals = _close_s.dropna()
+                if not _close_vals.empty:
+                    _last_actual = float(_close_vals.iloc[-1])
+            if not pd.isna(_last_actual) and _last_actual >= _MIN_VALID_PRICE:
+                _gap_rows = [{
+                    "date": h,
+                    "actual": _last_actual,
+                    "predicted": _last_actual,
+                    "low_range": _last_actual,
+                    "high_range": _last_actual,
+                    "error": 0.0,
+                    "pct_error": 0.0,
+                    "within_band": True,
+                    "_gap_filled": True,
+                } for h in _missing_hours]
+                acc_df = pd.concat(
+                    [acc_df, pd.DataFrame(_gap_rows)], ignore_index=True
+                )
+                acc_df = acc_df.sort_values("date").reset_index(drop=True)
+
         # Tag market-closed hours (weekends + Monday pre-market) but
         # keep them for charting so the weekend lines are visible.
         acc_df["_is_closed"] = acc_df["date"].apply(

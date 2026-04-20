@@ -30,7 +30,7 @@ if "src" in sys.modules:
 
 try:
     from src.prediction_engine import PredictionEngine
-    from src.data_fetchers.market_data import MarketDataFetcher
+    from src.data_fetchers.market_data import MarketDataFetcher, _safe_col
     from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score, _DATA_CUTOFF
     from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
@@ -41,7 +41,7 @@ except (KeyError, ImportError, AttributeError):
     for _k in [k for k in list(sys.modules) if k == "src" or k.startswith("src.")]:
         del sys.modules[_k]
     from src.prediction_engine import PredictionEngine
-    from src.data_fetchers.market_data import MarketDataFetcher
+    from src.data_fetchers.market_data import MarketDataFetcher, _safe_col
     from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score, _DATA_CUTOFF
     from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
@@ -511,10 +511,10 @@ st.subheader("🕯️ Live Indian Gold OHLC (10D) – INR/10g")
 # Try MCX gold first (native INR/10g), fall back to COMEX + FX conversion
 gold_df = market.fetch_ticker("GOLD.NS", period_days=10, interval="1h")
 _ohlc_source = "MCX (GOLD.NS)"
-if gold_df.empty or ("Close" in gold_df and pd.to_numeric(gold_df["Close"].squeeze(), errors="coerce").dropna().empty):
+if gold_df.empty or ("Close" in gold_df and pd.to_numeric(_safe_col(gold_df, "Close"), errors="coerce").dropna().empty):
     gold_df = market.fetch_ticker("GC=F", period_days=10, interval="1h")
     _ohlc_source = "COMEX (GC=F) + FX"
-elif "Close" in gold_df and float(pd.to_numeric(gold_df["Close"].squeeze(), errors="coerce").dropna().iloc[-1]) < 10_000:
+elif "Close" in gold_df and float(pd.to_numeric(_safe_col(gold_df, "Close"), errors="coerce").dropna().iloc[-1]) < 10_000:
     gold_df = market.fetch_ticker("GC=F", period_days=10, interval="1h")
     _ohlc_source = "COMEX (GC=F) + FX"
 if not gold_df.empty:
@@ -1439,9 +1439,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
             # Fallback: try from gold_df (OHLC chart data)
             if (pd.isna(_last_actual) and not gold_df.empty
                     and "Close" in gold_df.columns):
-                _close_s = gold_df["Close"].squeeze()
-                if isinstance(_close_s, pd.DataFrame):
-                    _close_s = _close_s.iloc[:, 0]
+                _close_s = _safe_col(gold_df, "Close")
                 _close_vals = _close_s.dropna()
                 if not _close_vals.empty:
                     _last_actual = float(_close_vals.iloc[-1])

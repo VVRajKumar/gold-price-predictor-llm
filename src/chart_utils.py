@@ -42,22 +42,34 @@ def is_in_offline_window(dt: datetime) -> bool:
 
 
 def _gap_spans_offline_window(t1: datetime, t2: datetime) -> bool:
-    """Return True when the gap [t1, t2] overlaps a known offline window.
+    """Return True when the gap [t1, t2] is *entirely explained* by known offline windows.
 
-    A gap "overlaps" a window when t1 is before the window end AND t2 is
-    after the window start — meaning the outage accounts for (part of) the
-    missing data.  Both timestamps are normalised to naive (no timezone)
-    before comparison.
+    A gap is considered explained only when the duration NOT covered by any
+    offline window is within the normal contiguous-gap threshold.  This
+    prevents a weekend gap from being bridged simply because it happens to
+    overlap with an offline window — only gaps whose remaining (non-offline)
+    portion is ≤ _MAX_CONTIGUOUS_GAP_HOURS are bridged.
+
+    Both timestamps are normalised to naive (no timezone) before comparison.
     """
     def _naive(dt: datetime) -> datetime:
         return dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
 
     t1n = _naive(t1)
     t2n = _naive(t2)
+    total_gap_hours = (t2n - t1n).total_seconds() / 3600
+
+    # Sum up how many hours of this gap fall inside any offline window.
+    offline_overlap_hours = 0.0
     for win_start, win_end in _KNOWN_OFFLINE_WINDOWS:
-        if t1n < win_end and t2n > win_start:
-            return True
-    return False
+        overlap_start = max(t1n, win_start)
+        overlap_end = min(t2n, win_end)
+        if overlap_end > overlap_start:
+            offline_overlap_hours += (overlap_end - overlap_start).total_seconds() / 3600
+
+    # Bridge only when the non-offline remainder is within the normal threshold.
+    remaining_gap = total_gap_hours - offline_overlap_hours
+    return remaining_gap <= _MAX_CONTIGUOUS_GAP_HOURS
 
 
 def break_at_gaps(dates, *value_cols):

@@ -40,7 +40,7 @@ try:
     from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score, _DATA_CUTOFF
     from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
-    from src.chart_utils import break_at_gaps as _break_at_gaps, split_into_segments as _split_into_segments
+    from src.chart_utils import break_at_gaps as _break_at_gaps, split_into_segments as _split_into_segments, is_in_offline_window as _is_in_offline_window
 except (KeyError, ImportError, AttributeError):
     # On Streamlit Cloud hot-reload the module cache can be in an inconsistent
     # state after the cleanup above.  Purge all stale src.* modules and retry.
@@ -52,7 +52,7 @@ except (KeyError, ImportError, AttributeError):
     from src.time_utils import now_ist, parse_iso_to_ist, IST_OFFSET, is_market_open, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score, _DATA_CUTOFF
     from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
-    from src.chart_utils import break_at_gaps as _break_at_gaps, split_into_segments as _split_into_segments
+    from src.chart_utils import break_at_gaps as _break_at_gaps, split_into_segments as _split_into_segments, is_in_offline_window as _is_in_offline_window
 
 # ── Display-time name helpers ────────────────────────────────────────
 # Chart-friendly names (short labels for SHAP bar chart / table headers)
@@ -1471,6 +1471,14 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         _cutoff_72h = pd.Timestamp(now_ist().replace(tzinfo=None)) - pd.Timedelta(hours=72)
         acc_df = acc_df[acc_df["date"] >= _cutoff_72h].copy()
 
+        # ── Remove entries from known offline windows ─────────────
+        # Predictions from Apr 27 09:00 → Apr 28 11:00 IST were never
+        # generated.  Strip any stale entries in that window so the chart
+        # connects Apr 27 08:00 directly to Apr 28 12:00.
+        acc_df = acc_df[~acc_df["date"].apply(
+            lambda dt: _is_in_offline_window(dt.to_pydatetime())
+        )].copy()
+
         # ── Fill weekend gaps with Friday's closing price ─────────
         # During weekends (Sat, Sun, Mon pre-9am) the market is closed and
         # the accuracy log has no entries.  Fill those market-closed hours
@@ -1482,7 +1490,9 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         _existing_hours = set(acc_df["date"].dt.floor("h")) if not acc_df.empty else set()
         _missing_hours = [
             h for h in _all_hours
-            if h not in _existing_hours and is_market_closed_ist(h.to_pydatetime())
+            if h not in _existing_hours
+            and is_market_closed_ist(h.to_pydatetime())
+            and not _is_in_offline_window(h.to_pydatetime())
         ]
         if _missing_hours:
             # Use Friday's last actual price as the flatline value

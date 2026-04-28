@@ -22,6 +22,25 @@ _KNOWN_OFFLINE_WINDOWS: list[tuple[datetime, datetime]] = [
 ]
 
 
+def is_in_offline_window(dt: datetime) -> bool:
+    """Return True when *dt* falls inside any known offline window.
+
+    Used to filter out data points (including synthetic gap-fill rows) that
+    belong to a period when no predictions were generated, so those hours are
+    fully excluded from all chart traces.  Both the start and end of the
+    window are treated as naive IST timestamps; timezone info is stripped
+    before comparison.
+    """
+    def _naive(d: datetime) -> datetime:
+        return d.replace(tzinfo=None) if d.tzinfo is not None else d
+
+    dtn = _naive(dt)
+    for win_start, win_end in _KNOWN_OFFLINE_WINDOWS:
+        if win_start <= dtn < win_end:
+            return True
+    return False
+
+
 def _gap_spans_offline_window(t1: datetime, t2: datetime) -> bool:
     """Return True when the gap [t1, t2] overlaps a known offline window.
 

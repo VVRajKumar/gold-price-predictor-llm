@@ -206,7 +206,7 @@ def _format_executive_summary_html(raw_text: str) -> str:
 # ── Page config ──────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Indian Gold Price Predictor – Agentic AI",
-    page_icon=None,
+    page_icon="🥇",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -222,26 +222,26 @@ st_autorefresh(interval=5 * 60 * 1000, limit=0, key="keep_alive_heartbeat")
 # ── Custom CSS ───────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    .stApp {background-color: #1A1A1A;}
+    .stApp {background-color: #0e1117;}
     .metric-card {
-        background: #2C2C2C;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
         border-radius: 12px; padding: 20px; margin: 8px 0;
-        border: 1px solid #2C2C2C; border-left: 4px solid #FFE600;
+        border: 1px solid #2d3748;
     }
-    .bullish {color: #FFE600; font-weight: bold;}
-    .bearish {color: #FF4444; font-weight: bold;}
-    .neutral {color: #AAAAAA; font-weight: bold;}
+    .bullish {color: #00d4aa; font-weight: bold;}
+    .bearish {color: #ff6b6b; font-weight: bold;}
+    .neutral {color: #ffd93d; font-weight: bold;}
     .agent-card {
-        background: #2C2C2C; border-radius: 10px; padding: 15px;
-        margin: 5px 0; border-left: 4px solid #FFE600;
+        background: #1a1a2e; border-radius: 10px; padding: 15px;
+        margin: 5px 0; border-left: 4px solid #4a5568;
     }
-    .agent-card.bullish-border {border-left-color: #FFE600;}
-    .agent-card.bearish-border {border-left-color: #FF4444;}
-    .agent-card.neutral-border {border-left-color: #AAAAAA;}
+    .agent-card.bullish-border {border-left-color: #00d4aa;}
+    .agent-card.bearish-border {border-left-color: #ff6b6b;}
+    .agent-card.neutral-border {border-left-color: #ffd93d;}
 
     /* ── Sidebar polish ─────────────────────────────────────────── */
     section[data-testid="stSidebar"] {
-        background: #111111;
+        background: linear-gradient(180deg, #0f1320 0%, #151a2e 50%, #0f1320 100%);
     }
     section[data-testid="stSidebar"] hr {
         border-color: rgba(99, 110, 140, 0.2);
@@ -255,11 +255,11 @@ st.markdown("""
         transition: background 0.2s;
     }
     section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"]:hover {
-        background: rgba(255, 230, 0, 0.08);
+        background: rgba(255, 217, 61, 0.08);
     }
     section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"][aria-current="page"] {
-        background: rgba(255, 230, 0, 0.12);
-        border-left: 3px solid #FFE600;
+        background: rgba(255, 217, 61, 0.12);
+        border-left: 3px solid #ffd93d;
     }
     /* Primary button styling in sidebar */
     section[data-testid="stSidebar"] button[kind="primary"] {
@@ -293,8 +293,8 @@ st.markdown("""
         transition: border-color 0.2s, background 0.2s;
     }
     section[data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"]:hover {
-        border-color: rgba(255, 230, 0, 0.4);
-        background: rgba(255, 230, 0, 0.06);
+        border-color: rgba(255, 217, 61, 0.4);
+        background: rgba(255, 217, 61, 0.06);
     }
 
     /* ── Responsive metric columns ───────────────────────────── */
@@ -420,7 +420,7 @@ def outlook_color(outlook: str) -> str:
 
 
 def outlook_emoji(outlook: str) -> str:
-    return {"bullish": "", "bearish": ""}.get(outlook, "")
+    return {"bullish": "🟢", "bearish": "🔴"}.get(outlook, "🟡")
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -434,7 +434,7 @@ with st.sidebar:
                     width:52px;height:52px;border-radius:14px;
                     background:linear-gradient(135deg,#ffd93d 0%,#f59e0b 100%);
                     box-shadow:0 4px 14px rgba(255,217,61,0.25);margin-bottom:8px;">
-            <span style="font-size:1.6rem;line-height:1;"></span>
+            <span style="font-size:1.6rem;line-height:1;">🥇</span>
         </div><br>
         <span style="font-size:1.25rem;font-weight:700;letter-spacing:0.3px;
                      color:#f0f0f5;">Gold Predictor</span><br>
@@ -449,30 +449,30 @@ with st.sidebar:
     st.divider()
 
     # ── Navigation ───────────────────────────────────────────────────
-    if st.button("Dashboard", use_container_width=True):
+    if st.button("📊 Dashboard", use_container_width=True):
         st.rerun()
-    st.page_link("pages/1_📜_Prediction_Archive.py", label="Prediction Archive")
+    st.page_link("pages/1_📜_Prediction_Archive.py", label="📜 Prediction Archive", icon="📜")
 
     st.divider()
 
     # ── Actions ───────────────────────────────────────────────────────
     if is_market_open():
-        if st.button("Generate New Prediction", width="stretch", type="primary"):
+        if st.button("🔄 Generate New Prediction", width="stretch", type="primary"):
             with st.spinner("Running 8 specialist agents … this takes 1-2 minutes"):
                 plan = engine.generate()
             st.success("Prediction updated!")
             st.rerun()
     else:
-        st.button("Generate New Prediction", width="stretch", type="primary", disabled=True)
+        st.button("🔄 Generate New Prediction", width="stretch", type="primary", disabled=True)
         st.markdown(
             """<div style="background:rgba(30,58,95,0.45);border-radius:10px;
             padding:10px 14px;margin:6px 0;border-left:3px solid #3b82f6;
             font-size:0.82rem;color:#93c5fd;line-height:1.45;">
-            Market closed — prices held flat at Friday's close.
+            📅 Market closed — prices held flat at Friday's close.
             </div>""",
             unsafe_allow_html=True,
         )
-        if st.button("Refresh Weekend Analysis", width="stretch", type="secondary"):
+        if st.button("🔄 Refresh Weekend Analysis", width="stretch", type="secondary"):
             with st.spinner("Running agents for fresh weekend news … this takes 1-2 minutes"):
                 try:
                     plan = engine.generate_weekend_analysis()
@@ -490,14 +490,14 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     _agent_list = [
-        ("#10b981", "", "Geopolitics"),
-        ("#6366f1", "", "Trend"),
-        ("#f59e0b", "", "ETF Flows"),
-        ("#8b5cf6", "", "Macro"),
-        ("#ef4444", "", "Oil & Energy"),
-        ("#ec4899", "", "Sentiment"),
-        ("#3b82f6", "", "Technical"),
-        ("#14b8a6", "", "Historical"),
+        ("#10b981", "🌍", "Geopolitics"),
+        ("#6366f1", "📈", "Trend"),
+        ("#f59e0b", "💰", "ETF Flows"),
+        ("#8b5cf6", "🏦", "Macro"),
+        ("#ef4444", "🛢️", "Oil & Energy"),
+        ("#ec4899", "😨", "Sentiment"),
+        ("#3b82f6", "📊", "Technical"),
+        ("#14b8a6", "📜", "Historical"),
     ]
     _agent_html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;">'
     for _color, _emoji, _name in _agent_list:
@@ -521,7 +521,7 @@ with st.sidebar:
 
 
 # ════════════════════════════════════════════════════════════════════
-st.title("Indian Gold Price Prediction System (₹/10g)")
+st.title("🥇 Indian Gold Price Prediction System (₹/10g)")
 st.caption("ML Ensemble (XGBoost + LightGBM + Ridge) · LLM for narrative only · SHAP explainability")
 
 # Weekend market-closed notice
@@ -533,7 +533,7 @@ if not is_market_open():
         f"""<div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);
         border-radius:12px;padding:20px 24px;margin:10px 0;
         border:2px solid #fbbf24;text-align:center;">
-        <h3 style="color:#fbbf24;margin:0 0 8px 0;">Market Closed — {_day_name}</h3>
+        <h3 style="color:#fbbf24;margin:0 0 8px 0;">📅 Market Closed — {_day_name}</h3>
         <p style="color:#e2e8f0;margin:0;font-size:15px;">
         The MCX gold market is closed for the weekend. Prices are held flat at Friday's closing level.<br>
         Trading resumes <b>{_next_open}</b>.
@@ -557,7 +557,7 @@ if not is_market_open():
 plan = engine.get_current_plan()
 
 # Always keep the live OHLC chart visible.
-st.subheader("Live Indian Gold OHLC (10D) – INR/10g")
+st.subheader("🕯️ Live Indian Gold OHLC (10D) – INR/10g")
 # Try MCX gold first (native INR/10g), fall back to COMEX + FX conversion
 gold_df = market.fetch_ticker("GOLD.NS", period_days=10, interval="1h")
 _ohlc_source = "MCX (GOLD.NS)"
@@ -691,12 +691,12 @@ if _quick_agg and _quick_agg["total_predictions_evaluated"] > 0:
     _dir = _quick_agg["avg_directional_accuracy"]
     _n = _quick_agg.get("total_unique_hours", _quick_agg["total_predictions_evaluated"])
     _nd = _quick_agg.get("total_unique_dates", _quick_agg.get("unique_dates_evaluated", "?"))
-    _mape_icon = "" if _mape < 2 else ("" if _mape < 5 else "")
-    _hit_icon = "" if _hit >= 80 else ("" if _hit >= 60 else "")
-    _dir_icon = "" if _dir >= 80 else ("" if _dir >= 60 else "")
+    _mape_icon = "🟢" if _mape < 2 else ("🟡" if _mape < 5 else "🔴")
+    _hit_icon = "🟢" if _hit >= 80 else ("🟡" if _hit >= 60 else "🔴")
+    _dir_icon = "🟢" if _dir >= 80 else ("🟡" if _dir >= 60 else "🔴")
     # Composite accuracy score using shared function
     _acc_score = compute_accuracy_score(_mape, _hit, _dir)
-    _score_icon = "" if _acc_score >= 75 else ("" if _acc_score >= 50 else "")
+    _score_icon = "🟢" if _acc_score >= 75 else ("🟡" if _acc_score >= 50 else "🔴")
     st.markdown(
         f"""<div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);
         border-radius:12px;padding:14px 20px;margin:10px 0;
@@ -706,7 +706,7 @@ if _quick_agg and _quick_agg["total_predictions_evaluated"] > 0:
         <span>{_mape_icon} <b>MAPE</b> {_mape:.1f}%</span>
         <span>{_hit_icon} <b>Band Hit</b> {_hit:.0f}%</span>
         <span>{_dir_icon} <b>Direction</b> {_dir:.0f}%</span>
-        <span> <b>{_n}</b> unique hours / <b>{_nd}</b> days</span>
+        <span>📊 <b>{_n}</b> unique hours / <b>{_nd}</b> days</span>
         </div>""",
         unsafe_allow_html=True,
     )
@@ -714,11 +714,11 @@ if _quick_agg and _quick_agg["total_predictions_evaluated"] > 0:
 # ── Guardrail Correction Count (#7) ─────────────────────────────────
 _gc_count = getattr(plan, "guardrail_correction_count", 0)
 if _gc_count > 0:
-    _gc_icon = ""
+    _gc_icon = "🛡️"
     st.caption(f"{_gc_icon} **{_gc_count}** guardrail correction(s) applied this prediction cycle")
 
 # ── Executive Summary ────────────────────────────────────────────────
-with st.expander("Executive Summary", expanded=True):
+with st.expander("📋 Executive Summary", expanded=True):
     _summary = _clean_text(plan.executive_summary) if plan.executive_summary else ""
     # Guard: if LLM returned raw JSON instead of prose, show it cleanly
     if _summary and (_summary.strip().startswith("{") or _summary.strip().startswith("[")):
@@ -737,7 +737,7 @@ with st.expander("Executive Summary", expanded=True):
         st.info("No executive summary available yet. Click **Generate New Prediction** to get started.")
 
 # ── Hourly Prediction Chart ──────────────────────────────────────────
-st.subheader("Next 24-Hour Price Prediction")
+st.subheader("🕐 Next 24-Hour Price Prediction")
 
 if plan.daily_predictions:
     pred_df = pd.DataFrame([dp.model_dump() for dp in plan.daily_predictions])
@@ -938,7 +938,7 @@ else:
 st.divider()
 
 # ── ML Model Transparency ────────────────────────────────────────────
-st.subheader("How the Prediction is Made")
+st.subheader("🧠 How the Prediction is Made")
 st.caption(
     "Your gold price forecast is powered by **3 ML models working together** "
     "(not AI text generation). The LLM only writes the summary text — "
@@ -955,7 +955,7 @@ if _shap:
     with hw1:
         st.markdown("""
         <div class="metric-card">
-        <h4>Step 1: Data Collection</h4>
+        <h4>📊 Step 1: Data Collection</h4>
         <p>We gather <b>90 days of hourly gold prices</b> plus live signals
         from 8 specialist agents (sentiment, geopolitics, macro, technical,
         ETF flows, oil, seasonal patterns, trend).</p>
@@ -964,7 +964,7 @@ if _shap:
     with hw2:
         st.markdown(f"""
         <div class="metric-card">
-        <h4>Step 2: Triple Model Prediction</h4>
+        <h4>🤖 Step 2: Triple Model Prediction</h4>
         <p>Three independent ML models each analyze <b>{_shap.get('total_features', 16)} features</b>
         and make their own forecast. A 4th model combines them into
         one final prediction — reducing any single model's mistakes.</p>
@@ -973,7 +973,7 @@ if _shap:
     with hw3:
         st.markdown("""
         <div class="metric-card">
-        <h4>Step 3: Confidence Bands</h4>
+        <h4>🎯 Step 3: Confidence Bands</h4>
         <p>Instead of one number, we give a <b>range</b> — there's an 80%
         probability the real price lands inside the Low–High band.
         The model also learns from its past mistakes to self-correct.</p>
@@ -1050,7 +1050,7 @@ if _shap:
                 """<div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);
                 border-radius:12px;padding:20px 24px;margin:10px 0;
                 border:2px solid #fbbf24;text-align:center;">
-                <h4 style="color:#fbbf24;margin:0 0 8px 0;">Market Closed — Weekend</h4>
+                <h4 style="color:#fbbf24;margin:0 0 8px 0;">📅 Market Closed — Weekend</h4>
                 <p style="color:#e2e8f0;margin:0;font-size:14px;">
                 The gold market is closed. No hourly predictions are being made.<br>
                 Hour-by-hour SHAP analysis will resume when the market reopens on Monday.
@@ -1113,19 +1113,19 @@ if _shap:
             _render_shap_cards(_hourly_shap[:_SHAP_PREVIEW])
 
             if len(_hourly_shap) > _SHAP_PREVIEW:
-                with st.expander(f"Show Hours {_SHAP_PREVIEW + 1}–{len(_hourly_shap)}", expanded=False):
+                with st.expander(f"📊 Show Hours {_SHAP_PREVIEW + 1}–{len(_hourly_shap)}", expanded=False):
                     _render_shap_cards(_hourly_shap[_SHAP_PREVIEW:])
 else:
-    st.info("ML model explainability will appear after the first prediction cycle completes.")
+    st.info("🔄 ML model explainability will appear after the first prediction cycle completes.")
 
 st.divider()
 
 # ── Agent Reports (Intelligence Signals) ─────────────────────────────
-st.subheader("Agent Intelligence Reports")
+st.subheader("🤖 Agent Intelligence Reports")
 st.markdown(
     """<div style="background:#1a1a2e;border-radius:10px;padding:14px 18px;margin-bottom:16px;
     border:1px solid #2d3748;font-size:14px;line-height:1.6;">
-    <b>What are these agents?</b> Our AI uses 8 specialist "agents" — think of them as
+    <b>💡 What are these agents?</b> Our AI uses 8 specialist "agents" — think of them as
     expert analysts who each focus on one area (like world events, market trends, or
     investor mood). They gather intelligence and feed structured signals into the ML
     prediction model. They do <b>not</b> predict prices themselves.
@@ -1188,7 +1188,7 @@ if plan.agent_reports:
 
         outlook = report.get("outlook", "neutral")
         emoji = outlook_emoji(outlook)
-        _olabel = {"bullish": "BULLISH", "bearish": "BEARISH"}.get(outlook, "NEUTRAL")
+        _olabel = {"bullish": "BULLISH 📈", "bearish": "BEARISH 📉"}.get(outlook, "NEUTRAL ➡️")
         _ocolor = outlook_color(outlook)
 
         with st.expander(f"{emoji} {name.replace('_', ' ').title()} — {_olabel}"):
@@ -1279,7 +1279,7 @@ if plan.agent_reports:
                     for f in factors
                 )
                 st.markdown(
-                    f'<div style="margin-top:8px;"><b style="color:#94a3b8;">Key Factors:</b><br>'
+                    f'<div style="margin-top:8px;"><b style="color:#94a3b8;">🔑 Key Factors:</b><br>'
                     f'{_pills}</div>',
                     unsafe_allow_html=True,
                 )
@@ -1287,14 +1287,14 @@ if plan.agent_reports:
 st.divider()
 
 # ── Bull / Bear Cases ────────────────────────────────────────────────
-st.subheader("Bull vs Bear Case")
+st.subheader("⚖️ Bull vs Bear Case")
 st.caption("Two possible scenarios for gold prices — what could push them up or pull them down.")
 b1, b2 = st.columns(2)
 with b1:
     _bull = _html_mod.escape(_clean_text(plan.bull_case) if plan.bull_case else "Not available")
     st.markdown(f"""
     <div style="background:#0a2e1a; border-radius:12px; padding:22px; border-left:4px solid #00d4aa;">
-    <h4 style="color:#00d4aa;margin-top:0;">Bull Case <span style="font-size:12px;font-weight:normal;color:#6ee7b7;">(prices could go UP if…)</span></h4>
+    <h4 style="color:#00d4aa;margin-top:0;">🐂 Bull Case <span style="font-size:12px;font-weight:normal;color:#6ee7b7;">(prices could go UP if…)</span></h4>
     <p style="line-height:1.7;font-size:14px;">{_bull}</p>
     </div>
     """, unsafe_allow_html=True)
@@ -1303,14 +1303,14 @@ with b2:
     _bear = _html_mod.escape(_clean_text(plan.bear_case) if plan.bear_case else "Not available")
     st.markdown(f"""
     <div style="background:#2e0a0a; border-radius:12px; padding:22px; border-left:4px solid #ff6b6b;">
-    <h4 style="color:#ff6b6b;margin-top:0;">Bear Case <span style="font-size:12px;font-weight:normal;color:#fca5a5;">(prices could go DOWN if…)</span></h4>
+    <h4 style="color:#ff6b6b;margin-top:0;">🐻 Bear Case <span style="font-size:12px;font-weight:normal;color:#fca5a5;">(prices could go DOWN if…)</span></h4>
     <p style="line-height:1.7;font-size:14px;">{_bear}</p>
     </div>
     """, unsafe_allow_html=True)
 
 # ── Risk Factors ─────────────────────────────────────────────────────
 if plan.risk_factors:
-    st.subheader("Risk Factors")
+    st.subheader("⚠️ Risk Factors")
     st.caption("Things that could cause unexpected price swings — keep an eye on these.")
     _risks_html = ""
     for i, risk in enumerate(plan.risk_factors, 1):
@@ -1335,7 +1335,7 @@ st.divider()
 # PREDICTION ACCURACY SCORECARD
 # ════════════════════════════════════════════════════════════════════
 history = engine.get_plan_history()
-st.subheader("Prediction Accuracy Scorecard")
+st.subheader("🎯 Prediction Accuracy Scorecard")
 # Auto-evaluate all stored plans against latest market data
 stored_plans = accuracy_tracker.get_stored_plans()
 
@@ -1383,7 +1383,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         eval_time = latest_eval.get("evaluated_at", "")
         try:
             eval_dt = parse_iso_to_ist(eval_time)
-            st.caption(f"Auto-updated: {eval_dt.strftime('%H:%M %b %d, %Y')} "
+            st.caption(f"🔄 Auto-updated: {eval_dt.strftime('%H:%M %b %d, %Y')} "
                        f"· {latest_eval['days_evaluated']}/{latest_eval['days_total']} hours scored "
                        f"· Background check every 2h")
         except Exception:
@@ -1395,27 +1395,27 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
     m1, m2, m3, m4, m5, m6 = st.columns(6)
     with m1:
         mape = agg_stats["overall_mape"]
-        mape_color = "" if mape < 2 else ("" if mape < 5 else "")
+        mape_color = "🟢" if mape < 2 else ("🟡" if mape < 5 else "🔴")
         st.metric(f"{mape_color} MAPE", f"{mape:.1f}%")
     with m2:
-        st.metric("MAE", f"₹{agg_stats['overall_mae']:,.2f}")
+        st.metric("📏 MAE", f"₹{agg_stats['overall_mae']:,.2f}")
     with m3:
         hit = agg_stats["overall_band_hit_rate"]
-        hit_color = "" if hit >= 80 else ("" if hit >= 60 else "")
+        hit_color = "🟢" if hit >= 80 else ("🟡" if hit >= 60 else "🔴")
         st.metric(f"{hit_color} Band Hit Rate", f"{hit:.0f}%")
     with m4:
         da = agg_stats["avg_directional_accuracy"]
-        da_color = "" if da >= 80 else ("" if da >= 60 else "")
+        da_color = "🟢" if da >= 80 else ("🟡" if da >= 60 else "🔴")
         st.metric(f"{da_color} Direction Accuracy", f"{da:.0f}%")
     with m5:
         # Composite accuracy score using shared function
         _sc_score = compute_accuracy_score(mape, hit, da)
-        _sc_icon = "" if _sc_score >= 75 else ("" if _sc_score >= 50 else "")
+        _sc_icon = "🟢" if _sc_score >= 75 else ("🟡" if _sc_score >= 50 else "🔴")
         st.metric(f"{_sc_icon} Accuracy Score", f"{_sc_score:.0f}/100")
     with m6:
         _unique_hrs = agg_stats.get('total_unique_hours', agg_stats['total_predictions_evaluated'])
         _unique_days = agg_stats.get('total_unique_dates', agg_stats.get('unique_dates_evaluated', '?'))
-        st.metric("Unique Hours", f"{_unique_hrs}")
+        st.metric("📊 Unique Hours", f"{_unique_hrs}")
         st.caption(f"across {_unique_days} day(s)")
 
     st.caption(
@@ -1624,7 +1624,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
             if not outside.empty:
                 fig_acc.add_trace(go.Scatter(
                         x=outside["date"], y=outside["actual"],
-                        mode="markers", name="Outside Band",
+                        mode="markers", name="Outside Band ✗",
                         marker=dict(size=12, color="#ff6b6b", symbol="x"),
                 ))
 
@@ -1654,7 +1654,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         # ── Hourly Accuracy Table ────────────────────────────────
         # Show only active market hours in the table (weekend hours are
         # visible in the chart as green-dotted but excluded from metrics).
-        with st.expander("Hourly Accuracy Breakdown", expanded=False):
+        with st.expander("📋 Hourly Accuracy Breakdown", expanded=False):
             _table_df = acc_active if not acc_active.empty else acc_df
             display_df = _table_df[["date", "predicted", "actual", "low_range",
                                  "high_range", "error", "pct_error", "within_band"]].copy()
@@ -1686,7 +1686,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
 
         # ── Per-Plan Accuracy History ────────────────────────────────
         if len(all_evals) > 1:
-            with st.expander("Accuracy Trend Across Predictions"):
+            with st.expander("📈 Accuracy Trend Across Predictions"):
                 trend_data = []
                 for ev in all_evals:
                     try:
@@ -1717,7 +1717,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
         _n_plans = len(accuracy_tracker.get_stored_plans())
         _latest_data = gold_df.index.max() if not gold_df.empty else None
         _pending_msg = (
-            f"**Evaluation pending.** {_n_plans} prediction(s) stored and waiting "
+            f"⏳ **Evaluation pending.** {_n_plans} prediction(s) stored and waiting "
             f"for actual market data to compare against.\n\n"
         )
         if _latest_data is not None:
@@ -1731,7 +1731,7 @@ if agg_stats and agg_stats["total_predictions_evaluated"] > 0:
 
 else:
     st.info(
-        "**No accuracy data yet.** Accuracy scoring requires at least one "
+        "📍 **No accuracy data yet.** Accuracy scoring requires at least one "
         "prediction where predicted hours are now in the past. Generate a "
         "prediction and check back after those hours to see how accurate the "
         "system was!\n\n"
@@ -1741,7 +1741,7 @@ else:
 # ── Prediction Generation History ────────────────────────────────────
 if len(history) > 1:
     st.divider()
-    st.subheader("Prediction History")
+    st.subheader("📊 Prediction History")
     hist_data = []
     for h in history[-20:]:
         hist_data.append({
@@ -1774,7 +1774,7 @@ if len(history) > 1:
 # ── Footer ───────────────────────────────────────────────────────────
 st.divider()
 st.caption(
-    "**Disclaimer:** This is an AI-powered prediction system for educational/research "
+    "⚠️ **Disclaimer:** This is an AI-powered prediction system for educational/research "
     "purposes only. It is NOT financial advice. Gold prices are inherently unpredictable. "
     "Always consult a licensed financial advisor before making investment decisions."
 )

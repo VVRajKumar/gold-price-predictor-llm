@@ -31,7 +31,7 @@ try:
     from src.time_utils import now_ist, parse_iso_to_ist, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score, _DIR_NEUTRAL_PCT, _DATA_CUTOFF
     from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
-    from src.chart_utils import break_at_gaps as _break_at_gaps, split_into_segments as _split_into_segments
+    from src.chart_utils import break_at_gaps as _break_at_gaps, split_into_segments as _split_into_segments, is_in_offline_window as _is_in_offline_window
 except (KeyError, ImportError, AttributeError):
     for _k in [k for k in list(sys.modules) if k == "src" or k.startswith("src.")]:
         del sys.modules[_k]
@@ -39,7 +39,7 @@ except (KeyError, ImportError, AttributeError):
     from src.time_utils import now_ist, parse_iso_to_ist, is_market_closed_ist
     from src.accuracy_tracker import compute_accuracy_score, _DIR_NEUTRAL_PCT, _DATA_CUTOFF
     from src.guardrails import _MIN_INR_PRICE as _MIN_VALID_PRICE
-    from src.chart_utils import break_at_gaps as _break_at_gaps, split_into_segments as _split_into_segments
+    from src.chart_utils import break_at_gaps as _break_at_gaps, split_into_segments as _split_into_segments, is_in_offline_window as _is_in_offline_window
 
 # ── Page config ──────────────────────────────────────────────────────
 st.set_page_config(
@@ -248,6 +248,11 @@ for _price_col in ("predicted", "actual"):
 # Exclude predicted hours before the data quality cutoff (early calibration period)
 df = df[df["date"] >= pd.Timestamp(_DATA_CUTOFF)].copy()
 
+# Exclude entries from known offline windows (periods when no predictions were
+# generated).  This removes any stale data points so the chart connects the
+# last pre-outage hour directly to the first post-outage hour.
+df = df[~df["date"].apply(lambda dt: _is_in_offline_window(dt.to_pydatetime()))].copy()
+
 # Exclude market-closed hours (weekends + Monday pre-market) from
 # metrics, tables, and summaries — these predictions are trivially
 # correct (predicted == actual) and would inflate accuracy numbers.
@@ -262,6 +267,7 @@ df_all = df.copy()  # includes weekend hours for chart rendering
 # through weekends instead of a gap.
 # Market-open hours that were missed (e.g. app offline Mon 9am–12pm)
 # are intentionally left empty — no fabricated data.
+# Hours inside a known offline window are also excluded from gap-fill.
 if not df_all.empty:
     _now_ts = pd.Timestamp(now_ist().replace(tzinfo=None)).floor("h")
     _archive_start = df_all["date"].min().floor("h")
@@ -269,7 +275,9 @@ if not df_all.empty:
     _existing_hours = set(df_all["date"].dt.floor("h"))
     _missing_closed = [
         h for h in _all_hours
-        if h not in _existing_hours and is_market_closed_ist(h.to_pydatetime())
+        if h not in _existing_hours
+        and is_market_closed_ist(h.to_pydatetime())
+        and not _is_in_offline_window(h.to_pydatetime())
     ]
     if _missing_closed:
         # Build a sorted actual-price series for forward-fill lookups
